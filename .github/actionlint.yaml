@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - self-hosted
+    - linux
+    - x64
+    - ubuntu
+    - incus
+    - nested-virt

@@ -1,0 +1,254 @@
+---
+name: AAP Incus Nightly Matrix
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      matrix_filter:
+        description: "Optional comma-separated matrix names, for example: aap27-rhel10"
+        required: false
+        default: ""
+      destroy_instances:
+        description: "Destroy Incus test VMs after each run"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aap-incus-nightly
+  cancel-in-progress: false
+
+jobs:
+  prepare-matrix:
+    name: Prepare AAP matrix
+    timeout-minutes: 15
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - ubuntu
+      - incus
+      - nested-virt
+
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      rhsm_org: ${{ steps.matrix.outputs.rhsm_org }}
+      destroy_instances: ${{ steps.matrix.outputs.destroy_instances }}
+
+    steps:
+      - name: Checkout validation
+        uses: actions/checkout@v6
+        with:
+          path: modulix-validation-lit
+
+      - name: Validate repository read token
+        env:
+          MODULIX_REPO_READ_TOKEN: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${MODULIX_REPO_READ_TOKEN}"
+
+      - name: Build matrix from validation inventory
+        id: matrix
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          MATRIX_FILTER: ${{ inputs.matrix_filter || '' }}
+          DESTROY_INSTANCES_INPUT: ${{ inputs.destroy_instances }}
+        run: |
+          set -euo pipefail
+
+          destroy_instances="true"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            destroy_instances="${DESTROY_INSTANCES_INPUT}"
+          fi
+
+          python3 - <<'PY'
+          import importlib.util
+          import subprocess
+          import sys
+
+          if importlib.util.find_spec("yaml") is None:
+              subprocess.check_call(
+                  [sys.executable, "-m", "pip", "install", "--user", "PyYAML==6.0.2"]
+              )
+          PY
+
+          matrix_json="$(
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          import yaml
+
+          matrix_file = Path(
+              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+          )
+          data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
+          entries = data["aap_ci_test_matrix"]
+
+          matrix_filter = os.environ.get("MATRIX_FILTER", "").strip()
+          if matrix_filter:
+              wanted = {item.strip() for item in matrix_filter.split(",") if item.strip()}
+              entries = [entry for entry in entries if entry["name"] in wanted]
+
+          if not entries:
+              raise SystemExit("No AAP CI matrix entries selected.")
+
+          print(json.dumps({"include": entries}, separators=(",", ":")))
+          PY
+          )"
+
+          rhsm_org="$(
+            python3 - <<'PY'
+          from pathlib import Path
+
+          import yaml
+
+          matrix_file = Path(
+              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+          )
+          data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
+          print(data["aap_ci_rhsm_org"])
+          PY
+          )"
+
+          {
+            printf 'matrix=%s\n' "${matrix_json}"
+            printf 'rhsm_org=%s\n' "${rhsm_org}"
+            printf 'destroy_instances=%s\n' "${destroy_instances}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Preflight runner artifacts
+        env:
+          MATRIX_FILTER: ${{ inputs.matrix_filter || '' }}
+          RH_AUTOMATION_HUB_TOKEN: ${{ secrets.RH_AUTOMATION_HUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "${RH_AUTOMATION_HUB_TOKEN}"
+
+          python3 - <<'PY' > /tmp/aap-incus-preflight.tsv
+          import os
+          from pathlib import Path
+
+          import yaml
+
+          matrix_file = Path(
+              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+          )
+          data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
+          entries = data["aap_ci_test_matrix"]
+
+          matrix_filter = os.environ.get("MATRIX_FILTER", "").strip()
+          if matrix_filter:
+              wanted = {item.strip() for item in matrix_filter.split(",") if item.strip()}
+              entries = [entry for entry in entries if entry["name"] in wanted]
+
+          for entry in entries:
+              print(
+                  "\t".join(
+                      [
+                          entry["name"],
+                          entry["incus_image"],
+                          entry["aap_bundle_file"],
+                      ]
+                  )
+              )
+          PY
+
+          while IFS=$'\t' read -r matrix_name incus_image bundle_file; do
+            echo "Preflight ${matrix_name}"
+            incus image info "${incus_image}" >/dev/null
+            test -r "${bundle_file}"
+          done < /tmp/aap-incus-preflight.tsv
+
+  aap-incus:
+    name: ${{ matrix.name }}
+    timeout-minutes: 240
+    needs:
+      - prepare-matrix
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - ubuntu
+      - incus
+      - nested-virt
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout validation
+        uses: actions/checkout@v6
+        with:
+          path: modulix-validation-lit
+
+      - name: Checkout automation
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/modulix-automation
+          path: modulix-automation
+
+      - name: Validate repository read token
+        env:
+          MODULIX_REPO_READ_TOKEN: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${MODULIX_REPO_READ_TOKEN}"
+
+      - name: Checkout foundational collection
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/ansible-collection-foundational
+          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+          path: ansible-collection-foundational
+
+      - name: Checkout RHEL collection
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/ansible-collection-rhel
+          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+          path: ansible-collection-rhel
+
+      - name: Checkout supplementary collection
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/ansible-collection-supplementary
+          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+          path: ansible-collection-supplementary
+
+      - name: Run AAP Incus matrix entry
+        env:
+          MATRIX_NAME: ${{ matrix.name }}
+          AAP_VERSION: ${{ matrix.aap_version }}
+          RHEL_MAJOR: ${{ matrix.rhel_major }}
+          INCUS_IMAGE: ${{ matrix.incus_image }}
+          INCUS_VM_CPU: ${{ matrix.incus_vm_cpu || '4' }}
+          INCUS_VM_MEMORY: ${{ matrix.incus_vm_memory || '20GiB' }}
+          INCUS_VM_ROOT_SIZE: ${{ matrix.incus_vm_root_size || '70GiB' }}
+          AAP_BUNDLE_FILE: ${{ matrix.aap_bundle_file }}
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID || needs.prepare-matrix.outputs.rhsm_org }}
+          RHSM_ACTIVATION_KEY: ${{ matrix.rhsm_activation_key }}
+          RH_AUTOMATION_HUB_TOKEN: ${{ secrets.RH_AUTOMATION_HUB_TOKEN }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+          AAP_CI_ADMIN_PASSWORD: ${{ secrets.AAP_CI_ADMIN_PASSWORD }}
+          AAP_CI_DESTROY_INSTANCE: ${{ needs.prepare-matrix.outputs.destroy_instances }}
+          AAP_CI_HOST_MEMORY_HEADROOM_MIB: ${{ matrix.host_memory_headroom_mib || '4096' }}
+          AUTOMATION_DIR: ${{ github.workspace }}/modulix-automation
+          SUPPLEMENTARY_DIR: ${{ github.workspace }}/ansible-collection-supplementary
+          AAP_CI_WORK_DIR: ${{ runner.temp }}/aap-incus-ci/${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          modulix-validation-lit/.github/scripts/aap-incus-matrix-run.sh

@@ -1,0 +1,72 @@
+---
+aap_ci_enabled: true
+aap_ci_runner_labels:
+  - self-hosted
+  - linux
+  - x64
+  - ubuntu
+  - incus
+  - nested-virt
+
+aap_ci_incus_project: default
+aap_ci_instance_prefix: aap-ci
+aap_ci_destroy_instances: true
+aap_ci_max_parallel: 1
+aap_ci_rhsm_org: "12246089"
+
+aap_ci_rhel_activation_keys:
+  "9": "ak-default-rhel-9"
+  "10": "ak-default-rhel-10"
+
+aap_ci_bundle_files:
+  "2.6": /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
+  "2.7": /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+
+aap_ci_test_matrix:
+  - name: aap26-rhel9
+    aap_version: "2.6"
+    rhel_major: "9"
+    install_method: containerized
+    incus_image: local:rhel9-aap-ci
+    incus_vm_cpu: "4"
+    incus_vm_memory: 20GiB
+    incus_vm_root_size: 70GiB
+    host_memory_headroom_mib: "4096"
+    rhsm_activation_key: "ak-default-rhel-9"
+    aap_bundle_file: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
+
+  - name: aap26-rhel10
+    aap_version: "2.6"
+    rhel_major: "10"
+    install_method: containerized
+    incus_image: local:rhel10-aap-ci
+    incus_vm_cpu: "4"
+    incus_vm_memory: 20GiB
+    incus_vm_root_size: 70GiB
+    host_memory_headroom_mib: "4096"
+    rhsm_activation_key: "ak-default-rhel-10"
+    aap_bundle_file: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
+
+  - name: aap27-rhel9
+    aap_version: "2.7"
+    rhel_major: "9"
+    install_method: containerized
+    incus_image: local:rhel9-aap-ci
+    incus_vm_cpu: "4"
+    incus_vm_memory: 20GiB
+    incus_vm_root_size: 70GiB
+    host_memory_headroom_mib: "4096"
+    rhsm_activation_key: "ak-default-rhel-9"
+    aap_bundle_file: /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+
+  - name: aap27-rhel10
+    aap_version: "2.7"
+    rhel_major: "10"
+    install_method: containerized
+    incus_image: local:rhel10-aap-ci
+    incus_vm_cpu: "4"
+    incus_vm_memory: 20GiB
+    incus_vm_root_size: 70GiB
+    host_memory_headroom_mib: "4096"
+    rhsm_activation_key: "ak-default-rhel-10"
+    aap_bundle_file: /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz

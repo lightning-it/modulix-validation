@@ -1,0 +1,19 @@
+---
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_become: false
+
+  children:
+    validation_runners:
+      hosts:
+        ciwkr01.prd.dmz.corp.l-it.io: {}
+
+    incus_hosts:
+      hosts:
+        ciwkr01.prd.dmz.corp.l-it.io: {}
+
+    aap_ci_runners:
+      hosts:
+        ciwkr01.prd.dmz.corp.l-it.io: {}

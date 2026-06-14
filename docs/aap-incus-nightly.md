@@ -1,0 +1,135 @@
+# AAP Incus Nightly Matrix
+
+# Internal Use Only
+
+This workflow validates that the Lightning IT AAP automation stack can deploy
+supported AAP/RHEL combinations on ephemeral Incus VMs.
+
+## Repository Boundary
+
+This repository owns the private validation harness:
+
+- GitHub Actions workflow
+- runner script
+- validation inventory
+- AAP/RHEL test matrix
+- private artifact references
+
+Reusable automation remains in `modulix-automation` and the collection
+repositories. Human operator documentation remains in `modulix-operations-lit`.
+
+## Workflow Files
+
+Workflow:
+
+```text
+.github/workflows/aap-incus-nightly.yml
+```
+
+Runner script:
+
+```text
+.github/scripts/aap-incus-matrix-run.sh
+```
+
+Validation matrix:
+
+```text
+inventories/nightly/host_vars/ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml
+```
+
+The nightly schedule runs at `02:00 UTC` from the default branch. The workflow
+can also be started manually with `workflow_dispatch`.
+
+## Tested Matrix
+
+The active matrix currently covers:
+
+- AAP 2.6 on RHEL 9
+- AAP 2.6 on RHEL 10
+- AAP 2.7 on RHEL 9
+- AAP 2.7 on RHEL 10
+
+## Required GitHub Secrets
+
+Set these secrets on `lightning-it/modulix-validation-lit`:
+
+- `MODULIX_REPO_READ_TOKEN`: fine-scoped token that can read private Lightning IT
+  repositories used by the workflow.
+- `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
+  installation.
+
+Optional secrets:
+
+- `RHSM_ORG_ID`: overrides the validation inventory RHSM org.
+- `AAP_CI_ADMIN_PASSWORD`: fixed test admin password. If omitted, the workflow
+  generates a per-run password.
+- `VAULT_TOKEN`: only needed when the runbook should read Vault-backed values.
+
+## Runner Requirements
+
+The runner must match these labels:
+
+```text
+self-hosted, linux, x64, ubuntu, incus, nested-virt
+```
+
+On the runner, verify:
+
+```bash
+incus info >/dev/null
+incus image info local:rhel9-aap-ci >/dev/null
+incus image info local:rhel10-aap-ci >/dev/null
+test -f /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
+test -f /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+```
+
+## Manual Run
+
+Run a single matrix entry:
+
+```bash
+gh workflow run "AAP Incus Nightly Matrix" \
+  --repo lightning-it/modulix-validation-lit \
+  -f matrix_filter=aap27-rhel10 \
+  -f destroy_instances=true
+```
+
+Watch the run:
+
+```bash
+gh run list \
+  --repo lightning-it/modulix-validation-lit \
+  --workflow "AAP Incus Nightly Matrix" \
+  --limit 5
+```
+
+## Lifecycle
+
+For each matrix entry the workflow:
+
+1. Creates a unique Incus VM.
+2. Generates a temporary SSH key and cloud-init user.
+3. Registers and prepares the RHEL guest.
+4. Starts the native AAP installer asynchronously.
+5. Polls the installer async job with short Ansible calls.
+6. Reruns `modulix-automation/ansible/runbooks/50-applications/aap/10-deploy.yml`
+   for verification and configuration-as-code.
+7. Unregisters RHSM through Ansible teardown.
+8. Destroys the Incus VM.
+
+If the Ansible teardown succeeds, the final Incus destroy step skips a second
+RHSM unregister attempt. This avoids false CI failures when the Incus VM agent
+is unavailable during late teardown.
+
+## Operational Defaults
+
+- `max-parallel: 1`
+- VM sizing is matrix-owned.
+- guest hostnames are kept short for AAP EDA queue safety.
+- `hub_seed_collections` defaults to `false` for compatibility validation.
+- stale `aap-ci-*` instances fail the run early.
+- failed runs collect AAP and Incus diagnostics before destroying the VM.
+
+Increase parallelism only after the runner has enough CPU, memory, disk, and
+Red Hat subscription capacity for parallel AAP installs.
