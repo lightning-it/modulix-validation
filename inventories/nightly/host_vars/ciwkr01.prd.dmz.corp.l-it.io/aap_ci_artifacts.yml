@@ -1,0 +1,57 @@
+---
+artifacts_items:
+  - name: aap-2.6-containerized-bundle
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'AAP_26_BUNDLE_URL') }}"
+    dest: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'AAP_26_BUNDLE_SHA256') }}"
+    no_log: true
+
+  - name: aap-2.7-containerized-bundle
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'AAP_27_BUNDLE_URL') }}"
+    dest: /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'AAP_27_BUNDLE_SHA256') }}"
+    no_log: true
+
+  - name: rhel-9-aap-ci-metadata
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'RHEL_9_INCUS_METADATA_URL') }}"
+    dest: /srv/incus/images/rhel-9-aap-ci-metadata.tar.xz
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'RHEL_9_INCUS_METADATA_SHA256') }}"
+    no_log: true
+
+  - name: rhel-9-aap-ci-qcow2
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'RHEL_9_INCUS_QCOW2_URL') }}"
+    dest: /srv/incus/images/rhel-9-aap-ci.qcow2
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'RHEL_9_INCUS_QCOW2_SHA256') }}"
+    no_log: true
+
+  - name: rhel-10-aap-ci-metadata
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'RHEL_10_INCUS_METADATA_URL') }}"
+    dest: /srv/incus/images/rhel-10-aap-ci-metadata.tar.xz
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'RHEL_10_INCUS_METADATA_SHA256') }}"
+    no_log: true
+
+  - name: rhel-10-aap-ci-qcow2
+    source: url
+    url: "{{ lookup('ansible.builtin.env', 'RHEL_10_INCUS_QCOW2_URL') }}"
+    dest: /srv/incus/images/rhel-10-aap-ci.qcow2
+    checksum: "sha256:{{ lookup('ansible.builtin.env', 'RHEL_10_INCUS_QCOW2_SHA256') }}"
+    no_log: true
+
+incus_image_default_replace: true
+incus_image_items:
+  - alias: rhel9-aap-ci
+    metadata: /srv/incus/images/rhel-9-aap-ci-metadata.tar.xz
+    rootfs: /srv/incus/images/rhel-9-aap-ci.qcow2
+    properties:
+      description: RHEL 9 AAP CI image
+
+  - alias: rhel10-aap-ci
+    metadata: /srv/incus/images/rhel-10-aap-ci-metadata.tar.xz
+    rootfs: /srv/incus/images/rhel-10-aap-ci.qcow2
+    properties:
+      description: RHEL 10 AAP CI image

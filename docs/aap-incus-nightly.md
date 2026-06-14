@@ -66,6 +66,24 @@ Optional secrets:
   generates a per-run password.
 - `VAULT_TOKEN`: only needed when the runbook should read Vault-backed values.
 
+Artifact sync secrets are optional. When all of them are present, the workflow
+downloads/verifies the AAP bundles and RHEL Incus images before preflight. When
+one or more are missing, the workflow expects the files and Incus aliases to
+already exist on the runner.
+
+- `AAP_26_BUNDLE_URL`
+- `AAP_26_BUNDLE_SHA256`
+- `AAP_27_BUNDLE_URL`
+- `AAP_27_BUNDLE_SHA256`
+- `RHEL_9_INCUS_METADATA_URL`
+- `RHEL_9_INCUS_METADATA_SHA256`
+- `RHEL_9_INCUS_QCOW2_URL`
+- `RHEL_9_INCUS_QCOW2_SHA256`
+- `RHEL_10_INCUS_METADATA_URL`
+- `RHEL_10_INCUS_METADATA_SHA256`
+- `RHEL_10_INCUS_QCOW2_URL`
+- `RHEL_10_INCUS_QCOW2_SHA256`
+
 ## Runner Requirements
 
 The runner must match these labels:
@@ -83,6 +101,10 @@ incus image info local:rhel10-aap-ci >/dev/null
 test -f /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
 test -f /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 ```
+
+If object-storage secrets are configured, these files and aliases are managed by
+`modulix-automation/ansible/runbooks/40-platforms/incus/20-image-artifacts.yml`
+from the validation inventory.
 
 ## Manual Run
 

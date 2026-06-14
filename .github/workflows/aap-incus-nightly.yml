@@ -46,12 +46,32 @@ jobs:
         with:
           path: modulix-validation-lit
 
+      - name: Checkout automation
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/modulix-automation
+          path: modulix-automation
+
       - name: Validate repository read token
         env:
           MODULIX_REPO_READ_TOKEN: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
         run: |
           set -euo pipefail
           test -n "${MODULIX_REPO_READ_TOKEN}"
+
+      - name: Checkout supplementary collection
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/ansible-collection-supplementary
+          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+          path: ansible-collection-supplementary
+
+      - name: Checkout Ubuntu collection
+        uses: actions/checkout@v6
+        with:
+          repository: lightning-it/ansible-collection-ubuntu
+          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
+          path: ansible-collection-ubuntu
 
       - name: Build matrix from validation inventory
         id: matrix
@@ -125,6 +145,75 @@ jobs:
             printf 'rhsm_org=%s\n' "${rhsm_org}"
             printf 'destroy_instances=%s\n' "${destroy_instances}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Sync runner artifacts from object storage
+        env:
+          AAP_26_BUNDLE_URL: ${{ secrets.AAP_26_BUNDLE_URL }}
+          AAP_26_BUNDLE_SHA256: ${{ secrets.AAP_26_BUNDLE_SHA256 }}
+          AAP_27_BUNDLE_URL: ${{ secrets.AAP_27_BUNDLE_URL }}
+          AAP_27_BUNDLE_SHA256: ${{ secrets.AAP_27_BUNDLE_SHA256 }}
+          RHEL_9_INCUS_METADATA_URL: ${{ secrets.RHEL_9_INCUS_METADATA_URL }}
+          RHEL_9_INCUS_METADATA_SHA256: ${{ secrets.RHEL_9_INCUS_METADATA_SHA256 }}
+          RHEL_9_INCUS_QCOW2_URL: ${{ secrets.RHEL_9_INCUS_QCOW2_URL }}
+          RHEL_9_INCUS_QCOW2_SHA256: ${{ secrets.RHEL_9_INCUS_QCOW2_SHA256 }}
+          RHEL_10_INCUS_METADATA_URL: ${{ secrets.RHEL_10_INCUS_METADATA_URL }}
+          RHEL_10_INCUS_METADATA_SHA256: ${{ secrets.RHEL_10_INCUS_METADATA_SHA256 }}
+          RHEL_10_INCUS_QCOW2_URL: ${{ secrets.RHEL_10_INCUS_QCOW2_URL }}
+          RHEL_10_INCUS_QCOW2_SHA256: ${{ secrets.RHEL_10_INCUS_QCOW2_SHA256 }}
+        run: |
+          set -euo pipefail
+
+          required_vars=(
+            AAP_26_BUNDLE_URL
+            AAP_26_BUNDLE_SHA256
+            AAP_27_BUNDLE_URL
+            AAP_27_BUNDLE_SHA256
+            RHEL_9_INCUS_METADATA_URL
+            RHEL_9_INCUS_METADATA_SHA256
+            RHEL_9_INCUS_QCOW2_URL
+            RHEL_9_INCUS_QCOW2_SHA256
+            RHEL_10_INCUS_METADATA_URL
+            RHEL_10_INCUS_METADATA_SHA256
+            RHEL_10_INCUS_QCOW2_URL
+            RHEL_10_INCUS_QCOW2_SHA256
+          )
+
+          missing_vars=()
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name:-}" ]; then
+              missing_vars+=("${var_name}")
+            fi
+          done
+
+          if [ "${#missing_vars[@]}" -gt 0 ]; then
+            echo "Skipping artifact sync because object-storage secrets are incomplete:"
+            printf '  %s\n' "${missing_vars[@]}"
+            exit 0
+          fi
+
+          ansible_core_version="${AAP_CI_ANSIBLE_CORE_VERSION:-2.18.14}"
+          venv_dir="${RUNNER_TEMP}/aap-artifact-sync-ansible-${ansible_core_version}"
+          if [ ! -x "${venv_dir}/bin/ansible-playbook" ]; then
+            python3 -m venv "${venv_dir}"
+            "${venv_dir}/bin/python" -m pip install --upgrade pip
+            "${venv_dir}/bin/python" -m pip install \
+              "ansible-core==${ansible_core_version}" \
+              jmespath \
+              PyYAML
+          fi
+          export PATH="${venv_dir}/bin:${PATH}"
+
+          collections_dir="${RUNNER_TEMP}/aap-artifact-sync-collections"
+          mkdir -p "${collections_dir}/ansible_collections/lit"
+          ln -sfn "${GITHUB_WORKSPACE}/ansible-collection-supplementary" \
+            "${collections_dir}/ansible_collections/lit/supplementary"
+          ln -sfn "${GITHUB_WORKSPACE}/ansible-collection-ubuntu" \
+            "${collections_dir}/ansible_collections/lit/ubuntu"
+          export ANSIBLE_COLLECTIONS_PATH="${collections_dir}"
+
+          ansible-playbook \
+            -i modulix-validation-lit/inventories/nightly/inventory.yml \
+            modulix-automation/ansible/runbooks/40-platforms/incus/20-image-artifacts.yml
 
       - name: Preflight runner artifacts
         env:
