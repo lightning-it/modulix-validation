@@ -38,6 +38,12 @@ Optional:
 - `RHSM_ORG_ID`: overrides the validation inventory RHSM org.
 - `AAP_CI_ADMIN_PASSWORD`: fixed test admin password.
 - `VAULT_TOKEN`: only needed when a validation runbook reads Vault-backed values.
+- `AAP_26_BUNDLE_URL` / `AAP_26_BUNDLE_SHA256`: AAP 2.6 bundle artifact.
+- `AAP_27_BUNDLE_URL` / `AAP_27_BUNDLE_SHA256`: AAP 2.7 bundle artifact.
+- `RHEL_9_INCUS_METADATA_URL` / `RHEL_9_INCUS_METADATA_SHA256`: RHEL 9 Incus metadata artifact.
+- `RHEL_9_INCUS_QCOW2_URL` / `RHEL_9_INCUS_QCOW2_SHA256`: RHEL 9 Incus qcow2 artifact.
+- `RHEL_10_INCUS_METADATA_URL` / `RHEL_10_INCUS_METADATA_SHA256`: RHEL 10 Incus metadata artifact.
+- `RHEL_10_INCUS_QCOW2_URL` / `RHEL_10_INCUS_QCOW2_SHA256`: RHEL 10 Incus qcow2 artifact.
 
 ## License
 
