@@ -15,7 +15,7 @@ aap_ci_max_parallel: 1
 aap_ci_rhsm_org: "12246089"
 
 aap_ci_rhel_activation_keys:
-  "9": "ak-default-rhel-9"
+  "9": "ak-default-rhel-10"
   "10": "ak-default-rhel-10"
 
 aap_ci_bundle_files:
@@ -32,7 +32,7 @@ aap_ci_test_matrix:
     incus_vm_memory: 20GiB
     incus_vm_root_size: 70GiB
     host_memory_headroom_mib: "4096"
-    rhsm_activation_key: "ak-default-rhel-9"
+    rhsm_activation_key: "ak-default-rhel-10"
     aap_bundle_file: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
 
   - name: aap26-rhel10
@@ -56,7 +56,7 @@ aap_ci_test_matrix:
     incus_vm_memory: 20GiB
     incus_vm_root_size: 70GiB
     host_memory_headroom_mib: "4096"
-    rhsm_activation_key: "ak-default-rhel-9"
+    rhsm_activation_key: "ak-default-rhel-10"
     aap_bundle_file: /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 
   - name: aap27-rhel10

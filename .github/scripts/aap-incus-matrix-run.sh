@@ -708,7 +708,9 @@ aap_admin_password_input: $(yaml_single_quote "${admin_password}")
 
 aap_deploy_topology: growth
 aap_deploy_setup_download_version: "$(printf '%s' "${AAP_VERSION}")"
+aap_deploy_gateway_main_url: "https://{{ ansible_host }}"
 aap_deploy_validate_certs: false
+aap_prepare_bundle_src: "$(printf '%s' "${AAP_BUNDLE_FILE}")"
 aap_deploy_manage_host_prep: true
 aap_deploy_manage_download_unpack: true
 aap_deploy_run_installer: true
