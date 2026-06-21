@@ -42,12 +42,12 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: modulix-validation-lit
 
       - name: Checkout automation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
@@ -60,14 +60,14 @@ jobs:
           test -n "${MODULIX_REPO_READ_TOKEN}"
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-supplementary
           token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-supplementary
 
       - name: Checkout Ubuntu collection
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
           token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
@@ -280,12 +280,12 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: modulix-validation-lit
 
       - name: Checkout automation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
@@ -298,21 +298,21 @@ jobs:
           test -n "${MODULIX_REPO_READ_TOKEN}"
 
       - name: Checkout foundational collection
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-foundational
           token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-foundational
 
       - name: Checkout RHEL collection
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-rhel
           token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-rhel
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-supplementary
           token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
