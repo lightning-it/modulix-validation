@@ -61,3 +61,10 @@ When `actionlint` is available, run:
 ```bash
 actionlint
 ```
+
+## Secret Storage Rule
+
+- Never commit secret values, tokens, passwords, private keys, activation codes, or decrypted Vault output.
+- When HC Vault is configured for a role or runbook, generated credentials must be read from HC Vault first, generated only when missing, written back to HC Vault, and then consumed by the application from the Vault-backed Ansible variables. Do not keep generated plaintext secret files on the managed host unless a role has an explicit break-glass option such as `*_allow_local_secret_files=true`.
+- When HC Vault is not configured, required credentials must be supplied from Ansible Vault encrypted inventory variables. Do not add new plaintext generated-secret fallbacks.
+- Tasks that read, generate, write, template, or compare secret material must use `no_log: true`.
