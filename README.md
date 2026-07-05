@@ -1,5 +1,28 @@
 # modulix-validation-lit
 
+<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
+
+
+## Release and Quality Model
+
+This repository follows the Lightning IT shared release and quality model.
+
+See [RELEASE.md](./RELEASE.md) for:
+
+- branch and release flow
+- required quality checks
+- test matrix
+- release evidence
+- artifact publishing
+- supported repository-specific release behavior
+
+Repository classification: **Private Infrastructure Repository**.
+Required test profiles: `pre-commit, validation-matrix, integration-incus, secret-safe-validation`.
+Publishing targets: `none`.
+
+Private repository note: generated docs must stay generic and secret-safe.
+<!-- END LIT_SHARED_RELEASE_MODEL -->
+
 # Internal Use Only
 
 Private Lightning IT validation harnesses for ModuLix.
