@@ -1,0 +1,28 @@
+schema_version: 1
+managed_by: lightning-it/shared-assets
+repository: modulix-validation-lit
+visibility: private
+repository_type: private_infrastructure
+release_type: none
+artifact_type: validation_evidence
+test_profiles:
+- pre-commit
+- validation-matrix
+- integration-incus
+- secret-safe-validation
+os_matrix:
+- ubuntu-latest
+- rhel-9
+- rhel-10
+product_matrix:
+- aap-2.6
+- aap-2.7
+- incus
+publishing_targets: []
+galaxy_publish: false
+quay_publish: false
+release_evidence: false
+heavy_incus_required: true
+readme_badges: []
+workflows:
+  ci: repository-quality.yml
