@@ -1,5 +1,38 @@
 # modulix-validation-lit
 
+<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
+
+## Release and Quality Model
+
+This repository follows the Lightning IT shared release and quality model.
+
+See [RELEASE.md](./RELEASE.md) for:
+
+- branch and release flow
+- required quality checks
+- test matrix
+- release evidence
+- artifact publishing
+- supported repository-specific release behavior
+
+Repository classification: **Private Infrastructure Repository**.
+Required test profiles: `pre-commit, validation-matrix, integration-incus, secret-safe-validation`.
+Publishing targets: `none`.
+
+## Supported and Tested Platforms
+
+| Platform / Product | Status | Validation |
+|---|---:|---|
+| ubuntu-latest | Supported | Molecule / Incus |
+| rhel-9 | Supported | Molecule / Incus |
+| rhel-10 | Supported | Molecule / Incus |
+| aap-2.6 | Tested where applicable | Molecule / Incus |
+| aap-2.7 | Tested where applicable | Molecule / Incus |
+| incus | Tested where applicable | Molecule / Incus |
+
+Private repository note: generated docs must stay generic and secret-safe.
+<!-- END LIT_SHARED_RELEASE_MODEL -->
+
 <!-- BEGIN LIT_QUALITY_BADGES -->
 
 No public badges are shown for this private repository. Quality status is reported through internal GitHub checks and `RELEASE.md` / `TESTING.md`.
