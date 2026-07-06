@@ -1,23 +1,26 @@
+---
 schema_version: 1
-managed_by: lightning-it/shared-assets
+managed_by: lightning-it/shared-assets-lit
 repository: modulix-validation-lit
 visibility: private
+license_spdx: LicenseRef-Proprietary
+license_exception_approved: true
 repository_type: private_infrastructure
 release_type: none
 artifact_type: validation_evidence
 test_profiles:
-- pre-commit
-- validation-matrix
-- integration-incus
-- secret-safe-validation
+  - pre-commit
+  - validation-matrix
+  - integration-incus
+  - secret-safe-validation
 os_matrix:
-- ubuntu-latest
-- rhel-9
-- rhel-10
+  - ubuntu-latest
+  - rhel-9
+  - rhel-10
 product_matrix:
-- aap-2.6
-- aap-2.7
-- incus
+  - aap-2.6
+  - aap-2.7
+  - incus
 publishing_targets: []
 galaxy_publish: false
 quay_publish: false
