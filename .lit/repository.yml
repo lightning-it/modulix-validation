@@ -26,6 +26,11 @@ galaxy_publish: false
 quay_publish: false
 release_evidence: false
 heavy_incus_required: true
+openssf_best_practices:
+  required: false
+  project_id: null
+  target_level: passing
+  exception: Private repository is not an open-source product.
 readme_badges: []
 workflows:
   ci: repository-quality.yml

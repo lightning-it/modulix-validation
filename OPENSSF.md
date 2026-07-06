@@ -18,9 +18,9 @@ The Scorecard badge is included in `README.md` only for public repositories wher
 
 ## Best Practices Badge
 
-Not applicable unless this private repository is intentionally published as an open-source product.
+Not applicable. The central release-model inventory records this exception: Private repository is not an open-source product.
 
-Do not add a passing OpenSSF Best Practices badge until the repository is actually enrolled and passing.
+Do not add a passing OpenSSF Best Practices badge until the repository is actually enrolled and passing. Badges must be generated from `release-model/repositories.yml`; hand-written badges are rejected by the release-model audit.
 
 ## Security Policy
 
