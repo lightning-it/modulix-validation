@@ -150,6 +150,8 @@ is unavailable during late teardown.
 - VM sizing is matrix-owned.
 - guest hostnames are kept short for AAP EDA queue safety.
 - `hub_seed_collections` defaults to `false` for compatibility validation.
+- the current IP-based smoke profile requires guest IPv4 and disables AAP DNS
+  preflight until the private nightly DNS lifecycle is implemented.
 - stale `aap-ci-*` instances fail the run early.
 - failed runs collect AAP and Incus diagnostics before destroying the VM.
 

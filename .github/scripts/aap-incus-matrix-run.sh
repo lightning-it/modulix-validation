@@ -155,14 +155,11 @@ addresses = []
 for instance in instances:
     for interface in instance.get("state", {}).get("network", {}).values():
         for address in interface.get("addresses", []):
-            family = address.get("family")
             value = address.get("address", "")
-            if family == "inet" and value != "127.0.0.1":
-                addresses.append((0, value))
-            elif family == "inet6" and value and not value.startswith(("::1", "fe80:")):
-                addresses.append((1, value))
+            if address.get("family") == "inet" and value != "127.0.0.1":
+                addresses.append(value)
 if addresses:
-    print(sorted(addresses)[0][1])
+    print(sorted(addresses)[0])
     raise SystemExit(0)
 raise SystemExit(1)
 ' 2>/dev/null || true
@@ -884,6 +881,7 @@ aap_password_require_component_inputs: false
 aap_admin_password_input: $(yaml_single_quote "${admin_password}")
 
 aap_preflight_expected_ansible_user: $(yaml_single_quote "${INCUS_SSH_USER}")
+aap_preflight_check_dns: false
 aap_preflight_check_vault: false
 aap_preflight_check_ansible_vault: false
 aap_deploy_install_user: $(yaml_single_quote "${install_user}")
