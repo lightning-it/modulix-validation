@@ -45,17 +45,16 @@ can also be started manually with `workflow_dispatch`.
 
 The active matrix currently covers:
 
-- AAP 2.6 on RHEL 9
-- AAP 2.6 on RHEL 10
 - AAP 2.7 on RHEL 9
 - AAP 2.7 on RHEL 10
+
+The AAP 2.6 entries remain documented in the matrix but are disabled because
+the current `lit.supplementary.aap_deploy` role supports AAP 2.7 only.
 
 ## Required GitHub Secrets
 
 Set these secrets on `lightning-it/modulix-validation-lit`:
 
-- `MODULIX_REPO_READ_TOKEN`: fine-scoped token that can read private Lightning IT
-  repositories used by the workflow.
 - `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
   installation.
 
@@ -64,7 +63,6 @@ Optional secrets:
 - `RHSM_ORG_ID`: overrides the validation inventory RHSM org.
 - `AAP_CI_ADMIN_PASSWORD`: fixed test admin password. If omitted, the workflow
   generates a per-run password.
-- `VAULT_TOKEN`: only needed when the runbook should read Vault-backed values.
 
 Artifact sync secrets are optional. When all of them are present, the workflow
 downloads/verifies the AAP bundles and RHEL Incus images before preflight. When
@@ -89,12 +87,13 @@ already exist on the runner.
 The runner must match these labels:
 
 ```text
-self-hosted, linux, x64, ubuntu, incus, nested-virt
+self-hosted, linux, x64, incus, nested-virt, aap
 ```
 
 On the runner, verify:
 
 ```bash
+test -e /dev/kvm
 incus info >/dev/null
 incus image info local:rhel9-aap-ci >/dev/null
 incus image info local:rhel10-aap-ci >/dev/null
@@ -130,15 +129,16 @@ gh run list \
 
 For each matrix entry the workflow:
 
-1. Creates a unique Incus VM.
-2. Generates a temporary SSH key and cloud-init user.
-3. Registers and prepares the RHEL guest.
-4. Starts the native AAP installer asynchronously.
-5. Polls the installer async job with short Ansible calls.
-6. Reruns `modulix-automation/ansible/runbooks/50-applications/aap/10-deploy.yml`
+1. Creates a unique Incus VM through `lit.ubuntu.incus_instance`.
+2. Sizes the inherited root disk and configures MAC-matched cloud-init DHCP.
+3. Generates a temporary SSH key and waits for authenticated SSH and cloud-init.
+4. Registers the RHEL guest and runs `06-base-os-prepare.yml`.
+5. Starts the native AAP installer asynchronously as `svc_aap`.
+6. Polls the installer async job with short Ansible calls.
+7. Reruns `modulix-automation/ansible/runbooks/50-applications/aap/10-deploy.yml`
    for verification and configuration-as-code.
-7. Unregisters RHSM through Ansible teardown.
-8. Destroys the Incus VM.
+8. Unregisters RHSM through Ansible teardown.
+9. Destroys the Incus VM through `lit.ubuntu.incus_instance`.
 
 If the Ansible teardown succeeds, the final Incus destroy step skips a second
 RHSM unregister attempt. This avoids false CI failures when the Incus VM agent

@@ -3,6 +3,6 @@ self-hosted-runner:
     - self-hosted
     - linux
     - x64
-    - ubuntu
     - incus
     - nested-virt
+    - aap

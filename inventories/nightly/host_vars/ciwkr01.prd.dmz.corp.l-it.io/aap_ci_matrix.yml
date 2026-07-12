@@ -4,9 +4,9 @@ aap_ci_runner_labels:
   - self-hosted
   - linux
   - x64
-  - ubuntu
   - incus
   - nested-virt
+  - aap
 
 aap_ci_incus_project: default
 aap_ci_instance_prefix: aap-ci
@@ -24,6 +24,8 @@ aap_ci_bundle_files:
 
 aap_ci_test_matrix:
   - name: aap26-rhel9
+    enabled: false
+    disabled_reason: Current lit.supplementary.aap_deploy supports AAP 2.7 only.
     aap_version: "2.6"
     rhel_major: "9"
     install_method: containerized
@@ -36,6 +38,8 @@ aap_ci_test_matrix:
     aap_bundle_file: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
 
   - name: aap26-rhel10
+    enabled: false
+    disabled_reason: Current lit.supplementary.aap_deploy supports AAP 2.7 only.
     aap_version: "2.6"
     rhel_major: "10"
     install_method: containerized
@@ -48,6 +52,7 @@ aap_ci_test_matrix:
     aap_bundle_file: /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
 
   - name: aap27-rhel9
+    enabled: true
     aap_version: "2.7"
     rhel_major: "9"
     install_method: containerized
@@ -60,6 +65,7 @@ aap_ci_test_matrix:
     aap_bundle_file: /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 
   - name: aap27-rhel10
+    enabled: true
     aap_version: "2.7"
     rhel_major: "10"
     install_method: containerized
