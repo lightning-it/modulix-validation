@@ -888,6 +888,10 @@ aap_preflight_check_vault: false
 aap_preflight_check_ansible_vault: false
 aap_deploy_install_user: $(yaml_single_quote "${install_user}")
 aap_deploy_install_user_home: $(yaml_single_quote "${install_user_home}")
+aap_cac_gateway_hostname: "https://{{ ansible_host }}"
+aap_cac_gateway_username: admin
+aap_cac_gateway_password: $(yaml_single_quote "${admin_password}")
+aap_cac_gateway_validate_certs: false
 aap_deploy_topology: growth
 aap_deploy_setup_download_version: "$(printf '%s' "${AAP_VERSION}")"
 aap_deploy_gateway_main_url: "https://{{ ansible_host }}"
