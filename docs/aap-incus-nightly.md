@@ -136,7 +136,7 @@ For each matrix entry the workflow:
 5. Starts the native AAP installer asynchronously as `svc_aap`.
 6. Polls the installer async job with short Ansible calls.
 7. Reruns `modulix-automation/ansible/runbooks/50-applications/aap/10-deploy.yml`
-   for verification and configuration-as-code.
+   with `aap_deploy` tags for deployment verification without reinstalling.
 8. Unregisters RHSM through Ansible teardown.
 9. Destroys the Incus VM through `lit.ubuntu.incus_instance`.
 
