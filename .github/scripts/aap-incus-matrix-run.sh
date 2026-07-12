@@ -844,10 +844,6 @@ write_ansible_config \
   "${automation_ansible_dir}/roles:/usr/share/ansible/roles:/runner/roles"
 export ANSIBLE_CONFIG="${ansible_config_path}"
 
-trap cleanup EXIT
-trap 'cleanup 130; exit 130' INT
-trap 'cleanup 143; exit 143' TERM
-
 if [ ! -f "${AAP_BUNDLE_FILE}" ]; then
   echo "ERROR: AAP bundle not found: ${AAP_BUNDLE_FILE}" >&2
   exit 1
@@ -868,6 +864,10 @@ if [ "${install_requirements}" = "true" ]; then
     RH_COLLECTIONS_REQUIREMENTS_FILE="${automation_ansible_dir}/collections/requirements-rh.yml" \
     "${automation_ansible_dir}/scripts/install-rh-collections"
 fi
+
+trap cleanup EXIT
+trap 'cleanup 130; exit 130' INT
+trap 'cleanup 143; exit 143' TERM
 
 run_incus_lifecycle create
 wait_for_incus_guest_ready
