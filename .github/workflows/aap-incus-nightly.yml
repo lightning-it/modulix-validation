@@ -56,7 +56,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-supplementary
-          ref: fix/aap-eda-readiness-yaml
           path: ansible-collection-supplementary
 
       - name: Checkout Ubuntu collection
@@ -312,7 +311,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lightning-it/ansible-collection-supplementary
-          ref: fix/aap-eda-readiness-yaml
           path: ansible-collection-supplementary
 
       - name: Checkout Ubuntu collection
