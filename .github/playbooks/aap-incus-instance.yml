@@ -1,0 +1,159 @@
+---
+- name: Manage an AAP validation VM with lit.ubuntu.incus_instance
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aap_ci_incus_action: "{{ lookup('ansible.builtin.env', 'AAP_CI_INCUS_ACTION') | default('create', true) }}"
+    aap_ci_incus_project: "{{ lookup('ansible.builtin.env', 'AAP_CI_INCUS_PROJECT') | default('default', true) }}"
+    aap_ci_instance_name: "{{ lookup('ansible.builtin.env', 'AAP_CI_INSTANCE_NAME') }}"
+    aap_ci_guest_hostname: "{{ lookup('ansible.builtin.env', 'AAP_CI_GUEST_HOSTNAME') }}"
+    aap_ci_guest_fqdn: "{{ lookup('ansible.builtin.env', 'AAP_CI_GUEST_FQDN') }}"
+    aap_ci_incus_image: "{{ lookup('ansible.builtin.env', 'INCUS_IMAGE') }}"
+    aap_ci_vm_cpu: "{{ lookup('ansible.builtin.env', 'INCUS_VM_CPU') | default('4', true) }}"
+    aap_ci_vm_memory: "{{ lookup('ansible.builtin.env', 'INCUS_VM_MEMORY') | default('20GiB', true) }}"
+    aap_ci_vm_root_size: "{{ lookup('ansible.builtin.env', 'INCUS_VM_ROOT_SIZE') | default('70GiB', true) }}"
+    aap_ci_ssh_user: "{{ lookup('ansible.builtin.env', 'INCUS_SSH_USER') | default('cloud-user', true) }}"
+    aap_ci_ssh_public_key_file: "{{ lookup('ansible.builtin.env', 'INCUS_SSH_PUBLIC_KEY_FILE') }}"
+    aap_ci_run_id: "{{ lookup('ansible.builtin.env', 'GITHUB_RUN_ID') | default('local', true) }}"
+    aap_ci_run_attempt: "{{ lookup('ansible.builtin.env', 'GITHUB_RUN_ATTEMPT') | default('1', true) }}"
+    aap_ci_matrix_name: "{{ lookup('ansible.builtin.env', 'MATRIX_NAME') }}"
+    aap_ci_expires_at: "{{ lookup('ansible.builtin.env', 'AAP_CI_EXPIRES_AT') }}"
+    aap_ci_incus_argv: >-
+      {{
+        ['incus', '--force-local']
+        + (['--project', aap_ci_incus_project] if aap_ci_incus_project | length > 0 else [])
+      }}
+
+  tasks:
+    - name: Validate AAP Incus lifecycle inputs
+      ansible.builtin.assert:
+        that:
+          - aap_ci_incus_action in ['create', 'destroy']
+          - aap_ci_instance_name | length > 0
+          - aap_ci_incus_project | length > 0
+          - >-
+            aap_ci_incus_action == 'destroy'
+            or (
+              aap_ci_guest_hostname | length > 0
+              and aap_ci_guest_fqdn | length > 0
+              and aap_ci_incus_image | length > 0
+              and aap_ci_ssh_public_key_file | length > 0
+            )
+        fail_msg: AAP Incus lifecycle inputs are incomplete or invalid.
+
+    - name: Create the stopped AAP validation VM
+      ansible.builtin.include_role:
+        name: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_default_project: "{{ aap_ci_incus_project }}"
+        incus_instance_inventory_path: ""
+        incus_instance_items:
+          - name: "{{ aap_ci_instance_name }}"
+            image: "{{ aap_ci_incus_image }}"
+            type: vm
+            state: present
+            hostname: "{{ aap_ci_guest_hostname }}"
+            fqdn: "{{ aap_ci_guest_fqdn }}"
+            ssh_user: "{{ aap_ci_ssh_user }}"
+            ssh_public_keys:
+              - "{{ lookup('ansible.builtin.file', aap_ci_ssh_public_key_file) | trim }}"
+            cloud_init_enabled: false
+            wait_for_ip: false
+            wait_for_ssh: false
+            limits:
+              cpu: "{{ aap_ci_vm_cpu }}"
+              memory: "{{ aap_ci_vm_memory }}"
+            config:
+              user.lit.managed_by: modulix-validation-lit
+              user.lit.service: aap
+              user.lit.matrix: "{{ aap_ci_matrix_name }}"
+              user.lit.run_id: "{{ aap_ci_run_id }}"
+              user.lit.run_attempt: "{{ aap_ci_run_attempt }}"
+              user.lit.fqdn: "{{ aap_ci_guest_fqdn }}"
+              user.lit.expires_at: "{{ aap_ci_expires_at }}"
+      when: aap_ci_incus_action == 'create'
+
+    - name: Resize the AAP validation VM root disk before first boot
+      ansible.builtin.command:
+        argv: >-
+          {{
+            aap_ci_incus_argv
+            + [
+              'config',
+              'device',
+              'override',
+              aap_ci_instance_name,
+              'root',
+              'size=' ~ aap_ci_vm_root_size
+            ]
+          }}
+      changed_when: true
+      when: aap_ci_incus_action == 'create'
+
+    - name: Read the AAP validation VM NIC MAC address
+      ansible.builtin.command:
+        argv: >-
+          {{
+            aap_ci_incus_argv
+            + [
+              'config',
+              'get',
+              aap_ci_instance_name,
+              'volatile.eth0.hwaddr'
+            ]
+          }}
+      register: aap_ci_instance_mac
+      changed_when: false
+      when: aap_ci_incus_action == 'create'
+
+    - name: Validate the AAP validation VM NIC MAC address
+      ansible.builtin.assert:
+        that:
+          - aap_ci_instance_mac.stdout | trim | length > 0
+        fail_msg: Incus did not expose volatile.eth0.hwaddr for the AAP VM.
+      when: aap_ci_incus_action == 'create'
+
+    - name: Start the configured AAP validation VM
+      ansible.builtin.include_role:
+        name: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_default_project: "{{ aap_ci_incus_project }}"
+        incus_instance_inventory_path: ""
+        incus_instance_items:
+          - name: "{{ aap_ci_instance_name }}"
+            image: "{{ aap_ci_incus_image }}"
+            type: vm
+            state: running
+            reconfigure: true
+            hostname: "{{ aap_ci_guest_hostname }}"
+            fqdn: "{{ aap_ci_guest_fqdn }}"
+            ssh_user: "{{ aap_ci_ssh_user }}"
+            ssh_public_keys:
+              - "{{ lookup('ansible.builtin.file', aap_ci_ssh_public_key_file) | trim }}"
+            wait_for_ip: false
+            wait_for_ssh: false
+            limits:
+              cpu: "{{ aap_ci_vm_cpu }}"
+              memory: "{{ aap_ci_vm_memory }}"
+            cloud_init_network_config: |
+              version: 2
+              ethernets:
+                incus0:
+                  match:
+                    macaddress: "{{ aap_ci_instance_mac.stdout | trim }}"
+                  dhcp4: true
+                  dhcp6: true
+                  accept-ra: true
+      when: aap_ci_incus_action == 'create'
+
+    - name: Destroy the AAP validation VM
+      ansible.builtin.include_role:
+        name: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_default_project: "{{ aap_ci_incus_project }}"
+        incus_instance_inventory_path: ""
+        incus_instance_items:
+          - name: "{{ aap_ci_instance_name }}"
+            state: absent
+      when: aap_ci_incus_action == 'destroy'
