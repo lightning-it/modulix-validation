@@ -124,7 +124,7 @@ jobs:
                     (.data.repository.pullRequest.reviews.nodes // [])[]
                     | select((.author.login // "") | startswith($prefix))
                     | select(.state == "COMMENTED")
-                    | select((.body // "") != "")
+                    | select(((.body // "") | gsub("\\s"; "")) != "")
                     | select(
                         ((.body // "")
                         | ascii_downcase
