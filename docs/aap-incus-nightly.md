@@ -132,7 +132,7 @@ For each matrix entry the workflow:
 1. Creates a unique Incus VM through `lit.ubuntu.incus_instance`.
 2. Sizes the inherited root disk and configures MAC-matched cloud-init DHCP.
 3. Generates a temporary SSH key and waits for authenticated SSH and cloud-init.
-4. Registers the RHEL guest and runs `06-base-os-prepare.yml`.
+4. Registers the RHEL guest and runs `06-aap-host-prepare.yml`.
 5. Starts the native AAP installer asynchronously as `svc_aap`.
 6. Polls the installer async job with short Ansible calls.
 7. Reruns `modulix-automation/ansible/runbooks/50-applications/aap/10-deploy.yml`
