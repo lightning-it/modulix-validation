@@ -32,6 +32,8 @@ jobs:
     name: workbench / public acceptance
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      RUNNER_ENVIRONMENT: github-hosted
     environment:
       name: workbench-public-acceptance
 
@@ -78,9 +80,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install \
-            ansible-core==2.18.18 \
-            ansible-runner==2.4.3 \
-            PyYAML==6.0.3
+            --require-hashes \
+            --requirement \
+            modulix-validation-lit/.github/requirements/workbench-public-acceptance.lock
 
           installed_collections="${RUNNER_TEMP}/workbench-installed-collections"
           development_collections="${RUNNER_TEMP}/workbench-development-collections"

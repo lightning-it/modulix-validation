@@ -12,6 +12,7 @@ import yaml
 
 SCRIPT = Path(__file__).parents[1] / ".github/scripts/workbench-public-acceptance.py"
 SPEC = importlib.util.spec_from_file_location("workbench_public_acceptance", SCRIPT)
+assert SPEC is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 sys.modules[SPEC.name] = MODULE
