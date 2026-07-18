@@ -409,7 +409,8 @@ def validate_inventory_payload(payload: Any, contract: Contract) -> None:
         raise HarnessError("inventory_target_address_mismatch")
     if variables.get("ansible_user") != contract.ansible_user:
         raise HarnessError("inventory_target_user_mismatch")
-    if variables.get("ansible_connection", "ssh") not in {"ssh", "smart"}:
+    ansible_connection = variables.get("ansible_connection", "ssh")
+    if not isinstance(ansible_connection, str) or ansible_connection not in {"ssh", "smart"}:
         raise HarnessError("inventory_target_connection_invalid")
     explicit_inventory_hostname = variables.get("inventory_hostname")
     if explicit_inventory_hostname is not None and explicit_inventory_hostname != contract.target:
