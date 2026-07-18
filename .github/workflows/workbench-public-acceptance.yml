@@ -37,13 +37,13 @@ jobs:
 
     steps:
       - name: Checkout validation harness
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           path: modulix-validation-lit
           persist-credentials: false
 
       - name: Checkout automation develop
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           repository: lightning-it/modulix-automation
           ref: develop
@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout public inventory develop
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           repository: lightning-it/ansible-inventory-lit
           ref: develop
@@ -61,7 +61,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout Ubuntu collection develop
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
           ref: develop
@@ -70,7 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6
         with:
           python-version: "3.13"
 
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload sanitized acceptance evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0  # v7
         with:
           name: workbench-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/workbench-public-evidence/*.json

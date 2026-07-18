@@ -431,8 +431,8 @@ def validate_inventory_payload(payload: Any, contract: Contract) -> None:
         raise HarnessError("inventory_target_port_mismatch")
     if isinstance(raw_port, int):
         actual_port = raw_port
-    elif isinstance(raw_port, str) and raw_port.strip().isdigit():
-        actual_port = int(raw_port.strip())
+    elif isinstance(raw_port, str) and raw_port.isdigit():
+        actual_port = int(raw_port)
     else:
         raise HarnessError("inventory_target_port_mismatch")
     if actual_port != contract.ssh_port:
