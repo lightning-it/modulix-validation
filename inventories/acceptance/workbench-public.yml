@@ -1,0 +1,39 @@
+---
+schema_version: 1
+suite: workbench-public-acceptance
+
+controller:
+  runner_environment: github-hosted
+
+target:
+  hostname: wbn01.prd.edge.pub.l-it.io
+  address: 195.201.173.85
+  inventory_group: ubuntu_workbenches
+  ssh_port: 1905
+  ansible_user: svc_ansible
+
+paths:
+  automation_root: modulix-automation
+  inventory_root: ansible-inventory-lit
+  inventory: inventories/pub/inventory.yml
+  ansible_config: ansible/ansible.cfg
+  deployment_playbook: >-
+    ansible/runbooks/50-applications/workbench/20-ubuntu-setup.yml
+  validation_playbook: >-
+    ansible/runbooks/50-applications/workbench/30-validate.yml
+  acceptance_playbook: >-
+    ansible/runbooks/50-applications/workbench/40-acceptance.yml
+  cleanup_playbook: >-
+    ansible/runbooks/50-applications/workbench/50-cleanup.yml
+
+acceptance:
+  profiles:
+    - tiny
+    - heavy
+    - application
+  profile_variable: workbench_acceptance_profile
+  run_id_variable: workbench_acceptance_run_id
+
+ansible:
+  phase_timeout_seconds: 7200
+  cleanup_timeout_seconds: 900
