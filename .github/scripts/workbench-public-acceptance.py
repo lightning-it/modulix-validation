@@ -427,10 +427,14 @@ def validate_inventory_payload(payload: Any, contract: Contract) -> None:
     raw_port = variables.get("ansible_port")
     if raw_port == "{{ openssh_server_primary_port }}":
         raw_port = variables.get("openssh_server_primary_port")
-    try:
-        actual_port = int(raw_port)
-    except (TypeError, ValueError) as exc:
-        raise HarnessError("inventory_target_port_mismatch") from exc
+    if isinstance(raw_port, bool):
+        raise HarnessError("inventory_target_port_mismatch")
+    if isinstance(raw_port, int):
+        actual_port = raw_port
+    elif isinstance(raw_port, str) and raw_port.strip().isdigit():
+        actual_port = int(raw_port.strip())
+    else:
+        raise HarnessError("inventory_target_port_mismatch")
     if actual_port != contract.ssh_port:
         raise HarnessError("inventory_target_port_mismatch")
     if variables.get("workbench_enabled") is not True:
