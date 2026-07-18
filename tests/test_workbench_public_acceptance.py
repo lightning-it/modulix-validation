@@ -153,6 +153,10 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             MODULE.EXPECTED_GROUP: {"hosts": [MODULE.EXPECTED_TARGET]},
         }
         MODULE.validate_inventory_payload(payload, contract)
+        payload["_meta"]["hostvars"][MODULE.EXPECTED_TARGET]["openssh_server_primary_port"] = 1905.1
+        with self.assertRaises(MODULE.HarnessError):
+            MODULE.validate_inventory_payload(payload, contract)
+        payload["_meta"]["hostvars"][MODULE.EXPECTED_TARGET]["openssh_server_primary_port"] = MODULE.EXPECTED_PORT
         payload["_meta"]["hostvars"][MODULE.EXPECTED_TARGET]["ansible_host"] = "192.0.2.1"
         with self.assertRaises(MODULE.HarnessError):
             MODULE.validate_inventory_payload(payload, contract)
