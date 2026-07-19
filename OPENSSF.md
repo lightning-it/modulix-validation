@@ -14,13 +14,13 @@ This repository follows the Lightning IT shared OpenSSF readiness model generate
 
 Not enabled by default for this private repository. Private repositories require GitHub Advanced Security or an explicit local exception before publishing Scorecard results.
 
-The Scorecard badge is included in `README.md` only for public repositories where the workflow is synced.
+The Scorecard badge is included in `README.md` only for public repositories where the workflow is synced. It can reflect OpenSSF's independent scan rather than a repository-published result.
 
 ## Best Practices Badge
 
 Not applicable. The central release-model inventory records this exception: Private repository is not an open-source product.
 
-Do not add a passing OpenSSF Best Practices badge until the repository is actually enrolled and passing. Badges must be generated from `release-model/repositories.yml`; hand-written badges are rejected by the release-model audit.
+Do not add a passing OpenSSF Best Practices badge until the repository is actually enrolled and passing. Badges must be generated from the central `release-model/repositories.yml` inventory in `lightning-it/shared-assets-lit`; hand-written badges are rejected by the release-model audit.
 
 ## Security Policy
 
@@ -30,8 +30,8 @@ Do not add a passing OpenSSF Best Practices badge until the repository is actual
 
 - `main` is the protected release branch.
 - `develop` is the integration branch for normal work, Renovate, and shared-assets-lit PRs.
-- `develop` to `main` promotion PRs require manual review.
-- Renovate and shared-assets-lit PRs may auto-merge only into `develop` after required checks pass.
+- Every pull request must have a completed GitHub Copilot review for its current head revision.
+- Promotion and integration PRs may auto-merge only after required checks pass and all review conversations are resolved.
 - Releases and publishing happen only from trusted `main` workflows after validation.
 - Release evidence is generated for repositories with release artifacts.
 
