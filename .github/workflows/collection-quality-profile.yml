@@ -124,13 +124,6 @@ jobs:
         with:
           ref: ${{ inputs['source-sha'] }}
           persist-credentials: false
-      - name: Checkout exact validation harness
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
-        with:
-          repository: lightning-it/modulix-validation
-          ref: ${{ github.workflow_sha }}
-          path: .validation-harness
-          persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
@@ -144,7 +137,7 @@ jobs:
             molecule-plugins==25.8.12 \
             PyYAML==6.0.3
       - name: Run validation-owned infrastructure profile
-        uses: ./.validation-harness/.github/actions/run-quality-profile
+        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@1154594bdf917b70fa474ac2ee5ae2b365ad951f
         with:
           profile: ${{ needs.validate-inputs.outputs.profile }}
           scenario: ${{ matrix.scenario }}
