@@ -127,7 +127,7 @@ jobs:
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          python-version: "3.14"
+          python-version: "3.11"
       - name: Install exact validation toolchain
         run: |
           set -euo pipefail
@@ -137,7 +137,7 @@ jobs:
             molecule-plugins==25.8.12 \
             PyYAML==6.0.3
       - name: Run validation-owned infrastructure profile
-        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@1154594bdf917b70fa474ac2ee5ae2b365ad951f
+        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@bf7cb6002df87c1c070527f22f7a33bee3da3277
         with:
           profile: ${{ needs.validate-inputs.outputs.profile }}
           scenario: ${{ matrix.scenario }}
