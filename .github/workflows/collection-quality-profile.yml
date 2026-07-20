@@ -127,10 +127,22 @@ jobs:
       - name: Checkout exact validation harness
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
-          repository: lightning-it/modulix-validation-lit
+          repository: lightning-it/modulix-validation
           ref: ${{ github.workflow_sha }}
           path: .validation-harness
           persist-credentials: false
+      - name: Set up exact Python runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.11"
+      - name: Install exact validation toolchain
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            ansible-core==2.18.13 \
+            molecule==25.12.0 \
+            molecule-plugins==25.8.12 \
+            PyYAML==6.0.3
       - name: Run validation-owned infrastructure profile
         uses: ./.validation-harness/.github/actions/run-quality-profile
         with:
