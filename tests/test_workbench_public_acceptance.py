@@ -87,6 +87,9 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             "@bf7cb6002df87c1c070527f22f7a33bee3da3277",
             workflow,
         )
+        renovate = (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
+        self.assertIn("collection-quality-profile.yml", renovate)
+        self.assertIn('"matchDepNames": ["python"]', renovate)
 
     def test_quality_action_installs_exact_candidate_without_network_resolution(self):
         action = (
@@ -98,6 +101,8 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             '-p "$QUALITY_INSTALL_ROOT" --force --no-deps',
             action,
         )
+        self.assertIn("community.general:11.4.9", action)
+        self.assertIn("community.hashi_vault:7.1.0", action)
 
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
