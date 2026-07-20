@@ -137,7 +137,7 @@ jobs:
             molecule-plugins==25.8.12 \
             PyYAML==6.0.3
       - name: Run validation-owned infrastructure profile
-        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@f27aab84ac0e850e918d205ec346b037371142c1
+        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@4ce793ca8901c646a83ec5d07ef8c81acbaaa5a5
         with:
           profile: ${{ needs.validate-inputs.outputs.profile }}
           scenario: ${{ matrix.scenario }}
