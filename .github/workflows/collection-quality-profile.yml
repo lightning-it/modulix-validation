@@ -63,7 +63,10 @@ jobs:
             heavy|application_acceptance) ;;
             *) echo "unsupported delegated profile: $PROFILE" >&2; exit 1 ;;
           esac
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ ! "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo "source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID" >&2
+            exit 1
+          fi
           python3 -c 'import json,sys; value=json.loads(sys.argv[1]); assert isinstance(value, dict); assert isinstance(value.get("include"), list); assert value["include"]' "$MATRIX_JSON"
           echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
 
@@ -79,9 +82,7 @@ jobs:
       name: ${{ inputs['environment-name'] }}
     timeout-minutes: 180
     concurrency:
-      group: >-
-        validation-${{ github.repository }}-${{ inputs.profile }}-${{ github.run_id }}-${{
-        github.run_attempt }}-${{ matrix.component }}-${{ matrix.target }}
+      group: modulix-validation-incus
       cancel-in-progress: false
     steps:
       - name: Checkout exact collection source
