@@ -33,7 +33,7 @@ on:
       memory-limit:
         description: Per-cell Incus memory limit.
         required: false
-        default: 8GiB
+        default: 12GiB
         type: string
       disk-limit:
         description: Per-cell Incus root disk limit.
