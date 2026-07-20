@@ -25,6 +25,28 @@ repositories. Human operational procedures belong in `modulix-operations-lit`.
 - Keep test matrices explicit and reviewable under `inventories/`.
 - Prefer copy-paste-ready docs for manual validation commands.
 
+## Collection Test Ownership
+
+This repository owns the GitHub Actions execution layer for collection tests that use real infrastructure or private
+runtime context. This includes protected Incus, Heavy, live, nightly, cross-collection, cross-service, upgrade,
+disaster-recovery, and Application Acceptance runs.
+
+Collection repositories continue to own reusable role code, Tiny tests, and environment-neutral scenario sources.
+When a scenario is closely coupled to a role, leave its Molecule files in the collection and check out the exact
+collection revision here. Do not fork or copy role implementation into this repository.
+
+For every migrated collection test, this repository MUST own:
+
+- the matrix and trigger policy;
+- self-hosted runner labels and capacity checks;
+- protected environments and secret references;
+- infrastructure naming, ownership metadata, finalizers, and stale-resource cleanup;
+- sanitized evidence and retention; and
+- exact collection repository and commit inputs.
+
+Collection release workflows MAY call a reusable workflow from this repository. Such calls must remain fail-closed,
+must test the exact candidate SHA, and must not silently replace a required result with a skipped job.
+
 ## Extensible Nightly Validation Model
 
 Nightly validation is organized as service suites. A suite validates a composed
