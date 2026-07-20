@@ -84,7 +84,7 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertIn('python-version: "3.11"', workflow)
         self.assertIn(
             "lightning-it/modulix-validation/.github/actions/run-quality-profile"
-            "@f27aab84ac0e850e918d205ec346b037371142c1",
+            "@4ce793ca8901c646a83ec5d07ef8c81acbaaa5a5",
             workflow,
         )
         renovate = (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
