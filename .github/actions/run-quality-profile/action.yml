@@ -1,6 +1,8 @@
 ---
 name: Run collection quality profile
-description: Run one registry-selected Molecule cell against the exact collection candidate.
+description: >-
+  Run one registry-selected Molecule cell against the exact collection candidate. The reusable workflow checks out
+  the caller collection at the workspace root, so repository-owned scenario and evidence helpers resolve from there.
 
 inputs:
   profile:
@@ -53,7 +55,7 @@ runs:
     - name: Download exact collection candidate
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
       with:
-        name: ${{ inputs.candidate-artifact }}
+        name: ${{ inputs['candidate-artifact'] }}
         path: >-
           ${{ runner.temp }}/supplementary-candidate/${{ github.repository_id }}/${{
           github.run_id }}/${{ github.run_attempt }}/${{ github.job }}/${{ github.sha }}
@@ -65,17 +67,17 @@ runs:
         PROFILE: ${{ inputs.profile }}
         SCENARIO: ${{ inputs.scenario }}
         TARGET: ${{ inputs.target }}
-        TARGET_DISPOSITION: ${{ inputs.target-disposition }}
+        TARGET_DISPOSITION: ${{ inputs['target-disposition'] }}
         ROLES: ${{ inputs.roles }}
         TEST_IMAGE: ${{ inputs.image }}
-        INSTANCE_TYPE: ${{ inputs.instance-type }}
-        CANDIDATE_ARTIFACT: ${{ inputs.candidate-artifact }}
-        SOURCE_SHA: ${{ inputs.source-sha }}
-        JUNIT_REQUIRED: ${{ inputs.junit-required }}
-        ALLURE_REQUIRED: ${{ inputs.allure-required }}
-        CPU_LIMIT: ${{ inputs.cpu-limit }}
-        MEMORY_LIMIT: ${{ inputs.memory-limit }}
-        DISK_LIMIT: ${{ inputs.disk-limit }}
+        INSTANCE_TYPE: ${{ inputs['instance-type'] }}
+        CANDIDATE_ARTIFACT: ${{ inputs['candidate-artifact'] }}
+        SOURCE_SHA: ${{ inputs['source-sha'] }}
+        JUNIT_REQUIRED: ${{ inputs['junit-required'] }}
+        ALLURE_REQUIRED: ${{ inputs['allure-required'] }}
+        CPU_LIMIT: ${{ inputs['cpu-limit'] }}
+        MEMORY_LIMIT: ${{ inputs['memory-limit'] }}
+        DISK_LIMIT: ${{ inputs['disk-limit'] }}
       run: |
         set -euo pipefail
 
@@ -712,8 +714,8 @@ runs:
       env:
         EFFECTIVE_EXIT_CODE: ${{ steps.lifecycle.outputs.effective_exit_code }}
         EXPAND_OUTCOME: ${{ steps.expand.outcome }}
-        JUNIT_REQUIRED: ${{ inputs.junit-required }}
-        ALLURE_REQUIRED: ${{ inputs.allure-required }}
+        JUNIT_REQUIRED: ${{ inputs['junit-required'] }}
+        ALLURE_REQUIRED: ${{ inputs['allure-required'] }}
       run: |
         set -euo pipefail
         record_exit_code="${EFFECTIVE_EXIT_CODE:-1}"

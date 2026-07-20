@@ -55,8 +55,8 @@ jobs:
         name: Validate profile and exact candidate identity
         env:
           PROFILE: ${{ inputs.profile }}
-          MATRIX_JSON: ${{ inputs.matrix-json }}
-          SOURCE_SHA: ${{ inputs.source-sha }}
+          MATRIX_JSON: ${{ inputs['matrix-json'] }}
+          SOURCE_SHA: ${{ inputs['source-sha'] }}
         run: |
           set -euo pipefail
           case "$PROFILE" in
@@ -73,10 +73,10 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 3
-      matrix: ${{ fromJSON(inputs.matrix-json) }}
+      matrix: ${{ fromJSON(inputs['matrix-json']) }}
     runs-on: ${{ matrix.runner }}
     environment:
-      name: ${{ inputs.environment-name }}
+      name: ${{ inputs['environment-name'] }}
     timeout-minutes: 180
     concurrency:
       group: >-
@@ -87,7 +87,7 @@ jobs:
       - name: Checkout exact collection source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
-          ref: ${{ inputs.source-sha }}
+          ref: ${{ inputs['source-sha'] }}
           persist-credentials: false
       - name: Checkout exact validation harness
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
@@ -106,10 +106,10 @@ jobs:
           roles: ${{ join(matrix.roles, ',') }}
           image: ${{ matrix.image || vars[matrix.image_variable] }}
           instance-type: ${{ matrix.instance_type }}
-          candidate-artifact: ${{ inputs.candidate-artifact }}
-          source-sha: ${{ inputs.source-sha }}
+          candidate-artifact: ${{ inputs['candidate-artifact'] }}
+          source-sha: ${{ inputs['source-sha'] }}
           junit-required: ${{ matrix.junit }}
           allure-required: ${{ matrix.allure }}
-          cpu-limit: ${{ inputs.cpu-limit }}
-          memory-limit: ${{ inputs.memory-limit }}
-          disk-limit: ${{ inputs.disk-limit }}
+          cpu-limit: ${{ inputs['cpu-limit'] }}
+          memory-limit: ${{ inputs['memory-limit'] }}
+          disk-limit: ${{ inputs['disk-limit'] }}
