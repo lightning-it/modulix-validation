@@ -103,6 +103,7 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("community.general:11.4.9", action)
         self.assertIn("community.hashi_vault:7.1.0", action)
+        self.assertIn("lit.foundational:1.31.0", action)
 
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
