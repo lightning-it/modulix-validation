@@ -202,7 +202,7 @@ runs:
           find "$QUALITY_CANDIDATE_ROOT" -maxdepth 1 -type f -name '*.tar.gz' -print
         )
         test "${#candidates[@]}" -eq 1
-        ansible-galaxy collection install "${candidates[0]}" -p "$QUALITY_INSTALL_ROOT" --force
+        ansible-galaxy collection install "${candidates[0]}" -p "$QUALITY_INSTALL_ROOT" --force --no-deps
         echo "ANSIBLE_COLLECTIONS_PATH=$QUALITY_INSTALL_ROOT:/usr/share/ansible/collections" >> "$GITHUB_ENV"
 
     - name: Record exact controller and dependency inventory

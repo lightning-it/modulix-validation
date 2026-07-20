@@ -76,6 +76,17 @@ def create_contract():
 
 
 class WorkbenchAcceptanceTests(unittest.TestCase):
+    def test_quality_action_installs_exact_candidate_without_network_resolution(self):
+        action = (
+            Path(__file__).parents[1]
+            / ".github/actions/run-quality-profile/action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'ansible-galaxy collection install "${candidates[0]}" '
+            '-p "$QUALITY_INSTALL_ROOT" --force --no-deps',
+            action,
+        )
+
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
         self.assertEqual(selected, ("tiny", "application"))
