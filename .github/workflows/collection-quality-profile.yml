@@ -89,10 +89,17 @@ jobs:
         with:
           ref: ${{ inputs.source-sha }}
           persist-credentials: false
-      - name: Run validation-owned infrastructure profile
-        uses: ./.github/actions/run-quality-profile
+      - name: Checkout exact validation harness
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
-          profile: ${{ matrix.profile }}
+          repository: lightning-it/modulix-validation-lit
+          ref: ${{ github.workflow_sha }}
+          path: .validation-harness
+          persist-credentials: false
+      - name: Run validation-owned infrastructure profile
+        uses: ./.validation-harness/.github/actions/run-quality-profile
+        with:
+          profile: ${{ needs.validate-inputs.outputs.profile }}
           scenario: ${{ matrix.scenario }}
           target: ${{ matrix.target }}
           target-disposition: ${{ matrix.target_disposition || 'supported' }}
