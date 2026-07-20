@@ -96,14 +96,10 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             Path(__file__).parents[1]
             / ".github/actions/run-quality-profile/action.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            'ansible-galaxy collection install "${candidates[0]}" '
-            '-p "$QUALITY_INSTALL_ROOT" --force --no-deps',
-            action,
-        )
-        self.assertIn("community.general:11.4.9", action)
-        self.assertIn("community.hashi_vault:7.1.0", action)
-        self.assertIn("lit.foundational:1.31.0", action)
+        self.assertIn('"${candidates[0]}"', action)
+        self.assertIn("--no-deps", action)
+        self.assertIn("runtime-collections.tar.gz", action)
+        self.assertIn("missing declared runtime collections", action)
 
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)

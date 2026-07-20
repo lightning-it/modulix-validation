@@ -1,8 +1,6 @@
 ---
 name: Run collection quality profile
-description: >-
-  Run one registry-selected Molecule cell against the exact collection candidate. The reusable workflow checks out
-  the caller collection at the workspace root, so repository-owned scenario and evidence helpers resolve from there.
+description: Run one registry-selected Molecule cell against the exact collection candidate.
 
 inputs:
   profile:
@@ -55,10 +53,28 @@ runs:
     - name: Download exact collection candidate
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
       with:
-        name: ${{ inputs['candidate-artifact'] }}
+        name: ${{ inputs.candidate-artifact }}
         path: >-
           ${{ runner.temp }}/supplementary-candidate/${{ github.repository_id }}/${{
           github.run_id }}/${{ github.run_attempt }}/${{ github.job }}/${{ github.sha }}
+
+    - name: Install pinned Molecule entry points
+      shell: bash
+      run: |
+        set -euo pipefail
+        tool_parent="$RUNNER_TEMP/supplementary-quality-tools"
+        mkdir -p "$tool_parent"
+        tool_root="$(mktemp -d "$tool_parent/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_JOB.XXXXXX")"
+        echo "QUALITY_TOOL_ROOT=$tool_root" >> "$GITHUB_ENV"
+        python3 -m venv "$tool_root"
+        "$tool_root/bin/python3" -m pip install --disable-pip-version-check \
+          ansible-core==2.21.2 \
+          molecule==25.12.0 \
+          molecule-plugins==25.8.12
+        export PATH="$tool_root/bin:$PATH"
+        "$tool_root/bin/python3" -c 'import ansible; import molecule'
+        "$tool_root/bin/molecule" --version
+        echo "$tool_root/bin" >> "$GITHUB_PATH"
 
     - name: Initialize isolated matrix cell
       id: initialize
@@ -67,17 +83,17 @@ runs:
         PROFILE: ${{ inputs.profile }}
         SCENARIO: ${{ inputs.scenario }}
         TARGET: ${{ inputs.target }}
-        TARGET_DISPOSITION: ${{ inputs['target-disposition'] }}
+        TARGET_DISPOSITION: ${{ inputs.target-disposition }}
         ROLES: ${{ inputs.roles }}
         TEST_IMAGE: ${{ inputs.image }}
-        INSTANCE_TYPE: ${{ inputs['instance-type'] }}
-        CANDIDATE_ARTIFACT: ${{ inputs['candidate-artifact'] }}
-        SOURCE_SHA: ${{ inputs['source-sha'] }}
-        JUNIT_REQUIRED: ${{ inputs['junit-required'] }}
-        ALLURE_REQUIRED: ${{ inputs['allure-required'] }}
-        CPU_LIMIT: ${{ inputs['cpu-limit'] }}
-        MEMORY_LIMIT: ${{ inputs['memory-limit'] }}
-        DISK_LIMIT: ${{ inputs['disk-limit'] }}
+        INSTANCE_TYPE: ${{ inputs.instance-type }}
+        CANDIDATE_ARTIFACT: ${{ inputs.candidate-artifact }}
+        SOURCE_SHA: ${{ inputs.source-sha }}
+        JUNIT_REQUIRED: ${{ inputs.junit-required }}
+        ALLURE_REQUIRED: ${{ inputs.allure-required }}
+        CPU_LIMIT: ${{ inputs.cpu-limit }}
+        MEMORY_LIMIT: ${{ inputs.memory-limit }}
+        DISK_LIMIT: ${{ inputs.disk-limit }}
       run: |
         set -euo pipefail
 
@@ -100,7 +116,7 @@ runs:
         full_owner="${GITHUB_REPOSITORY}-${GITHUB_WORKFLOW}-${GITHUB_RUN_ID}-"
         full_owner+="${GITHUB_RUN_ATTEMPT}-${SCENARIO}-${TARGET}"
         mapfile -t bounded_identities < <(
-          python scripts/quality_cell_identity.py \
+          python3 scripts/quality_cell_identity.py \
             --instance "$full_instance" \
             --owner "$full_owner"
         )
@@ -117,6 +133,7 @@ runs:
         candidate_root="${RUNNER_TEMP}/supplementary-candidate/${GITHUB_REPOSITORY_ID}/"
         candidate_root+="${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${GITHUB_JOB}/${GITHUB_SHA}"
         install_root="${temp_root}/collections"
+        molecule_ephemeral_root="${temp_root}/molecule-ephemeral"
         log_path="${GITHUB_WORKSPACE}/artifacts/logs/${SCENARIO}-${TARGET}.log"
         result_artifact="quality-result-${SCENARIO}-${TARGET}-"
         if [ "$TARGET_DISPOSITION" = candidate ]; then
@@ -125,7 +142,13 @@ runs:
         result_artifact+="${SOURCE_SHA}-attempt-${GITHUB_RUN_ATTEMPT}"
 
         rm -rf "$temp_root"
-        mkdir -p "$artifact_root" "$results_root" "$cell_root" "$install_root" "$(dirname "$log_path")"
+        mkdir -p \
+          "$artifact_root" \
+          "$results_root" \
+          "$cell_root" \
+          "$install_root" \
+          "$molecule_ephemeral_root" \
+          "$(dirname "$log_path")"
 
         {
           echo "QUALITY_PROFILE=$PROFILE"
@@ -140,6 +163,7 @@ runs:
           echo "QUALITY_LOG_PATH=$log_path"
           echo "QUALITY_INSTALL_ROOT=$install_root"
           echo "QUALITY_TEMP_ROOT=$temp_root"
+          echo "MOLECULE_EPHEMERAL_DIRECTORY=$molecule_ephemeral_root"
           echo "QUALITY_SOURCE_SHA=$SOURCE_SHA"
           echo "QUALITY_RESULT_ARTIFACT=$result_artifact"
           echo "MOLECULE_RUN_PROTECTED=true"
@@ -199,18 +223,115 @@ runs:
           sha256sum --check "$(basename "$checksum_file")"
         )
         mapfile -t candidates < <(
-          find "$QUALITY_CANDIDATE_ROOT" -maxdepth 1 -type f -name '*.tar.gz' -print
+          find "$QUALITY_CANDIDATE_ROOT" \
+            -maxdepth 1 \
+            -type f \
+            -name 'lit-supplementary-*.tar.gz' \
+            -print
         )
         test "${#candidates[@]}" -eq 1
+        runtime_bundle="$QUALITY_CANDIDATE_ROOT/runtime-collections.tar.gz"
+        test -s "$runtime_bundle"
+        RUNTIME_BUNDLE="$runtime_bundle" QUALITY_INSTALL_ROOT="$QUALITY_INSTALL_ROOT" python3 - <<'PY'
+        import inspect
+        import os
+        import tarfile
+        from pathlib import Path, PurePosixPath
+
+        archive = Path(os.environ["RUNTIME_BUNDLE"])
+        destination = Path(os.environ["QUALITY_INSTALL_ROOT"])
+
+        def normalized_parts(path: PurePosixPath) -> tuple[str, ...]:
+            parts: list[str] = []
+            for part in path.parts:
+                if part in {"", "."}:
+                    continue
+                if part == "..":
+                    if not parts:
+                        raise SystemExit(f"runtime collection link escapes its root: {path}")
+                    parts.pop()
+                else:
+                    parts.append(part)
+            return tuple(parts)
+
+        total_bytes = 0
+        seen: set[tuple[str, ...]] = set()
+        with tarfile.open(archive, "r:gz") as stream:
+            members = stream.getmembers()
+            if not members or len(members) > 100_000:
+                raise SystemExit("runtime collection bundle has an unsafe member count")
+            for member in members:
+                path = PurePosixPath(member.name)
+                if (
+                    path.is_absolute()
+                    or ".." in path.parts
+                    or not path.parts
+                    or path.parts[0] != "ansible_collections"
+                    or not (
+                        member.isfile()
+                        or member.isdir()
+                        or member.issym()
+                        or member.islnk()
+                    )
+                ):
+                    raise SystemExit(f"unsafe runtime collection member: {member.name}")
+                normalized = normalized_parts(path)
+                if normalized in seen:
+                    raise SystemExit(f"duplicate runtime collection member: {member.name}")
+                seen.add(normalized)
+                if member.issym() or member.islnk():
+                    link = PurePosixPath(member.linkname)
+                    if link.is_absolute():
+                        raise SystemExit(f"absolute runtime collection link: {member.name}")
+                    link_path = path.parent / link if member.issym() else link
+                    link_parts = normalized_parts(link_path)
+                    if not link_parts or link_parts[0] != "ansible_collections":
+                        raise SystemExit(f"escaping runtime collection link: {member.name}")
+                if member.size > 512 * 1024 * 1024:
+                    raise SystemExit(f"oversized runtime collection member: {member.name}")
+                total_bytes += member.size
+                if total_bytes > 2 * 1024 * 1024 * 1024:
+                    raise SystemExit("runtime collection bundle expands beyond size limit")
+            extract_arguments = {"path": destination, "members": members}
+            if "filter" in inspect.signature(stream.extractall).parameters:
+                extract_arguments["filter"] = "data"
+            stream.extractall(**extract_arguments)
+        PY
         ansible-galaxy collection install \
-          community.general:11.4.9 \
-          community.hashi_vault:7.1.0 \
-          lit.foundational:1.31.0 \
+          "${candidates[0]}" \
           -p "$QUALITY_INSTALL_ROOT" \
           --force \
           --no-deps
-        ansible-galaxy collection install "${candidates[0]}" -p "$QUALITY_INSTALL_ROOT" --force --no-deps
-        echo "ANSIBLE_COLLECTIONS_PATH=$QUALITY_INSTALL_ROOT:/usr/share/ansible/collections" >> "$GITHUB_ENV"
+        default_collection_paths="$(
+          python3 -c 'from ansible import constants as C; print(":".join(C.COLLECTIONS_PATHS))'
+        )"
+        test -n "$default_collection_paths"
+        python3 - <<'PY'
+        import os
+        from pathlib import Path
+
+        import yaml
+
+        metadata = yaml.safe_load(Path("galaxy.yml").read_text(encoding="utf-8"))
+        dependencies = metadata.get("dependencies", {})
+        if not isinstance(dependencies, dict):
+            raise SystemExit("galaxy.yml dependencies must be a mapping")
+
+        roots = [Path(os.environ["QUALITY_INSTALL_ROOT"])]
+        missing = []
+        for fqcn in sorted(dependencies):
+            parts = fqcn.split(".")
+            if len(parts) != 2 or not all(parts):
+                raise SystemExit(f"invalid collection dependency in galaxy.yml: {fqcn}")
+            relative = Path("ansible_collections", *parts)
+            if not any((root / relative).is_dir() for root in roots):
+                missing.append(fqcn)
+        if missing:
+            raise SystemExit(
+                "missing declared runtime collections: " + ", ".join(missing)
+            )
+        PY
+        echo "ANSIBLE_COLLECTIONS_PATH=$QUALITY_INSTALL_ROOT:$default_collection_paths" >> "$GITHUB_ENV"
 
     - name: Record exact controller and dependency inventory
       shell: bash
@@ -348,8 +469,6 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python3 -c 'import yaml' 2>/dev/null || \
-          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
         python3 - <<'PY'
         import hashlib
         import json
@@ -664,7 +783,6 @@ runs:
       run: |
         set -euo pipefail
         python3 - "$QUALITY_ARTIFACT_ROOT" <<'PY'
-        import inspect
         import os
         import sys
         import tarfile
@@ -714,10 +832,7 @@ runs:
                         raise SystemExit(f"archive member escapes destination: {member.name}")
                 if total_bytes > compressed_bytes * max_compression_ratio:
                     raise SystemExit(f"archive compression ratio exceeds limit: {archive}")
-                if "filter" in inspect.signature(tarfile.TarFile.extractall).parameters:
-                    stream.extractall(target, filter="data")
-                else:
-                    stream.extractall(target)
+                stream.extractall(target, filter="data")
         PY
 
     - name: Record actual matrix result
@@ -727,8 +842,8 @@ runs:
       env:
         EFFECTIVE_EXIT_CODE: ${{ steps.lifecycle.outputs.effective_exit_code }}
         EXPAND_OUTCOME: ${{ steps.expand.outcome }}
-        JUNIT_REQUIRED: ${{ inputs['junit-required'] }}
-        ALLURE_REQUIRED: ${{ inputs['allure-required'] }}
+        JUNIT_REQUIRED: ${{ inputs.junit-required }}
+        ALLURE_REQUIRED: ${{ inputs.allure-required }}
       run: |
         set -euo pipefail
         record_exit_code="${EFFECTIVE_EXIT_CODE:-1}"
@@ -861,3 +976,20 @@ runs:
         test "$RECORD_OUTCOME" = success
         test "$PACKAGE_OUTCOME" = success
         test "$UPLOAD_OUTCOME" = success
+
+    - name: Remove isolated quality toolchain
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${QUALITY_TOOL_ROOT:-}" ]; then
+          exit 0
+        fi
+        case "$QUALITY_TOOL_ROOT" in
+          "$RUNNER_TEMP"/supplementary-quality-tools/*) ;;
+          *)
+            echo "refusing to remove unexpected quality tool path" >&2
+            exit 1
+            ;;
+        esac
+        rm -rf -- "$QUALITY_TOOL_ROOT"
