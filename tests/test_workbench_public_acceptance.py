@@ -76,6 +76,18 @@ def create_contract():
 
 
 class WorkbenchAcceptanceTests(unittest.TestCase):
+    def test_collection_profile_uses_compatible_python_and_offline_action(self):
+        workflow = (
+            Path(__file__).parents[1]
+            / ".github/workflows/collection-quality-profile.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('python-version: "3.11"', workflow)
+        self.assertIn(
+            "lightning-it/modulix-validation/.github/actions/run-quality-profile"
+            "@bf7cb6002df87c1c070527f22f7a33bee3da3277",
+            workflow,
+        )
+
     def test_quality_action_installs_exact_candidate_without_network_resolution(self):
         action = (
             Path(__file__).parents[1]
