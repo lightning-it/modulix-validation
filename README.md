@@ -21,14 +21,14 @@ Publishing targets: `none`.
 
 ## Supported and Tested Platforms
 
-| Platform / Product | Status | Validation |
-|---|---:|---|
-| ubuntu-latest | Supported | Molecule / Incus |
-| rhel-9 | Supported | Molecule / Incus |
-| rhel-10 | Supported | Molecule / Incus |
-| aap-2.6 | Tested where applicable | Molecule / Incus |
-| aap-2.7 | Tested where applicable | Molecule / Incus |
-| incus | Tested where applicable | Molecule / Incus |
+| Platform / Product |                  Status | Validation       |
+| ------------------ | ----------------------: | ---------------- |
+| ubuntu-latest      |               Supported | Molecule / Incus |
+| rhel-9             |               Supported | Molecule / Incus |
+| rhel-10            |               Supported | Molecule / Incus |
+| aap-2.6            | Tested where applicable | Molecule / Incus |
+| aap-2.7            | Tested where applicable | Molecule / Incus |
+| incus              | Tested where applicable | Molecule / Incus |
 
 Private repository note: generated docs must stay generic and secret-safe.
 <!-- END LIT_SHARED_RELEASE_MODEL -->
