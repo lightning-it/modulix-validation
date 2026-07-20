@@ -657,6 +657,7 @@ runs:
       run: |
         set -euo pipefail
         python3 - "$QUALITY_ARTIFACT_ROOT" <<'PY'
+        import inspect
         import os
         import sys
         import tarfile
@@ -706,7 +707,10 @@ runs:
                         raise SystemExit(f"archive member escapes destination: {member.name}")
                 if total_bytes > compressed_bytes * max_compression_ratio:
                     raise SystemExit(f"archive compression ratio exceeds limit: {archive}")
-                stream.extractall(target, filter="data")
+                if "filter" in inspect.signature(tarfile.TarFile.extractall).parameters:
+                    stream.extractall(target, filter="data")
+                else:
+                    stream.extractall(target)
         PY
 
     - name: Record actual matrix result

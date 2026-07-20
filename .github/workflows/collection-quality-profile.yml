@@ -67,7 +67,41 @@ jobs:
             echo "source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID" >&2
             exit 1
           fi
-          python3 -c 'import json,sys; value=json.loads(sys.argv[1]); assert isinstance(value, dict); assert isinstance(value.get("include"), list); assert value["include"]' "$MATRIX_JSON"
+          python3 - <<'PY'
+          import json
+          import os
+
+          value = json.loads(os.environ["MATRIX_JSON"])
+          cells = value.get("include") if isinstance(value, dict) else None
+          if not isinstance(cells, list) or not cells:
+              raise SystemExit("matrix-json must contain a non-empty include list")
+          required = {
+              "allure",
+              "component",
+              "instance_type",
+              "junit",
+              "roles",
+              "runner",
+              "scenario",
+              "target",
+          }
+          for index, cell in enumerate(cells):
+              if not isinstance(cell, dict):
+                  raise SystemExit(f"matrix-json include[{index}] must be an object")
+              missing = sorted(required - cell.keys())
+              if missing:
+                  raise SystemExit(f"matrix-json include[{index}] is missing: {', '.join(missing)}")
+              if not isinstance(cell["runner"], (str, list)) or not cell["runner"]:
+                  raise SystemExit(f"matrix-json include[{index}].runner must be non-empty")
+              if not isinstance(cell["roles"], list) or not cell["roles"]:
+                  raise SystemExit(f"matrix-json include[{index}].roles must be a non-empty list")
+              for key in ("component", "scenario", "target", "instance_type"):
+                  if not isinstance(cell[key], str) or not cell[key]:
+                      raise SystemExit(f"matrix-json include[{index}].{key} must be a non-empty string")
+              for key in ("junit", "allure"):
+                  if not isinstance(cell[key], bool):
+                      raise SystemExit(f"matrix-json include[{index}].{key} must be a boolean")
+          PY
           echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
 
   profile-cells:
