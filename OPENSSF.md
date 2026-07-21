@@ -4,21 +4,21 @@ This repository follows the Lightning IT shared OpenSSF readiness model generate
 
 ## Repository
 
-- Repository: `modulix-validation-lit`
-- Visibility: `private`
-- Type: `private_infrastructure`
+- Repository: `modulix-validation`
+- Visibility: `public`
+- Type: `generic_managed`
 - Release type: `none`
 - Artifact type: `validation_evidence`
 
 ## Scorecard
 
-Not enabled by default for this private repository. Private repositories require GitHub Advanced Security or an explicit local exception before publishing Scorecard results.
+Enabled through `.github/workflows/openssf-scorecard.yml` with scheduled, manual, and `branch_protection_rule` triggers. The workflow executes a digest-pinned Scorecard container and uploads SARIF to GitHub code scanning. Repository-run results are not published to the OpenSSF API because its workflow verifier does not currently accept the immutable container invocation.
 
 The Scorecard badge is included in `README.md` only for public repositories where the workflow is synced. It can reflect OpenSSF's independent scan rather than a repository-published result.
 
 ## Best Practices Badge
 
-Not applicable. The central release-model inventory records this exception: Private repository is not an open-source product.
+Required but not enrolled. Enroll manually at OpenSSF Best Practices, complete the questionnaire until the project reaches the configured target level, then record the numeric project ID as `openssf_best_practices.project_id` in the central `release-model/repositories.yml` inventory in `lightning-it/shared-assets-lit`.
 
 Do not add a passing OpenSSF Best Practices badge until the repository is actually enrolled and passing. Badges must be generated from the central `release-model/repositories.yml` inventory in `lightning-it/shared-assets-lit`; hand-written badges are rejected by the release-model audit.
 
@@ -42,7 +42,7 @@ Dependency automation must target `develop` and must not bypass required checks.
 
 ## Security Scanning
 
-Secret-safe validation only; no private inventory values or customer data may be exposed.
+Repository-quality validation and shared release-model checks.
 
 ## Exceptions
 
