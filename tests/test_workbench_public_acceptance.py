@@ -76,6 +76,31 @@ def create_contract():
 
 
 class WorkbenchAcceptanceTests(unittest.TestCase):
+    def test_collection_profile_uses_compatible_python_and_offline_action(self):
+        workflow = (
+            Path(__file__).parents[1]
+            / ".github/workflows/collection-quality-profile.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('python-version: "3.11"', workflow)
+        self.assertIn(
+            "lightning-it/modulix-validation/.github/actions/run-quality-profile"
+            "@7d9e9edb4eb8f6efbd025a8da74a78f2de2d2ed4",
+            workflow,
+        )
+        renovate = (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
+        self.assertIn("collection-quality-profile.yml", renovate)
+        self.assertIn('"matchDepNames": ["python"]', renovate)
+
+    def test_quality_action_installs_exact_candidate_without_network_resolution(self):
+        action = (
+            Path(__file__).parents[1]
+            / ".github/actions/run-quality-profile/action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"${candidates[0]}"', action)
+        self.assertIn("--no-deps", action)
+        self.assertIn("runtime-collections.tar.gz", action)
+        self.assertIn("missing declared runtime collections", action)
+
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
         self.assertEqual(selected, ("tiny", "application"))
