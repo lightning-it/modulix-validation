@@ -18,13 +18,6 @@
   "prConcurrentLimit": 5,
   "packageRules": [
     {
-      "description": "Keep delegated ansible-core 2.18 profiles on compatible Python 3.11",
-      "matchManagers": ["github-actions"],
-      "matchFileNames": [".github/workflows/collection-quality-profile.yml"],
-      "matchDepNames": ["python"],
-      "enabled": false
-    },
-    {
       "description": "Automerge safe non-major updates into develop after CI passes",
       "matchUpdateTypes": [
         "minor",

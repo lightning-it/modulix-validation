@@ -15,7 +15,7 @@ See [RELEASE.md](./RELEASE.md) for:
 - artifact publishing
 - supported repository-specific release behavior
 
-Repository classification: **Private Infrastructure Repository**.
+Repository classification: **Shared-Assets-Managed Repository**.
 Required test profiles: `pre-commit, validation-matrix, integration-incus, secret-safe-validation`.
 Publishing targets: `none`.
 
@@ -30,12 +30,11 @@ Publishing targets: `none`.
 | aap-2.7            | Tested where applicable | Molecule / Incus |
 | incus              | Tested where applicable | Molecule / Incus |
 
-Private repository note: generated docs must stay generic and secret-safe.
 <!-- END LIT_SHARED_RELEASE_MODEL -->
 
 <!-- BEGIN LIT_QUALITY_BADGES -->
 
-No public badges are shown for this private repository. Quality status is reported through internal GitHub checks and `RELEASE.md` / `TESTING.md`.
+[![CI](https://github.com/lightning-it/modulix-validation/actions/workflows/repository-quality.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-validation/actions/workflows/repository-quality.yml)
 
 <!-- END LIT_QUALITY_BADGES -->
 
