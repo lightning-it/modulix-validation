@@ -1,4 +1,4 @@
-# modulix-validation-lit
+# modulix-validation
 
 <!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
 
@@ -39,9 +39,10 @@ Publishing targets: `none`.
 
 <!-- END LIT_QUALITY_BADGES -->
 
-# Internal Use Only
+# Validation Harness
 
-Private Lightning IT validation harnesses for ModuLix.
+Public Lightning IT validation harnesses for ModuLix. Environment credentials,
+private artifact locations, and generated evidence remain outside Git.
 
 This repository owns real nightly and integration validation workflows. It is
 separate from:
@@ -202,9 +203,10 @@ docs/                                      validation documentation
 
 ## Current AAP Workflow Secrets
 
-Set these secrets on `lightning-it/modulix-validation-lit` for the current AAP
+Set these secrets on `lightning-it/modulix-validation` for the current AAP
 suite:
 
+- `LIT_REPOSITORY_READ_TOKEN`: read-only token for cross-repository checkouts.
 - `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
   installation.
 
@@ -236,7 +238,8 @@ provider task and do not expose it to unrelated workflow steps.
 
 ## License
 
-This repository is proprietary and private. Do not redistribute.
+This repository is public under its repository-specific proprietary license.
+See the license metadata before redistributing.
 
 ## Security
 

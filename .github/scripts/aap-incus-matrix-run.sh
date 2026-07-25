@@ -649,8 +649,11 @@ cleanup() {
         best_effort_rhsm_cleanup
       fi
 
-      run_incus_lifecycle destroy
-      destroy_rc=$?
+      if run_incus_lifecycle destroy; then
+        destroy_rc=0
+      else
+        destroy_rc=$?
+      fi
       if [ "${destroy_rc}" -ne 0 ]; then
         echo "ERROR: failed to destroy Incus instance ${instance_name}." >&2
       elif [ -n "${work_dir:-}" ] && [ -d "${work_dir}" ]; then
@@ -984,6 +987,7 @@ if [ "${deploy_rc}" -eq 0 ]; then
   deploy_rc=$?
 fi
 
+trap - EXIT
 cleanup "${deploy_rc}"
 cleanup_rc=$?
 if [ "${deploy_rc}" -eq 0 ] && [ "${cleanup_rc}" -ne 0 ]; then

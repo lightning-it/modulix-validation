@@ -42,27 +42,34 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           path: modulix-validation-lit
+          persist-credentials: false
 
       - name: Checkout automation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout Ubuntu collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Build matrix from validation inventory
         id: matrix
@@ -285,39 +292,50 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           path: modulix-validation-lit
+          persist-credentials: false
 
       - name: Checkout automation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout foundational collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-foundational
           path: ansible-collection-foundational
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout RHEL collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-rhel
           path: ansible-collection-rhel
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout Ubuntu collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Run AAP Incus matrix entry
         env:

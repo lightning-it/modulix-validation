@@ -7,9 +7,6 @@
     ":semanticCommitType(chore)",
     ":semanticCommitScope(deps)"
   ],
-  "renovate-config": {
-    "enabled": false
-  },
   "labels": ["dependencies", "renovate"],
   "baseBranchPatterns": ["develop"],
   "timezone": "UTC",
@@ -42,6 +39,12 @@
       "description": "Keep every component of the GitHub Actions toolchain on one version",
       "matchManagers": ["github-actions"],
       "groupName": "github-actions"
+    },
+    {
+      "description": "Track the collection quality profile Python runtime",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/collection-quality-profile.yml"],
+      "matchDepNames": ["python"]
     }
   ]
 }

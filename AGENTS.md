@@ -2,14 +2,16 @@
 
 ## Repository Purpose
 
-This private repository contains Lightning IT validation harnesses for ModuLix.
+This public repository contains sanitized Lightning IT validation harnesses for
+ModuLix. Credentials, private artifact locations, and generated evidence must
+remain outside Git.
 
 Use it for:
 
 - GitHub Actions workflows that run real integration tests
 - validation inventories and matrices
 - runner-specific preflight contracts
-- private artifact references needed by tests
+- nonsecret artifact references needed by tests
 
 Do not put reusable automation logic here. Reusable runbooks belong in
 `modulix-automation`. Role implementation belongs in the collection
@@ -17,8 +19,7 @@ repositories. Human operational procedures belong in `modulix-operations-lit`.
 
 ## Boundaries
 
-- Keep this repository private unless all environment-specific values have been
-  removed.
+- Keep committed content safe for the repository's public visibility.
 - Keep secrets out of Git. Use GitHub Secrets, Vault, or short-lived tokens.
 - Keep Red Hat downloads, signed URLs, AAP manifests, and RHSM credentials out
   of Git.

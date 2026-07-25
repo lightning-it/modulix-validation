@@ -53,8 +53,10 @@ the current `lit.supplementary.aap_deploy` role supports AAP 2.7 only.
 
 ## Required GitHub Secrets
 
-Set these secrets on `lightning-it/modulix-validation-lit`:
+Set these secrets on `lightning-it/modulix-validation`:
 
+- `LIT_REPOSITORY_READ_TOKEN`: read-only token for the Lightning IT repositories
+  checked out by the workflow.
 - `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
   installation.
 
