@@ -113,7 +113,7 @@ Run a single matrix entry:
 
 ```bash
 gh workflow run "AAP Incus Nightly Matrix" \
-  --repo lightning-it/modulix-validation-lit \
+  --repo lightning-it/modulix-validation \
   -f matrix_filter=aap27-rhel10 \
   -f destroy_instances=true
 ```
@@ -122,7 +122,7 @@ Watch the run:
 
 ```bash
 gh run list \
-  --repo lightning-it/modulix-validation-lit \
+  --repo lightning-it/modulix-validation \
   --workflow "AAP Incus Nightly Matrix" \
   --limit 5
 ```
