@@ -400,7 +400,16 @@ clear_aap_installer_jid() {
 
 collect_failure_diagnostics() {
   local diagnostics_script="${work_dir:-/tmp}/aap-ci-diagnostics.sh"
-  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-220}"
+  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-${AAP_CI_DIAGNOSTIC_LOG_LINES:-220}}"
+  local log_lines_b64
+  local install_user_b64
+  local install_user_home_b64
+
+  if ! [[ "${log_lines}" =~ ^[0-9]+$ ]] \
+    || [ "${log_lines}" -lt 1 ] \
+    || [ "${log_lines}" -gt 2000 ]; then
+    log_lines=220
+  fi
 
   if [ "${AAP_CI_COLLECT_FAILURE_DIAGNOSTICS:-true}" != "true" ]; then
     return
@@ -411,6 +420,11 @@ collect_failure_diagnostics() {
   fi
 
   if ! command -v ansible >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! command -v base64 >/dev/null 2>&1; then
+    echo "Skipping AAP failure diagnostics: base64 is unavailable." >&2
     return
   fi
 
@@ -477,6 +491,9 @@ find "${install_user_home}/aap" /opt/aap /var/log -maxdepth 5 -type f \
 EOS
 
   chmod 0600 "${diagnostics_script}" || true
+  log_lines_b64="$(printf '%s' "${log_lines}" | base64 | tr -d '\n')"
+  install_user_b64="$(printf '%s' "${install_user}" | base64 | tr -d '\n')"
+  install_user_home_b64="$(printf '%s' "${install_user_home}" | base64 | tr -d '\n')"
   ansible \
     -i "${inventory_path}" \
     aaps \
@@ -487,7 +504,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES='${log_lines}' AAP_CI_INSTALL_USER='${install_user}' AAP_CI_INSTALL_USER_HOME='${install_user_home}' /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${log_lines_b64}') AAP_CI_INSTALL_USER=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_b64}') AAP_CI_INSTALL_USER_HOME=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_home_b64}') /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
