@@ -834,11 +834,9 @@ runs:
                     raise SystemExit(f"archive compression ratio exceeds limit: {archive}")
                 # Use Python's hardened filter when available. Python 3.11
                 # remains supported after the explicit member validation above.
-                try:
+                if sys.version_info >= (3, 12):
                     stream.extractall(target, filter="data")
-                except TypeError as error:
-                    if "filter" not in str(error):
-                        raise
+                else:
                     stream.extractall(target)
         PY
 
