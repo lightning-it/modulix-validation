@@ -577,8 +577,8 @@ wait_for_incus_guest_ready() {
              if command -v timeout >/dev/null 2>&1; then
                sudo -n timeout --signal=TERM ${remaining}s cloud-init status --wait
              else
-               cloud_init_deadline=\$((SECONDS + ${remaining}))
-               while [ \"\${SECONDS}\" -lt \"\${cloud_init_deadline}\" ]; do
+               cloud_init_deadline=\$((\$(date +%s) + ${remaining}))
+               while [ \"\$(date +%s)\" -lt \"\${cloud_init_deadline}\" ]; do
                  cloud_init_status=\"\$(sudo -n cloud-init status 2>&1)\" || true
                  case \"\${cloud_init_status}\" in
                    *'status: done'*) exit 0 ;;
