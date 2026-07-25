@@ -2,9 +2,9 @@
 
 ## Repository Purpose
 
-This public repository contains sanitized Lightning IT validation harnesses for
-ModuLix. Credentials, private artifact locations, and generated evidence must
-remain outside Git.
+This publicly visible, proprietary repository contains sanitized Lightning IT
+validation harnesses for ModuLix. Credentials, private artifact locations, and
+generated evidence must remain outside Git.
 
 Use it for:
 

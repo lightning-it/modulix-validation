@@ -238,8 +238,8 @@ provider task and do not expose it to unrelated workflow steps.
 
 ## License
 
-This repository is public under its repository-specific proprietary license.
-See the license metadata before redistributing.
+This repository is publicly visible but remains proprietary. Its
+repository-specific license grants no redistribution rights.
 
 ## Security
 
