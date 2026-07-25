@@ -580,7 +580,10 @@ wait_for_incus_guest_ready() {
              else
                cloud_init_deadline=\$((\$(date +%s) + ${remaining}))
                while [ \"\$(date +%s)\" -lt \"\${cloud_init_deadline}\" ]; do
-                 cloud_init_status=\"\$(sudo -n cloud-init status 2>&1)\" || true
+                 if ! cloud_init_status=\"\$(sudo -n cloud-init status 2>&1)\"; then
+                   printf '%s\n' \"\${cloud_init_status}\" >&2
+                   exit 1
+                 fi
                  case \"\${cloud_init_status}\" in
                    *'status: done'*) exit 0 ;;
                    *'status: error'*|*'status: degraded'*) exit 1 ;;
