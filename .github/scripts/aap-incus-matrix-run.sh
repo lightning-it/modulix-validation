@@ -512,6 +512,7 @@ wait_for_incus_guest_ready() {
   local attempt=1
   local deadline
   local ip_address=""
+  local remaining
   local rc=1
   local ssh_options=(
     -o BatchMode=yes
@@ -560,8 +561,33 @@ wait_for_incus_guest_ready() {
 
     if [ -n "${ip_address}" ] &&
       ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" true >/dev/null 2>&1; then
-      if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
-        'if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait; fi'; then
+      remaining=$((deadline - SECONDS))
+      if [ "${remaining}" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
+        if timeout --signal=TERM "${remaining}s" \
+          ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          'if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait; fi'; then
+          rc=0
+        else
+          rc=$?
+        fi
+      elif [ "${remaining}" -gt 0 ]; then
+        # shellcheck disable=SC2029 # Pass the validated local deadline to the guest.
+        if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          "if command -v cloud-init >/dev/null 2>&1; then
+             if command -v timeout >/dev/null 2>&1; then
+               sudo -n timeout --signal=TERM '${remaining}s' cloud-init status --wait
+             else
+               sudo -n cloud-init status
+             fi
+           fi"; then
+          rc=0
+        else
+          rc=$?
+        fi
+      else
+        rc=124
+      fi
+      if [ "${rc}" -eq 0 ]; then
         write_guest_inventory "${ip_address}"
         echo "Incus guest is ready: ${instance_name} (${ip_address})."
         return 0
@@ -725,6 +751,12 @@ inventory_path="${work_dir}/${instance_name}.yml"
 vars_path="${work_dir}/${instance_name}-vars.yml"
 ansible_config_path="${work_dir}/ansible-ci.cfg"
 admin_password="${AAP_CI_ADMIN_PASSWORD:-$(generate_password)}"
+
+if ! [[ "${instance_wait_timeout}" =~ ^[0-9]+$ ]] ||
+  [ "${instance_wait_timeout}" -lt 1 ]; then
+  echo "ERROR: AAP_CI_INSTANCE_WAIT_TIMEOUT must be a positive integer." >&2
+  exit 1
+fi
 
 echo "Starting AAP Incus matrix entry ${MATRIX_NAME}: AAP ${AAP_VERSION} on RHEL ${RHEL_MAJOR}."
 
