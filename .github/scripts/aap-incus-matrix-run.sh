@@ -405,6 +405,12 @@ collect_failure_diagnostics() {
   local install_user_b64
   local install_user_home_b64
 
+  if ! [[ "${log_lines}" =~ ^[0-9]+$ ]] \
+    || [ "${log_lines}" -lt 1 ] \
+    || [ "${log_lines}" -gt 2000 ]; then
+    log_lines=220
+  fi
+
   if [ "${AAP_CI_COLLECT_FAILURE_DIAGNOSTICS:-true}" != "true" ]; then
     return
   fi
