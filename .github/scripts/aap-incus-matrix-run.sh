@@ -987,7 +987,7 @@ if [ "${deploy_rc}" -eq 0 ]; then
   deploy_rc=$?
 fi
 
-trap - EXIT
+trap - EXIT INT TERM
 cleanup "${deploy_rc}"
 cleanup_rc=$?
 if [ "${deploy_rc}" -eq 0 ] && [ "${cleanup_rc}" -ne 0 ]; then
