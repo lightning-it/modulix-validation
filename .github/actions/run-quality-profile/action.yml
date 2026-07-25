@@ -836,7 +836,9 @@ runs:
                 # remains supported after the explicit member validation above.
                 try:
                     stream.extractall(target, filter="data")
-                except TypeError:
+                except TypeError as error:
+                    if "filter" not in str(error):
+                        raise
                     stream.extractall(target)
         PY
 
