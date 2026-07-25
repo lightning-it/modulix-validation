@@ -832,7 +832,12 @@ runs:
                         raise SystemExit(f"archive member escapes destination: {member.name}")
                 if total_bytes > compressed_bytes * max_compression_ratio:
                     raise SystemExit(f"archive compression ratio exceeds limit: {archive}")
-                stream.extractall(target, filter="data")
+                # Use Python's hardened filter when available. Python 3.11
+                # remains supported after the explicit member validation above.
+                if sys.version_info >= (3, 12):
+                    stream.extractall(target, members=members, filter="data")
+                else:
+                    stream.extractall(target, members=members)
         PY
 
     - name: Record actual matrix result

@@ -53,8 +53,10 @@ the current `lit.supplementary.aap_deploy` role supports AAP 2.7 only.
 
 ## Required GitHub Secrets
 
-Set these secrets on `lightning-it/modulix-validation-lit`:
+Set these secrets on `lightning-it/modulix-validation`:
 
+- `LIT_REPOSITORY_READ_TOKEN`: read-only token for the Lightning IT repositories
+  checked out by the workflow.
 - `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
   installation.
 
@@ -111,7 +113,7 @@ Run a single matrix entry:
 
 ```bash
 gh workflow run "AAP Incus Nightly Matrix" \
-  --repo lightning-it/modulix-validation-lit \
+  --repo lightning-it/modulix-validation \
   -f matrix_filter=aap27-rhel10 \
   -f destroy_instances=true
 ```
@@ -120,7 +122,7 @@ Watch the run:
 
 ```bash
 gh run list \
-  --repo lightning-it/modulix-validation-lit \
+  --repo lightning-it/modulix-validation \
   --workflow "AAP Incus Nightly Matrix" \
   --limit 5
 ```

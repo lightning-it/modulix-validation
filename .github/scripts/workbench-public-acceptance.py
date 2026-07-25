@@ -58,7 +58,7 @@ EXPECTED_CLEANUP_PLAYBOOK = Path(
 EXPECTED_PROFILES = ("tiny", "heavy", "application")
 EXPECTED_PROFILE_VARIABLE = "workbench_acceptance_profile"
 EXPECTED_RUN_ID_VARIABLE = "workbench_acceptance_run_id"
-EXPECTED_MATRIX = Path("modulix-validation-lit/inventories/acceptance/workbench-public.yml")
+EXPECTED_MATRIX = Path("modulix-validation/inventories/acceptance/workbench-public.yml")
 SAFE_RUN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{2,23}$")
 SAFE_TASK_LABEL = re.compile(r"[^A-Za-z0-9 ._:/()=+-]")
 SENSITIVE_ENV_PARTS = (

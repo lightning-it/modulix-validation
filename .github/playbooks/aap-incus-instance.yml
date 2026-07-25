@@ -65,7 +65,7 @@
               cpu: "{{ aap_ci_vm_cpu }}"
               memory: "{{ aap_ci_vm_memory }}"
             config:
-              user.lit.managed_by: modulix-validation-lit
+              user.lit.managed_by: modulix-validation
               user.lit.service: aap
               user.lit.matrix: "{{ aap_ci_matrix_name }}"
               user.lit.run_id: "{{ aap_ci_run_id }}"
