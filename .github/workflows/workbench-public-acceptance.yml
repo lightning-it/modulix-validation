@@ -41,7 +41,7 @@ jobs:
       - name: Checkout validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          path: modulix-validation-lit
+          path: modulix-validation
           persist-credentials: false
 
       - name: Checkout automation develop
@@ -82,7 +82,7 @@ jobs:
           python3 -m pip install \
             --require-hashes \
             --requirement \
-            modulix-validation-lit/.github/requirements/workbench-public-acceptance.lock
+            modulix-validation/.github/requirements/workbench-public-acceptance.lock
 
           installed_collections="${RUNNER_TEMP}/workbench-installed-collections"
           development_collections="${RUNNER_TEMP}/workbench-development-collections"
@@ -101,7 +101,7 @@ jobs:
       - name: Run harness unit tests
         run: >-
           env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover
-          -s modulix-validation-lit/tests
+          -s modulix-validation/tests
           -p 'test_*.py'
 
       - name: Materialize protected controller credentials
@@ -135,8 +135,8 @@ jobs:
         run: |
           set -euo pipefail
           evidence_dir="${RUNNER_TEMP}/workbench-public-evidence"
-          harness="modulix-validation-lit/.github/scripts/workbench-public-acceptance.py"
-          matrix="modulix-validation-lit/inventories/acceptance/workbench-public.yml"
+          harness="modulix-validation/.github/scripts/workbench-public-acceptance.py"
+          matrix="modulix-validation/inventories/acceptance/workbench-public.yml"
           install -d -m 0700 "${TMPDIR}" "${evidence_dir}"
           timeout --signal=INT --kill-after=5m 285m python3 "${harness}" \
             --workspace "${GITHUB_WORKSPACE}" \
@@ -156,8 +156,8 @@ jobs:
         run: |
           set -euo pipefail
           evidence_dir="${RUNNER_TEMP}/workbench-public-evidence"
-          harness="modulix-validation-lit/.github/scripts/workbench-public-acceptance.py"
-          matrix="modulix-validation-lit/inventories/acceptance/workbench-public.yml"
+          harness="modulix-validation/.github/scripts/workbench-public-acceptance.py"
+          matrix="modulix-validation/inventories/acceptance/workbench-public.yml"
           install -d -m 0700 "${TMPDIR}" "${evidence_dir}"
           timeout --signal=INT --kill-after=5m 55m python3 "${harness}" \
             --cleanup-only \

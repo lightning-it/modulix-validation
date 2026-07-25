@@ -44,7 +44,7 @@ jobs:
       - name: Checkout validation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          path: modulix-validation-lit
+          path: modulix-validation
           persist-credentials: false
 
       - name: Checkout automation
@@ -105,7 +105,7 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
@@ -138,7 +138,7 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
@@ -218,7 +218,7 @@ jobs:
           export ANSIBLE_COLLECTIONS_PATH="${collections_dir}"
 
           ansible-playbook \
-            -i modulix-validation-lit/inventories/nightly/inventory.yml \
+            -i modulix-validation/inventories/nightly/inventory.yml \
             modulix-automation/ansible/runbooks/40-platforms/incus/20-image-artifacts.yml
 
       - name: Preflight runner artifacts
@@ -237,7 +237,7 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
@@ -294,7 +294,7 @@ jobs:
       - name: Checkout validation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          path: modulix-validation-lit
+          path: modulix-validation
           persist-credentials: false
 
       - name: Checkout automation
@@ -360,4 +360,4 @@ jobs:
           AAP_CI_WORK_DIR: ${{ runner.temp }}/aap-incus-ci/${{ matrix.name }}
         run: |
           set -euo pipefail
-          modulix-validation-lit/.github/scripts/aap-incus-matrix-run.sh
+          modulix-validation/.github/scripts/aap-incus-matrix-run.sh

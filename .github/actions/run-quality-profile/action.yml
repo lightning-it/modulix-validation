@@ -835,9 +835,9 @@ runs:
                 # Use Python's hardened filter when available. Python 3.11
                 # remains supported after the explicit member validation above.
                 if sys.version_info >= (3, 12):
-                    stream.extractall(target, filter="data")
+                    stream.extractall(target, members=members, filter="data")
                 else:
-                    stream.extractall(target)
+                    stream.extractall(target, members=members)
         PY
 
     - name: Record actual matrix result
