@@ -533,6 +533,7 @@ wait_for_incus_guest_ready() {
   fi
 
   while [ "${attempt}" -le "${attempts}" ]; do
+    rc=1
     echo "Waiting for Incus guest readiness attempt ${attempt}/${attempts}."
     deadline=$((SECONDS + instance_wait_timeout))
 
@@ -602,8 +603,6 @@ wait_for_incus_guest_ready() {
         return 0
       fi
     fi
-
-    rc=1
 
     echo "Incus guest readiness attempt ${attempt}/${attempts} failed with rc=${rc}."
     collect_incus_diagnostics
