@@ -400,7 +400,7 @@ clear_aap_installer_jid() {
 
 collect_failure_diagnostics() {
   local diagnostics_script="${work_dir:-/tmp}/aap-ci-diagnostics.sh"
-  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-220}"
+  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-${AAP_CI_DIAGNOSTIC_LOG_LINES:-220}}"
   local log_lines_b64
   local install_user_b64
   local install_user_home_b64
