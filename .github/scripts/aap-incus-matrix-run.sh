@@ -140,9 +140,18 @@ incus_cli() {
 }
 
 instance_status() {
-  incus_cli list "${instance_name}" -c s --format csv 2>/dev/null |
-    head -n 1 |
-    tr -d '\r'
+  local current_status
+
+  if ! current_status="$(
+    incus_cli list "${instance_name}" -c s --format csv 2>/dev/null |
+      head -n 1 |
+      tr -d '\r'
+  )"; then
+    echo "WARN: unable to query Incus instance status; retrying." >&2
+    return 0
+  fi
+
+  printf '%s' "${current_status}"
 }
 
 instance_ip_address() {
