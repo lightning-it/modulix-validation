@@ -401,9 +401,9 @@ clear_aap_installer_jid() {
 collect_failure_diagnostics() {
   local diagnostics_script="${work_dir:-/tmp}/aap-ci-diagnostics.sh"
   local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-220}"
-  local log_lines_quoted
-  local install_user_quoted
-  local install_user_home_quoted
+  local log_lines_b64
+  local install_user_b64
+  local install_user_home_b64
 
   if [ "${AAP_CI_COLLECT_FAILURE_DIAGNOSTICS:-true}" != "true" ]; then
     return
@@ -480,9 +480,9 @@ find "${install_user_home}/aap" /opt/aap /var/log -maxdepth 5 -type f \
 EOS
 
   chmod 0600 "${diagnostics_script}" || true
-  printf -v log_lines_quoted '%q' "${log_lines}"
-  printf -v install_user_quoted '%q' "${install_user}"
-  printf -v install_user_home_quoted '%q' "${install_user_home}"
+  log_lines_b64="$(printf '%s' "${log_lines}" | base64 | tr -d '\n')"
+  install_user_b64="$(printf '%s' "${install_user}" | base64 | tr -d '\n')"
+  install_user_home_b64="$(printf '%s' "${install_user_home}" | base64 | tr -d '\n')"
   ansible \
     -i "${inventory_path}" \
     aaps \
@@ -493,7 +493,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=${log_lines_quoted} AAP_CI_INSTALL_USER=${install_user_quoted} AAP_CI_INSTALL_USER_HOME=${install_user_home_quoted} /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\$(printf '%s' '${log_lines_b64}' | base64 -d) AAP_CI_INSTALL_USER=\$(printf '%s' '${install_user_b64}' | base64 -d) AAP_CI_INSTALL_USER_HOME=\$(printf '%s' '${install_user_home_b64}' | base64 -d) /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
