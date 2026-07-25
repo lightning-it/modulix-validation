@@ -423,6 +423,11 @@ collect_failure_diagnostics() {
     return
   fi
 
+  if ! command -v base64 >/dev/null 2>&1; then
+    echo "Skipping AAP failure diagnostics: base64 is unavailable." >&2
+    return
+  fi
+
   echo "::group::AAP failure diagnostics"
   cat > "${diagnostics_script}" <<'EOS'
 #!/usr/bin/env bash
