@@ -36,15 +36,27 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Keep every component of the GitHub Actions toolchain on one version",
+      "description": "Group GitHub Actions dependencies except workflow Python runtimes",
       "matchManagers": ["github-actions"],
+      "matchDepNames": ["!python"],
       "groupName": "github-actions"
     },
     {
-      "description": "Track the collection quality profile Python runtime",
+      "description": "Keep collection validation on its tested Python runtime",
       "matchManagers": ["github-actions"],
       "matchFileNames": [".github/workflows/collection-quality-profile.yml"],
-      "matchDepNames": ["python"]
+      "matchDepNames": ["python"],
+      "allowedVersions": "3.11"
+    },
+    {
+      "description": "Keep acceptance and repository checks aligned with their lockfiles",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [
+        ".github/workflows/repository-quality.yml",
+        ".github/workflows/workbench-public-acceptance.yml"
+      ],
+      "matchDepNames": ["python"],
+      "allowedVersions": "3.13"
     }
   ]
 }
