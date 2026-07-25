@@ -140,9 +140,18 @@ incus_cli() {
 }
 
 instance_status() {
-  incus_cli list "${instance_name}" -c s --format csv 2>/dev/null |
-    head -n 1 |
-    tr -d '\r'
+  local current_status
+
+  if ! current_status="$(
+    incus_cli list "${instance_name}" -c s --format csv 2>/dev/null |
+      head -n 1 |
+      tr -d '\r'
+  )"; then
+    echo "WARN: unable to query Incus instance status; retrying." >&2
+    return 0
+  fi
+
+  printf '%s' "${current_status}"
 }
 
 instance_ip_address() {
@@ -512,6 +521,7 @@ wait_for_incus_guest_ready() {
   local attempt=1
   local deadline
   local ip_address=""
+  local remaining
   local rc=1
   local ssh_options=(
     -o BatchMode=yes
@@ -532,6 +542,7 @@ wait_for_incus_guest_ready() {
   fi
 
   while [ "${attempt}" -le "${attempts}" ]; do
+    rc=1
     echo "Waiting for Incus guest readiness attempt ${attempt}/${attempts}."
     deadline=$((SECONDS + instance_wait_timeout))
 
@@ -560,15 +571,50 @@ wait_for_incus_guest_ready() {
 
     if [ -n "${ip_address}" ] &&
       ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" true >/dev/null 2>&1; then
-      if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
-        'if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait; fi'; then
+      remaining=$((deadline - SECONDS))
+      if [ "${remaining}" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
+        if timeout --signal=TERM "${remaining}s" \
+          ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          'if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait; fi'; then
+          rc=0
+        else
+          rc=$?
+        fi
+      elif [ "${remaining}" -gt 0 ]; then
+        # shellcheck disable=SC2029 # Pass the validated local deadline to the guest.
+        if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          "if command -v cloud-init >/dev/null 2>&1; then
+             if command -v timeout >/dev/null 2>&1; then
+               sudo -n timeout --signal=TERM ${remaining}s cloud-init status --wait
+             else
+               cloud_init_deadline=\$((\$(date +%s) + ${remaining}))
+               while [ \"\$(date +%s)\" -lt \"\${cloud_init_deadline}\" ]; do
+                 if ! cloud_init_status=\"\$(sudo -n cloud-init status 2>&1)\"; then
+                   printf '%s\n' \"\${cloud_init_status}\" >&2
+                   exit 1
+                 fi
+                 case \"\${cloud_init_status}\" in
+                   *'status: done'*) exit 0 ;;
+                   *'status: error'*|*'status: degraded'*) exit 1 ;;
+                 esac
+                 sleep 2
+               done
+               exit 124
+             fi
+           fi"; then
+          rc=0
+        else
+          rc=$?
+        fi
+      else
+        rc=124
+      fi
+      if [ "${rc}" -eq 0 ]; then
         write_guest_inventory "${ip_address}"
         echo "Incus guest is ready: ${instance_name} (${ip_address})."
         return 0
       fi
     fi
-
-    rc=1
 
     echo "Incus guest readiness attempt ${attempt}/${attempts} failed with rc=${rc}."
     collect_incus_diagnostics
@@ -725,6 +771,12 @@ inventory_path="${work_dir}/${instance_name}.yml"
 vars_path="${work_dir}/${instance_name}-vars.yml"
 ansible_config_path="${work_dir}/ansible-ci.cfg"
 admin_password="${AAP_CI_ADMIN_PASSWORD:-$(generate_password)}"
+
+if ! [[ "${instance_wait_timeout}" =~ ^[0-9]+$ ]] ||
+  [ "${instance_wait_timeout}" -lt 1 ]; then
+  echo "ERROR: AAP_CI_INSTANCE_WAIT_TIMEOUT must be a positive integer." >&2
+  exit 1
+fi
 
 echo "Starting AAP Incus matrix entry ${MATRIX_NAME}: AAP ${AAP_VERSION} on RHEL ${RHEL_MAJOR}."
 
