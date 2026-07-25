@@ -504,7 +504,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\$(printf '%s' '${log_lines_b64}' | base64 -d) AAP_CI_INSTALL_USER=\$(printf '%s' '${install_user_b64}' | base64 -d) AAP_CI_INSTALL_USER_HOME=\$(printf '%s' '${install_user_home_b64}' | base64 -d) /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${log_lines_b64}') AAP_CI_INSTALL_USER=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_b64}') AAP_CI_INSTALL_USER_HOME=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_home_b64}') /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
