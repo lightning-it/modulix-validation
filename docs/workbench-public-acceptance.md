@@ -2,8 +2,10 @@
 
 ## Purpose
 
-The private `Workbench Public Acceptance` workflow verifies the application
+The protected `Workbench Public Acceptance` workflow verifies the application
 state of `wbn01.prd.edge.pub.l-it.io` from a GitHub-hosted Ubuntu controller.
+Its definition is public; the GitHub Environment, secrets, and dispatch
+controls form the protected execution boundary.
 The physical Workbench is always the managed target and is never used as the
 GitHub Actions runner.
 
