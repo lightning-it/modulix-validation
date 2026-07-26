@@ -213,8 +213,7 @@ jobs:
               <<<"${live_pr}" >/dev/null; then
             trusted=true
             trusted_kind=repository-quality
-          elif [ "${PR_AUTHOR}" = "lightning-it-release-automation[bot]" ] \
-            && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
+          elif [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [ "${PR_HEAD}" = "chore/sync-main-to-develop" ] \
             && [ "${PR_BASE}" = "develop" ] \
             && [ "${PR_TITLE}" = "chore: sync main back to develop" ]; then
