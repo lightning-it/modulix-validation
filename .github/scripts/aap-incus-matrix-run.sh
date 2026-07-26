@@ -845,6 +845,7 @@ fi
 if ! [[ "${install_user_home}" =~ ^/[A-Za-z0-9._/-]+$ ]] \
   || [[ "${install_user_home}" =~ (^|/)\.\.(/|$) ]] \
   || [[ "${install_user_home}" =~ (^|/)\.(/|$) ]] \
+  || [[ "${install_user_home}" == */ ]] \
   || [[ "${install_user_home}" == *"//"* ]]; then
   echo "ERROR: AAP_CI_INSTALL_USER_HOME must be a normalized absolute path using safe characters: ${install_user_home}" >&2
   exit 1
