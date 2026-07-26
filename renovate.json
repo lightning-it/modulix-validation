@@ -7,6 +7,9 @@
     ":semanticCommitType(chore)",
     ":semanticCommitScope(deps)"
   ],
+  "renovate-config": {
+    "enabled": false
+  },
   "labels": ["dependencies", "renovate"],
   "baseBranchPatterns": ["develop"],
   "timezone": "UTC",
@@ -36,9 +39,8 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Group GitHub Actions dependencies except workflow Python runtimes",
+      "description": "Keep every component of the GitHub Actions toolchain on one version",
       "matchManagers": ["github-actions"],
-      "matchDepNames": ["!python"],
       "groupName": "github-actions"
     },
     {
@@ -46,7 +48,8 @@
       "matchManagers": ["github-actions"],
       "matchFileNames": [".github/workflows/collection-quality-profile.yml"],
       "matchDepNames": ["python"],
-      "allowedVersions": "3.11"
+      "allowedVersions": "/^3\\.11(?:\\.\\d+)?$/",
+      "groupName": "python 3.11 lockfile runtimes"
     },
     {
       "description": "Keep acceptance and repository checks aligned with their lockfiles",
@@ -56,7 +59,8 @@
         ".github/workflows/workbench-public-acceptance.yml"
       ],
       "matchDepNames": ["python"],
-      "allowedVersions": "3.13"
+      "allowedVersions": "/^3\\.13(?:\\.\\d+)?$/",
+      "groupName": "python 3.13 lockfile runtimes"
     }
   ]
 }
