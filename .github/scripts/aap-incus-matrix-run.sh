@@ -504,7 +504,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${log_lines_b64}') AAP_CI_INSTALL_USER=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_b64}') AAP_CI_INSTALL_USER_HOME=\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_home_b64}') /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${log_lines_b64}')\" AAP_CI_INSTALL_USER=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_b64}')\" AAP_CI_INSTALL_USER_HOME=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_home_b64}')\" /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
@@ -828,8 +828,10 @@ if ! [[ "${install_user}" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
   exit 1
 fi
 
-if [[ "${install_user_home}" != /* ]]; then
-  echo "ERROR: AAP_CI_INSTALL_USER_HOME must be an absolute path: ${install_user_home}" >&2
+if ! [[ "${install_user_home}" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+  || [[ "${install_user_home}" =~ (^|/)\.\.(/|$) ]] \
+  || [[ "${install_user_home}" == *"//"* ]]; then
+  echo "ERROR: AAP_CI_INSTALL_USER_HOME must be a normalized absolute path using safe characters: ${install_user_home}" >&2
   exit 1
 fi
 
