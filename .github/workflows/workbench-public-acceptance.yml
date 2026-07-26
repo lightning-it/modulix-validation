@@ -1,0 +1,190 @@
+# yamllint disable rule:truthy
+---
+name: Workbench Public Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      acceptance_profiles:
+        description: Acceptance profiles to run after the complete deployment
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - tiny
+          - heavy
+          - application
+      target_confirmation:
+        description: Type the exact Workbench FQDN to authorize this run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workbench-public-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: workbench / public acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      RUNNER_ENVIRONMENT: github-hosted
+    environment:
+      name: workbench-public-acceptance
+
+    steps:
+      - name: Checkout validation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          path: modulix-validation
+          persist-credentials: false
+
+      - name: Checkout automation develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/modulix-automation
+          ref: develop
+          path: modulix-automation
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout public inventory develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/ansible-inventory-lit
+          ref: develop
+          path: ansible-inventory-lit
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout Ubuntu collection develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/ansible-collection-ubuntu
+          ref: develop
+          path: ansible-collection-ubuntu
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned controller dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install \
+            --require-hashes \
+            --requirement \
+            modulix-validation/.github/requirements/workbench-public-acceptance.lock
+
+          installed_collections="${RUNNER_TEMP}/workbench-installed-collections"
+          development_collections="${RUNNER_TEMP}/workbench-development-collections"
+          requirements_file="modulix-automation/ansible/collections/requirements.yml"
+          development_lit="${development_collections}/ansible_collections/lit"
+          ansible-galaxy collection install \
+            --requirements-file "${requirements_file}" \
+            --collections-path "${installed_collections}"
+          install -d -m 0700 "${development_lit}"
+          ln -s "${GITHUB_WORKSPACE}/ansible-collection-ubuntu" \
+            "${development_lit}/ubuntu"
+          printf 'WORKBENCH_COLLECTIONS_PATH=%s:%s\n' \
+            "${development_collections}" \
+            "${installed_collections}" >> "${GITHUB_ENV}"
+
+      - name: Run harness unit tests
+        run: >-
+          env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover
+          -s modulix-validation/tests
+          -p 'test_*.py'
+
+      - name: Materialize protected controller credentials
+        id: credentials
+        env:
+          WORKBENCH_DEPLOY_SSH_PRIVATE_KEY: >-
+            ${{ secrets.WORKBENCH_DEPLOY_SSH_PRIVATE_KEY }}
+          WORKBENCH_SSH_KNOWN_HOSTS: >-
+            ${{ secrets.WORKBENCH_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          private_key="${HOME}/.ssh/id_ed25519_lit_codex_deploy"
+          known_hosts="${GITHUB_WORKSPACE}/.tmp/hetzner-baremetal-known-hosts"
+          test -n "${WORKBENCH_DEPLOY_SSH_PRIVATE_KEY}"
+          test -n "${WORKBENCH_SSH_KNOWN_HOSTS}"
+          install -d -m 0700 "${HOME}/.ssh" "${GITHUB_WORKSPACE}/.tmp"
+          printf '%s\n' "${WORKBENCH_DEPLOY_SSH_PRIVATE_KEY}" > "${private_key}"
+          printf '%s\n' "${WORKBENCH_SSH_KNOWN_HOSTS}" > "${known_hosts}"
+          chmod 0600 "${private_key}" "${known_hosts}"
+          ssh-keygen -y -f "${private_key}" >/dev/null
+          ssh-keygen -F '[195.201.173.85]:1905' \
+            -f "${known_hosts}" >/dev/null
+
+      - name: Run bounded Workbench acceptance
+        id: acceptance
+        env:
+          ACCEPTANCE_PROFILES: ${{ inputs.acceptance_profiles }}
+          TARGET_CONFIRMATION: ${{ inputs.target_confirmation }}
+          TMPDIR: ${{ runner.temp }}/workbench-public-state
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/workbench-public-evidence"
+          harness="modulix-validation/.github/scripts/workbench-public-acceptance.py"
+          matrix="modulix-validation/inventories/acceptance/workbench-public.yml"
+          install -d -m 0700 "${TMPDIR}" "${evidence_dir}"
+          timeout --signal=INT --kill-after=5m 285m python3 "${harness}" \
+            --workspace "${GITHUB_WORKSPACE}" \
+            --matrix "${GITHUB_WORKSPACE}/${matrix}" \
+            --collections-path "${WORKBENCH_COLLECTIONS_PATH}" \
+            --profiles "${ACCEPTANCE_PROFILES}" \
+            --run-id "gh-${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}" \
+            --confirmation "${TARGET_CONFIRMATION}" \
+            --evidence "${evidence_dir}/full.json"
+
+      - name: Run ownership-safe final cleanup
+        if: ${{ always() && steps.credentials.outcome == 'success' }}
+        env:
+          ACCEPTANCE_PROFILES: ${{ inputs.acceptance_profiles }}
+          TARGET_CONFIRMATION: ${{ inputs.target_confirmation }}
+          TMPDIR: ${{ runner.temp }}/workbench-public-cleanup-state
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/workbench-public-evidence"
+          harness="modulix-validation/.github/scripts/workbench-public-acceptance.py"
+          matrix="modulix-validation/inventories/acceptance/workbench-public.yml"
+          install -d -m 0700 "${TMPDIR}" "${evidence_dir}"
+          timeout --signal=INT --kill-after=5m 55m python3 "${harness}" \
+            --cleanup-only \
+            --workspace "${GITHUB_WORKSPACE}" \
+            --matrix "${GITHUB_WORKSPACE}/${matrix}" \
+            --collections-path "${WORKBENCH_COLLECTIONS_PATH}" \
+            --profiles "${ACCEPTANCE_PROFILES}" \
+            --run-id "gh-${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}" \
+            --confirmation "${TARGET_CONFIRMATION}" \
+            --evidence "${evidence_dir}/cleanup.json"
+
+      - name: Remove controller credentials and transient state
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          rm -f -- \
+            "${HOME}/.ssh/id_ed25519_lit_codex_deploy" \
+            "${GITHUB_WORKSPACE}/.tmp/hetzner-baremetal-known-hosts"
+          rm -rf -- \
+            "${RUNNER_TEMP:?}/workbench-public-state" \
+            "${RUNNER_TEMP:?}/workbench-public-cleanup-state"
+
+      - name: Upload sanitized acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: workbench-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/workbench-public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30

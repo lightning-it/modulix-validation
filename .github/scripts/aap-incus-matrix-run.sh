@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+validation_dir="$(cd "${script_dir}/../.." && pwd)"
+incus_lifecycle_playbook="${validation_dir}/.github/playbooks/aap-incus-instance.yml"
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "ERROR: required command not found: $1" >&2
@@ -125,6 +129,80 @@ canonical_path() {
   readlink -m "$1"
 }
 
+incus_cli() {
+  local argv=(incus --force-local)
+
+  if [ -n "${incus_project:-}" ]; then
+    argv+=(--project "${incus_project}")
+  fi
+
+  "${argv[@]}" "$@"
+}
+
+instance_status() {
+  local current_status
+
+  if ! current_status="$(
+    incus_cli list "${instance_name}" -c s --format csv 2>/dev/null |
+      head -n 1 |
+      tr -d '\r'
+  )"; then
+    echo "WARN: unable to query Incus instance status; retrying." >&2
+    return 0
+  fi
+
+  printf '%s' "${current_status}"
+}
+
+instance_ip_address() {
+  incus_cli list "${instance_name}" --format json | python3 -c '
+import json
+import sys
+
+instances = json.load(sys.stdin)
+addresses = []
+for instance in instances:
+    for interface in instance.get("state", {}).get("network", {}).values():
+        for address in interface.get("addresses", []):
+            value = address.get("address", "")
+            if address.get("family") == "inet" and value != "127.0.0.1":
+                addresses.append(value)
+if addresses:
+    print(sorted(addresses)[0])
+    raise SystemExit(0)
+raise SystemExit(1)
+' 2>/dev/null || true
+}
+
+write_guest_inventory() {
+  local ip_address="$1"
+
+  cat > "${inventory_path}" <<EOF
+---
+all:
+  children:
+    aaps:
+      hosts:
+        ${guest_hostname}:
+          ansible_host: "${ip_address}"
+          ansible_user: ${INCUS_SSH_USER}
+          ansible_become: true
+          ansible_python_interpreter: /usr/bin/python3
+          ansible_ssh_private_key_file: "${INCUS_SSH_PRIVATE_KEY_FILE}"
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+EOF
+  chmod 0600 "${inventory_path}"
+}
+
+run_incus_lifecycle() {
+  local action="$1"
+
+  AAP_CI_INCUS_ACTION="${action}" ansible-playbook \
+    -i localhost, \
+    -c local \
+    "${incus_lifecycle_playbook}"
+}
+
 preflight_incus_capacity() {
   local prefix="${AAP_CI_INSTANCE_PREFIX:-aap-ci-}"
   local stale_instances
@@ -132,7 +210,7 @@ preflight_incus_capacity() {
   local required_mib
   local headroom_mib="${AAP_CI_HOST_MEMORY_HEADROOM_MIB:-4096}"
 
-  stale_instances="$(incus list --format csv -c n | awk -v prefix="${prefix}" 'index($0, prefix) == 1')"
+  stale_instances="$(incus_cli list --format csv -c n | awk -v prefix="${prefix}" 'index($0, prefix) == 1')"
   if [ -n "${stale_instances}" ]; then
     echo "ERROR: stale AAP CI Incus instances exist and must be cleaned before a new run:" >&2
     printf '%s\n' "${stale_instances}" >&2
@@ -277,7 +355,7 @@ poll_aap_installer() {
         -i "${inventory_path}" \
         aaps \
         -b \
-        --become-user aap \
+        --become-user "${install_user}" \
         -m ansible.builtin.async_status \
         -a "jid=${jid}" \
         -o 2>&1
@@ -322,7 +400,16 @@ clear_aap_installer_jid() {
 
 collect_failure_diagnostics() {
   local diagnostics_script="${work_dir:-/tmp}/aap-ci-diagnostics.sh"
-  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-220}"
+  local log_lines="${AAP_CI_DIAGNOSTICS_LOG_LINES:-${AAP_CI_DIAGNOSTIC_LOG_LINES:-220}}"
+  local log_lines_b64
+  local install_user_b64
+  local install_user_home_b64
+
+  if ! [[ "${log_lines}" =~ ^[0-9]+$ ]] \
+    || [ "${log_lines}" -lt 1 ] \
+    || [ "${log_lines}" -gt 2000 ]; then
+    log_lines=220
+  fi
 
   if [ "${AAP_CI_COLLECT_FAILURE_DIAGNOSTICS:-true}" != "true" ]; then
     return
@@ -336,10 +423,29 @@ collect_failure_diagnostics() {
     return
   fi
 
+  if ! command -v base64 >/dev/null 2>&1; then
+    echo "Skipping AAP failure diagnostics: base64 is unavailable." >&2
+    return
+  fi
+
   echo "::group::AAP failure diagnostics"
   cat > "${diagnostics_script}" <<'EOS'
 #!/usr/bin/env bash
 set -o pipefail
+
+decode_b64() {
+  python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' "$1"
+}
+
+export AAP_CI_DIAGNOSTIC_LOG_LINES="$(
+  decode_b64 "${AAP_CI_DIAGNOSTIC_LOG_LINES_B64:?}"
+)"
+export AAP_CI_INSTALL_USER="$(
+  decode_b64 "${AAP_CI_INSTALL_USER_B64:?}"
+)"
+export AAP_CI_INSTALL_USER_HOME="$(
+  decode_b64 "${AAP_CI_INSTALL_USER_HOME_B64:?}"
+)"
 
 redact() {
   sed -E 's/((password|passwd|token|secret|key)[[:alnum:]_ -]*[=:][[:space:]]*)[^[:space:]"'"'"']+/\1[REDACTED]/Ig'
@@ -361,9 +467,12 @@ pgrep -af 'ansible-playbook|podman container run|awx-manage|pulpcore|aap-eda|aap
   | tail -n 80 \
   || true
 
+install_user="${AAP_CI_INSTALL_USER:-svc_aap}"
+install_user_home="${AAP_CI_INSTALL_USER_HOME:-/appl/home/${install_user}}"
+
 echo "== podman containers =="
-if command -v podman >/dev/null 2>&1 && id aap >/dev/null 2>&1; then
-  sudo -u aap podman ps --format json \
+if command -v podman >/dev/null 2>&1 && id "${install_user}" >/dev/null 2>&1; then
+  sudo -u "${install_user}" podman ps --format json \
     | python3 -c 'import json,sys
 data=json.load(sys.stdin)
 for item in sorted(data, key=lambda c: (c.get("Names") or [c.get("Name", "")])[0]):
@@ -373,16 +482,16 @@ for item in sorted(data, key=lambda c: (c.get("Names") or [c.get("Name", "")])[0
 fi
 
 echo "== failed user services =="
-if id aap >/dev/null 2>&1; then
-  uid="$(id -u aap)"
-  sudo -u aap XDG_RUNTIME_DIR="/run/user/${uid}" \
+if id "${install_user}" >/dev/null 2>&1; then
+  uid="$(id -u "${install_user}")"
+  sudo -u "${install_user}" XDG_RUNTIME_DIR="/run/user/${uid}" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
     systemctl --user --failed --no-pager \
     || true
 fi
 
 echo "== installer logs =="
-find /home/aap/aap /opt/aap /var/log -maxdepth 5 -type f \
+find "${install_user_home}/aap" /opt/aap /var/log -maxdepth 5 -type f \
   \( -name 'aap_install.log' -o -name '*.log' -o -name '*.out' -o -name '*.err' \) \
   -mmin -240 2>/dev/null \
   | sort \
@@ -396,6 +505,9 @@ find /home/aap/aap /opt/aap /var/log -maxdepth 5 -type f \
 EOS
 
   chmod 0600 "${diagnostics_script}" || true
+  log_lines_b64="$(printf '%s' "${log_lines}" | base64 | tr -d '\n')"
+  install_user_b64="$(printf '%s' "${install_user}" | base64 | tr -d '\n')"
+  install_user_home_b64="$(printf '%s' "${install_user_home}" | base64 | tr -d '\n')"
   ansible \
     -i "${inventory_path}" \
     aaps \
@@ -406,7 +518,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES='${log_lines}' /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES_B64='${log_lines_b64}' AAP_CI_INSTALL_USER_B64='${install_user_b64}' AAP_CI_INSTALL_USER_HOME_B64='${install_user_home_b64}' /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
@@ -422,15 +534,15 @@ collect_incus_diagnostics() {
     return
   fi
 
-  if ! incus info "${instance_name}" >/dev/null 2>&1; then
+  if ! incus_cli info "${instance_name}" >/dev/null 2>&1; then
     return
   fi
 
   echo "::group::Incus failure diagnostics"
-  incus list "${instance_name}" --format yaml || true
-  incus info "${instance_name}" --show-log || true
-  incus config show "${instance_name}" --expanded || true
-  incus console "${instance_name}" --show-log || true
+  incus_cli list "${instance_name}" --format yaml || true
+  incus_cli info "${instance_name}" --show-log || true
+  incus_cli config show "${instance_name}" || true
+  incus_cli console "${instance_name}" --show-log || true
   echo "::endgroup::"
 }
 
@@ -438,7 +550,17 @@ wait_for_incus_guest_ready() {
   local attempts="${AAP_CI_INSTANCE_BOOT_ATTEMPTS:-2}"
   local retry_delay="${AAP_CI_INSTANCE_BOOT_RETRY_DELAY_SECONDS:-30}"
   local attempt=1
+  local deadline
+  local ip_address=""
+  local remaining
   local rc=1
+  local ssh_options=(
+    -o BatchMode=yes
+    -o StrictHostKeyChecking=no
+    -o UserKnownHostsFile=/dev/null
+    -o ConnectTimeout=5
+    -i "${INCUS_SSH_PRIVATE_KEY_FILE}"
+  )
 
   if ! [[ "${attempts}" =~ ^[0-9]+$ ]] || [ "${attempts}" -lt 1 ]; then
     echo "ERROR: AAP_CI_INSTANCE_BOOT_ATTEMPTS must be a positive integer." >&2
@@ -451,18 +573,86 @@ wait_for_incus_guest_ready() {
   fi
 
   while [ "${attempt}" -le "${attempts}" ]; do
+    rc=1
     echo "Waiting for Incus guest readiness attempt ${attempt}/${attempts}."
-    if deploy/incus/wait-for-instance.sh "${instance_name}" --timeout "${instance_wait_timeout}"; then
-      return 0
+    deadline=$((SECONDS + instance_wait_timeout))
+
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+      if [ "$(instance_status)" = "RUNNING" ]; then
+        break
+      fi
+      sleep 2
+    done
+
+    ip_address=""
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+      ip_address="$(instance_ip_address)"
+      if [ -n "${ip_address}" ]; then
+        break
+      fi
+      sleep 2
+    done
+
+    while [ "${SECONDS}" -lt "${deadline}" ] && [ -n "${ip_address}" ]; do
+      if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" true >/dev/null 2>&1; then
+        break
+      fi
+      sleep 5
+    done
+
+    if [ -n "${ip_address}" ] &&
+      ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" true >/dev/null 2>&1; then
+      remaining=$((deadline - SECONDS))
+      if [ "${remaining}" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
+        if timeout --signal=TERM "${remaining}s" \
+          ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          'if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait; fi'; then
+          rc=0
+        else
+          rc=$?
+        fi
+      elif [ "${remaining}" -gt 0 ]; then
+        # shellcheck disable=SC2029 # Pass the validated local deadline to the guest.
+        if ssh "${ssh_options[@]}" "${INCUS_SSH_USER}@${ip_address}" \
+          "if command -v cloud-init >/dev/null 2>&1; then
+             if command -v timeout >/dev/null 2>&1; then
+               sudo -n timeout --signal=TERM ${remaining}s cloud-init status --wait
+             else
+               cloud_init_deadline=\$((\$(date +%s) + ${remaining}))
+               while [ \"\$(date +%s)\" -lt \"\${cloud_init_deadline}\" ]; do
+                 if ! cloud_init_status=\"\$(sudo -n cloud-init status 2>&1)\"; then
+                   printf '%s\n' \"\${cloud_init_status}\" >&2
+                   exit 1
+                 fi
+                 case \"\${cloud_init_status}\" in
+                   *'status: done'*) exit 0 ;;
+                   *'status: error'*|*'status: degraded'*) exit 1 ;;
+                 esac
+                 sleep 2
+               done
+               exit 124
+             fi
+           fi"; then
+          rc=0
+        else
+          rc=$?
+        fi
+      else
+        rc=124
+      fi
+      if [ "${rc}" -eq 0 ]; then
+        write_guest_inventory "${ip_address}"
+        echo "Incus guest is ready: ${instance_name} (${ip_address})."
+        return 0
+      fi
     fi
-    rc=$?
 
     echo "Incus guest readiness attempt ${attempt}/${attempts} failed with rc=${rc}."
     collect_incus_diagnostics
 
     if [ "${attempt}" -lt "${attempts}" ]; then
       echo "Force-restarting Incus instance ${instance_name} before the next readiness attempt."
-      incus restart -f "${instance_name}" || true
+      incus_cli restart -f "${instance_name}" || true
       sleep "${retry_delay}" || true
     fi
 
@@ -472,8 +662,25 @@ wait_for_incus_guest_ready() {
   return "${rc}"
 }
 
+best_effort_rhsm_cleanup() {
+  if ! incus_cli info "${instance_name}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  incus_cli exec "${instance_name}" -- /bin/sh -eu -c '
+if ! command -v subscription-manager >/dev/null 2>&1; then
+  exit 0
+fi
+if subscription-manager identity >/dev/null 2>&1; then
+  subscription-manager unregister || true
+fi
+subscription-manager clean || true
+' || true
+}
+
 cleanup() {
   local rc="${1:-$?}"
+  local destroy_rc=0
   local rhel_teardown_rc=1
   local rhel_teardown_complete=false
 
@@ -514,21 +721,29 @@ cleanup() {
 
     if [ "${destroy_instance:-true}" = "true" ]; then
       echo "Destroying Incus instance ${instance_name}."
-      if [ "${rhel_teardown_complete}" = "true" ]; then
-        (
-          cd "${supplementary_dir}" &&
-            INCUS_RHSM_UNREGISTER_ON_DESTROY=false \
-              deploy/incus/destroy.sh "${instance_name}"
-        )
+      if [ "${rhel_teardown_complete}" != "true" ]; then
+        echo "Running best-effort RHSM cleanup through Incus before destroy."
+        best_effort_rhsm_cleanup
+      fi
+
+      if run_incus_lifecycle destroy; then
+        destroy_rc=0
       else
-        (
-          cd "${supplementary_dir}" &&
-            INCUS_RHSM_UNREGISTER_STRICT=false \
-              deploy/incus/destroy.sh "${instance_name}"
-        )
+        destroy_rc=$?
+      fi
+      if [ "${destroy_rc}" -ne 0 ]; then
+        echo "ERROR: failed to destroy Incus instance ${instance_name}." >&2
+      elif [ -n "${work_dir:-}" ] && [ -d "${work_dir}" ]; then
+        rm -rf "${work_dir}"
       fi
     fi
   fi
+
+  if [ "${rc}" -eq 0 ] && [ "${destroy_rc}" -ne 0 ]; then
+    return "${destroy_rc}"
+  fi
+
+  return "${rc}"
 }
 
 require_env MATRIX_NAME
@@ -540,6 +755,7 @@ require_env RHSM_ORG_ID
 require_env RHSM_ACTIVATION_KEY
 require_env AUTOMATION_DIR
 require_env SUPPLEMENTARY_DIR
+require_env UBUNTU_DIR
 
 : "${MATRIX_NAME:?}"
 : "${AAP_VERSION:?}"
@@ -550,31 +766,48 @@ require_env SUPPLEMENTARY_DIR
 : "${RHSM_ACTIVATION_KEY:?}"
 : "${AUTOMATION_DIR:?}"
 : "${SUPPLEMENTARY_DIR:?}"
+: "${UBUNTU_DIR:?}"
 
 require_cmd incus
-require_cmd mkisofs
 require_cmd python3
 require_cmd ssh
 require_cmd ssh-keygen
 
 automation_dir="$(canonical_path "${AUTOMATION_DIR}")"
 supplementary_dir="$(canonical_path "${SUPPLEMENTARY_DIR}")"
+ubuntu_dir="$(canonical_path "${UBUNTU_DIR}")"
 automation_ansible_dir="${automation_dir}/ansible"
 work_dir="$(canonical_path "${AAP_CI_WORK_DIR:-${RUNNER_TEMP:-/tmp}/aap-incus-ci}")"
 destroy_instance="$(bool_value "${AAP_CI_DESTROY_INSTANCE:-true}")"
 install_requirements="$(bool_value "${AAP_CI_INSTALL_REQUIREMENTS:-true}")"
 hub_seed_collections="$(bool_value "${AAP_CI_HUB_SEED_COLLECTIONS:-false}")"
 instance_wait_timeout="${AAP_CI_INSTANCE_WAIT_TIMEOUT:-600}"
+incus_project="${AAP_CI_INCUS_PROJECT:-default}"
+install_user="${AAP_CI_INSTALL_USER:-svc_aap}"
+install_user_home="${AAP_CI_INSTALL_USER_HOME:-/appl/home/${install_user}}"
 run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
 run_id="${GITHUB_RUN_ID:-local}"
 instance_name="${AAP_CI_INSTANCE_NAME:-aap-ci-${MATRIX_NAME}-${run_id}-${run_attempt}}"
 short_run_id="$(dns_label_value "${run_id}")"
 short_run_id="${short_run_id: -6}"
 guest_hostname="${AAP_CI_GUEST_HOSTNAME:-a${AAP_VERSION//./}r${RHEL_MAJOR}-${short_run_id}-${run_attempt}}"
+guest_fqdn="${AAP_CI_GUEST_FQDN:-${guest_hostname}.${AAP_CI_FQDN_SUFFIX:-incus.local}}"
+expires_at="${AAP_CI_EXPIRES_AT:-$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+
+print((datetime.now(timezone.utc) + timedelta(hours=8)).isoformat().replace('+00:00', 'Z'))
+PY
+)}"
 inventory_path="${work_dir}/${instance_name}.yml"
 vars_path="${work_dir}/${instance_name}-vars.yml"
 ansible_config_path="${work_dir}/ansible-ci.cfg"
 admin_password="${AAP_CI_ADMIN_PASSWORD:-$(generate_password)}"
+
+if ! [[ "${instance_wait_timeout}" =~ ^[0-9]+$ ]] ||
+  [ "${instance_wait_timeout}" -lt 1 ]; then
+  echo "ERROR: AAP_CI_INSTANCE_WAIT_TIMEOUT must be a positive integer." >&2
+  exit 1
+fi
 
 echo "Starting AAP Incus matrix entry ${MATRIX_NAME}: AAP ${AAP_VERSION} on RHEL ${RHEL_MAJOR}."
 
@@ -587,9 +820,9 @@ case "${RHEL_MAJOR}" in
 esac
 
 case "${AAP_VERSION}" in
-  2.6|2.7) ;;
+  2.7) ;;
   *)
-    echo "ERROR: unsupported AAP_VERSION=${AAP_VERSION}; expected 2.6 or 2.7." >&2
+    echo "ERROR: unsupported AAP_VERSION=${AAP_VERSION}; current lit.supplementary.aap_deploy supports 2.7." >&2
     exit 1
     ;;
 esac
@@ -604,6 +837,20 @@ if [ "${#guest_hostname}" -gt 22 ]; then
   exit 1
 fi
 
+if ! [[ "${install_user}" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "ERROR: AAP_CI_INSTALL_USER is not a valid Linux account name: ${install_user}" >&2
+  exit 1
+fi
+
+if ! [[ "${install_user_home}" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+  || [[ "${install_user_home}" =~ (^|/)\.\.(/|$) ]] \
+  || [[ "${install_user_home}" =~ (^|/)\.(/|$) ]] \
+  || [[ "${install_user_home}" == */ ]] \
+  || [[ "${install_user_home}" == *"//"* ]]; then
+  echo "ERROR: AAP_CI_INSTALL_USER_HOME must be a normalized absolute path using safe characters: ${install_user_home}" >&2
+  exit 1
+fi
+
 if [ ! -d "${automation_ansible_dir}" ]; then
   echo "ERROR: automation ansible checkout not found: ${automation_ansible_dir}" >&2
   exit 1
@@ -614,16 +861,31 @@ if [ ! -d "${supplementary_dir}" ]; then
   exit 1
 fi
 
+if [ ! -d "${ubuntu_dir}" ]; then
+  echo "ERROR: Ubuntu collection checkout not found: ${ubuntu_dir}" >&2
+  exit 1
+fi
+
+if [ ! -f "${incus_lifecycle_playbook}" ]; then
+  echo "ERROR: AAP Incus lifecycle playbook not found: ${incus_lifecycle_playbook}" >&2
+  exit 1
+fi
+
 ensure_ansible_tools
 require_cmd ansible-galaxy
 require_cmd ansible-playbook
 
-if ! incus info >/dev/null 2>&1; then
+if ! incus_cli info >/dev/null 2>&1; then
   echo "ERROR: incus client cannot reach an Incus daemon or remote." >&2
   exit 1
 fi
 
-if ! incus image info "${INCUS_IMAGE}" >/dev/null 2>&1; then
+if [ ! -e /dev/kvm ]; then
+  echo "ERROR: Incus VM validation requires /dev/kvm on the runner." >&2
+  exit 1
+fi
+
+if ! incus_cli image info "${INCUS_IMAGE}" >/dev/null 2>&1; then
   echo "ERROR: Incus image alias does not exist: ${INCUS_IMAGE}" >&2
   exit 1
 fi
@@ -654,6 +916,11 @@ export INCUS_SSH_USER="${INCUS_SSH_USER:-cloud-user}"
 export INCUS_VM_CPU="${INCUS_VM_CPU:-4}"
 export INCUS_VM_MEMORY="${INCUS_VM_MEMORY:-20GiB}"
 export INCUS_VM_ROOT_SIZE="${INCUS_VM_ROOT_SIZE:-70GiB}"
+export AAP_CI_INCUS_PROJECT="${incus_project}"
+export AAP_CI_INSTANCE_NAME="${instance_name}"
+export AAP_CI_GUEST_HOSTNAME="${guest_hostname}"
+export AAP_CI_GUEST_FQDN="${guest_fqdn}"
+export AAP_CI_EXPIRES_AT="${expires_at}"
 export RHSM_ORG_ID
 export RHSM_ACTIVATION_KEY
 export AAP_BUNDLE_FILE
@@ -663,10 +930,6 @@ write_ansible_config \
   "${ANSIBLE_COLLECTIONS_PATH}" \
   "${automation_ansible_dir}/roles:/usr/share/ansible/roles:/runner/roles"
 export ANSIBLE_CONFIG="${ansible_config_path}"
-
-trap cleanup EXIT
-trap 'cleanup 130; exit 130' INT
-trap 'cleanup 143; exit 143' TERM
 
 if [ ! -f "${AAP_BUNDLE_FILE}" ]; then
   echo "ERROR: AAP bundle not found: ${AAP_BUNDLE_FILE}" >&2
@@ -680,24 +943,25 @@ if [ "${install_requirements}" = "true" ]; then
     TARGET_PATH="${automation_ansible_dir}/collections-dev" \
     REQUIREMENTS_FILE="${automation_ansible_dir}/collections/requirements.yml" \
     "${automation_ansible_dir}/scripts/install-local-collections" \
-    foundational \
-    rhel \
-    supplementary
+      foundational \
+      rhel \
+      ubuntu \
+      supplementary
   RH_COLLECTIONS_TARGET="${automation_ansible_dir}/collections-dev" \
     RH_COLLECTIONS_REQUIREMENTS_FILE="${automation_ansible_dir}/collections/requirements-rh.yml" \
     "${automation_ansible_dir}/scripts/install-rh-collections"
 fi
 
-cd "${supplementary_dir}"
+trap cleanup EXIT
+trap 'cleanup 130; exit 130' INT
+trap 'cleanup 143; exit 143' TERM
 
-deploy/incus/create.sh --version "${RHEL_MAJOR}" --vm --name "${instance_name}" --hostname "${guest_hostname}"
+run_incus_lifecycle create
 wait_for_incus_guest_ready
-deploy/incus/inventory.sh "${instance_name}" --group aaps --host-alias "${guest_hostname}" > "${inventory_path}"
-chmod 0600 "${inventory_path}"
 
 ansible-playbook \
   -i "${inventory_path}" \
-  playbooks/rhel_prepare.yml \
+  "${supplementary_dir}/playbooks/rhel_prepare.yml" \
   -e rhel_guest_target=aaps \
   -e '{"virtual_guest_manage_qemu_guest_agent": false}'
 
@@ -706,12 +970,17 @@ cat > "${vars_path}" <<EOF
 aap_password_require_component_inputs: false
 aap_admin_password_input: $(yaml_single_quote "${admin_password}")
 
+aap_preflight_expected_ansible_user: $(yaml_single_quote "${INCUS_SSH_USER}")
+aap_preflight_check_dns: false
+aap_preflight_check_vault: false
+aap_preflight_check_ansible_vault: false
+aap_deploy_install_user: $(yaml_single_quote "${install_user}")
+aap_deploy_install_user_home: $(yaml_single_quote "${install_user_home}")
 aap_deploy_topology: growth
 aap_deploy_setup_download_version: "$(printf '%s' "${AAP_VERSION}")"
 aap_deploy_gateway_main_url: "https://{{ ansible_host }}"
 aap_deploy_validate_certs: false
 aap_prepare_bundle_src: "$(printf '%s' "${AAP_BUNDLE_FILE}")"
-aap_deploy_manage_host_prep: true
 aap_deploy_manage_download_unpack: true
 aap_deploy_run_installer: true
 aap_deploy_run_verify: true
@@ -722,6 +991,11 @@ aap_deploy_setup_install_extra_vars:
 virtual_guest_manage_qemu_guest_agent: false
 EOF
 chmod 0600 "${vars_path}"
+
+ansible-playbook \
+  -i "${inventory_path}" \
+  "${automation_ansible_dir}/runbooks/50-applications/aap/06-base-os-prepare.yml" \
+  -e @"${vars_path}"
 
 installer_async_jid_path="/opt/aap/logs/aap_installer_async_jid"
 deploy_rc=0
@@ -760,7 +1034,7 @@ while [ "${installer_attempt}" -le "${installer_max_attempts}" ]; do
         -i "${inventory_path}" \
         "${automation_ansible_dir}/runbooks/50-applications/aap/10-deploy.yml" \
         -e @"${vars_path}" \
-        -e '{"aap_deploy_skip_if_runtime_active": false}' \
+        -e '{"aap_deploy_skip_if_runtime_active": false, "aap_deploy_reset_partial_install_enabled": true}' \
         --tags aap_deploy
   fi
   deploy_rc=$?
@@ -790,14 +1064,19 @@ fi
 
 if [ "${deploy_rc}" -eq 0 ]; then
   run_with_heartbeat \
-    "AAP verify and configuration playbook" \
+    "AAP deployment verification playbook" \
     ansible-playbook \
       -i "${inventory_path}" \
       "${automation_ansible_dir}/runbooks/50-applications/aap/10-deploy.yml" \
       -e @"${vars_path}" \
-      -e '{"aap_deploy_installer_wait": true}'
+      -e '{"aap_deploy_installer_wait": true, "aap_deploy_run_installer": false, "aap_deploy_manage_download_unpack": false}' \
+      --tags aap_deploy
   deploy_rc=$?
 fi
 
 cleanup "${deploy_rc}"
+cleanup_rc=$?
+if [ "${deploy_rc}" -eq 0 ] && [ "${cleanup_rc}" -ne 0 ]; then
+  exit "${cleanup_rc}"
+fi
 exit "${deploy_rc}"

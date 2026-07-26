@@ -31,9 +31,9 @@ jobs:
       - self-hosted
       - linux
       - x64
-      - ubuntu
       - incus
       - nested-virt
+      - aap
 
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -42,36 +42,34 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          path: modulix-validation-lit
+          path: modulix-validation
+          persist-credentials: false
 
       - name: Checkout automation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-
-      - name: Validate repository read token
-        env:
-          MODULIX_REPO_READ_TOKEN: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${MODULIX_REPO_READ_TOKEN}"
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-supplementary
-          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-supplementary
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout Ubuntu collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
-          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-ubuntu
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Build matrix from validation inventory
         id: matrix
@@ -107,11 +105,19 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
-          entries = data["aap_ci_test_matrix"]
+          default_project = data.get("aap_ci_incus_project", "default")
+          entries = [
+              {
+                  **entry,
+                  "incus_project": entry.get("incus_project", default_project),
+              }
+              for entry in data["aap_ci_test_matrix"]
+              if entry.get("enabled", True)
+          ]
 
           matrix_filter = os.environ.get("MATRIX_FILTER", "").strip()
           if matrix_filter:
@@ -132,7 +138,7 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
@@ -212,7 +218,7 @@ jobs:
           export ANSIBLE_COLLECTIONS_PATH="${collections_dir}"
 
           ansible-playbook \
-            -i modulix-validation-lit/inventories/nightly/inventory.yml \
+            -i modulix-validation/inventories/nightly/inventory.yml \
             modulix-automation/ansible/runbooks/40-platforms/incus/20-image-artifacts.yml
 
       - name: Preflight runner artifacts
@@ -231,11 +237,16 @@ jobs:
           import yaml
 
           matrix_file = Path(
-              "modulix-validation-lit/inventories/nightly/host_vars/"
+              "modulix-validation/inventories/nightly/host_vars/"
               "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
-          entries = data["aap_ci_test_matrix"]
+          default_project = data.get("aap_ci_incus_project", "default")
+          entries = [
+              entry
+              for entry in data["aap_ci_test_matrix"]
+              if entry.get("enabled", True)
+          ]
 
           matrix_filter = os.environ.get("MATRIX_FILTER", "").strip()
           if matrix_filter:
@@ -247,6 +258,7 @@ jobs:
                   "\t".join(
                       [
                           entry["name"],
+                          entry.get("incus_project", default_project),
                           entry["incus_image"],
                           entry["aap_bundle_file"],
                       ]
@@ -254,24 +266,24 @@ jobs:
               )
           PY
 
-          while IFS=$'\t' read -r matrix_name incus_image bundle_file; do
+          while IFS=$'\t' read -r matrix_name incus_project incus_image bundle_file; do
             echo "Preflight ${matrix_name}"
-            incus image info "${incus_image}" >/dev/null
+            incus --force-local --project "${incus_project}" image info "${incus_image}" >/dev/null
             test -r "${bundle_file}"
           done < /tmp/aap-incus-preflight.tsv
 
   aap-incus:
     name: ${{ matrix.name }}
-    timeout-minutes: 240
+    timeout-minutes: 330
     needs:
       - prepare-matrix
     runs-on:
       - self-hosted
       - linux
       - x64
-      - ubuntu
       - incus
       - nested-virt
+      - aap
 
     strategy:
       fail-fast: false
@@ -280,43 +292,50 @@ jobs:
 
     steps:
       - name: Checkout validation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          path: modulix-validation-lit
+          path: modulix-validation
+          persist-credentials: false
 
       - name: Checkout automation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-
-      - name: Validate repository read token
-        env:
-          MODULIX_REPO_READ_TOKEN: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${MODULIX_REPO_READ_TOKEN}"
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout foundational collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-foundational
-          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-foundational
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout RHEL collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-rhel
-          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-rhel
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout supplementary collection
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-supplementary
-          token: ${{ secrets.MODULIX_REPO_READ_TOKEN || secrets.LITRELEASEBOT_TOKEN }}
           path: ansible-collection-supplementary
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout Ubuntu collection
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/ansible-collection-ubuntu
+          path: ansible-collection-ubuntu
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Run AAP Incus matrix entry
         env:
@@ -331,13 +350,14 @@ jobs:
           RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID || needs.prepare-matrix.outputs.rhsm_org }}
           RHSM_ACTIVATION_KEY: ${{ matrix.rhsm_activation_key }}
           RH_AUTOMATION_HUB_TOKEN: ${{ secrets.RH_AUTOMATION_HUB_TOKEN }}
-          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
           AAP_CI_ADMIN_PASSWORD: ${{ secrets.AAP_CI_ADMIN_PASSWORD }}
           AAP_CI_DESTROY_INSTANCE: ${{ needs.prepare-matrix.outputs.destroy_instances }}
+          AAP_CI_INCUS_PROJECT: ${{ matrix.incus_project || 'default' }}
           AAP_CI_HOST_MEMORY_HEADROOM_MIB: ${{ matrix.host_memory_headroom_mib || '4096' }}
           AUTOMATION_DIR: ${{ github.workspace }}/modulix-automation
           SUPPLEMENTARY_DIR: ${{ github.workspace }}/ansible-collection-supplementary
+          UBUNTU_DIR: ${{ github.workspace }}/ansible-collection-ubuntu
           AAP_CI_WORK_DIR: ${{ runner.temp }}/aap-incus-ci/${{ matrix.name }}
         run: |
           set -euo pipefail
-          modulix-validation-lit/.github/scripts/aap-incus-matrix-run.sh
+          modulix-validation/.github/scripts/aap-incus-matrix-run.sh

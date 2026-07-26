@@ -1,11 +1,11 @@
 ---
 schema_version: 1
 managed_by: lightning-it/shared-assets-lit
-repository: modulix-validation-lit
-visibility: private
+repository: modulix-validation
+visibility: public
 license_spdx: LicenseRef-Proprietary
 license_exception_approved: true
-repository_type: private_infrastructure
+repository_type: generic_managed
 release_type: none
 artifact_type: validation_evidence
 test_profiles:
@@ -26,6 +26,11 @@ galaxy_publish: false
 quay_publish: false
 release_evidence: false
 heavy_incus_required: true
+openssf_best_practices:
+  required: true
+  project_id: null
+  target_level: passing
+  exception: null
 readme_badges: []
 workflows:
   ci: repository-quality.yml

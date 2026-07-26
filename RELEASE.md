@@ -4,23 +4,23 @@ This repository follows the Lightning IT shared release and quality model.
 
 ## Repository Classification
 
-- Repository: `modulix-validation-lit`
-- Type: `private_infrastructure`
+- Repository: `modulix-validation`
+- Type: `generic_managed`
 - Release type: `none`
 - Artifact type: `validation_evidence`
-- Visibility: `private`
+- Visibility: `public`
 - Release evidence: `disabled`
 - Heavy Incus release validation: `required`
 
 ## Branch Flow
 
-- `develop` is the integration branch for normal work, Renovate updates, and shared-assets-lit synchronization.
+- `develop` is the integration branch for normal work, Renovate updates, and centrally managed synchronization.
 - `main` is the protected release branch.
 - This repository does not publish release artifacts; `main` still represents the protected stable branch.
 - A `develop` to `main` promotion PR is created automatically when releasable changes exist.
 - The `develop` to `main` PR is a manual gate and must never be auto-merged.
 - After `main` changes, a `main` to `develop` backmerge PR is created or updated automatically.
-- Backmerge PRs may auto-merge only when required checks are green and there are no conflicts.
+- Integration and backmerge PRs may auto-merge only after required checks pass, all review conversations are resolved, and there are no conflicts.
 
 ## Mandatory Quality Gates
 
@@ -31,12 +31,11 @@ This repository follows the Lightning IT shared release and quality model.
 - Publishing secrets are available only to trusted `main` release workflows.
 - GitHub token permissions must stay least-privilege for each workflow.
 
-## Private Infrastructure Safety
+## Managed Repository Release
 
-- Do not copy secrets or private inventory values into public repositories.
-- Release and testing documentation must stay generic.
-- CI must avoid printing host-specific or credential-bearing inventory values.
-- Shared workflows may be consumed only when they protect private data by default.
+- CI validates repository structure and file formats appropriate to the repository contents.
+- Generated documentation is maintained by shared-assets-lit.
+- Artifact/version behavior is documented in repository-specific files when artifacts are published.
 
 ## Release Evidence
 
