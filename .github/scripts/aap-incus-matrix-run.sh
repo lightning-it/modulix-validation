@@ -433,6 +433,20 @@ collect_failure_diagnostics() {
 #!/usr/bin/env bash
 set -o pipefail
 
+decode_b64() {
+  python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' "$1"
+}
+
+export AAP_CI_DIAGNOSTIC_LOG_LINES="$(
+  decode_b64 "${AAP_CI_DIAGNOSTIC_LOG_LINES_B64:?}"
+)"
+export AAP_CI_INSTALL_USER="$(
+  decode_b64 "${AAP_CI_INSTALL_USER_B64:?}"
+)"
+export AAP_CI_INSTALL_USER_HOME="$(
+  decode_b64 "${AAP_CI_INSTALL_USER_HOME_B64:?}"
+)"
+
 redact() {
   sed -E 's/((password|passwd|token|secret|key)[[:alnum:]_ -]*[=:][[:space:]]*)[^[:space:]"'"'"']+/\1[REDACTED]/Ig'
 }
@@ -504,7 +518,7 @@ EOS
     -i "${inventory_path}" \
     aaps \
     -m ansible.builtin.shell \
-    -a "AAP_CI_DIAGNOSTIC_LOG_LINES=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${log_lines_b64}')\" AAP_CI_INSTALL_USER=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_b64}')\" AAP_CI_INSTALL_USER_HOME=\"\$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' '${install_user_home_b64}')\" /tmp/aap-ci-diagnostics.sh" \
+    -a "AAP_CI_DIAGNOSTIC_LOG_LINES_B64='${log_lines_b64}' AAP_CI_INSTALL_USER_B64='${install_user_b64}' AAP_CI_INSTALL_USER_HOME_B64='${install_user_home_b64}' /tmp/aap-ci-diagnostics.sh" \
     || true
   ansible \
     -i "${inventory_path}" \
@@ -830,6 +844,7 @@ fi
 
 if ! [[ "${install_user_home}" =~ ^/[A-Za-z0-9._/-]+$ ]] \
   || [[ "${install_user_home}" =~ (^|/)\.\.(/|$) ]] \
+  || [[ "${install_user_home}" =~ (^|/)\.(/|$) ]] \
   || [[ "${install_user_home}" == *"//"* ]]; then
   echo "ERROR: AAP_CI_INSTALL_USER_HOME must be a normalized absolute path using safe characters: ${install_user_home}" >&2
   exit 1
