@@ -39,10 +39,11 @@ success_marker: assertions/example-service-heavy.passed
 `image` and `instance_type`. The `(scenario, target)` pair must be unique.
 
 The scenario receives `MOLECULE_TEST_OWNER`, run identity, target, image,
-instance type, and `MOLECULE_TEST_SUCCESS_MARKER`. Its final meaningful
-verification step must write non-empty content to the marker. A zero Molecule
-exit code without that marker fails the cell, so required validation cannot
-pass through an internal skip.
+instance type, bounded run-unique instance and network names, and
+`MOLECULE_TEST_SUCCESS_MARKER`. Its final meaningful verification step must
+write non-empty content to the marker. A zero Molecule exit code without that
+marker fails the cell, so required validation cannot pass through an internal
+skip.
 
 ## Lifecycle and evidence
 

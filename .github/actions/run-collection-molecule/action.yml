@@ -79,6 +79,11 @@ runs:
 
         cell_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INPUT_SCENARIO}-${INPUT_TARGET}"
         owner="${GITHUB_REPOSITORY}-${cell_key}"
+        identity="$(
+          printf '%s' "$owner" | sha256sum | cut -c1-12
+        )"
+        instance="molecule-$identity"
+        network="molecule-net-$identity"
         cell_root="$RUNNER_TEMP/collection-profile/$cell_key"
         evidence_root="$cell_root/evidence"
         install_root="$cell_root/collections"
@@ -107,6 +112,8 @@ runs:
           echo "MOLECULE_TEST_TARGET=$INPUT_TARGET"
           echo "MOLECULE_TEST_IMAGE=$INPUT_IMAGE"
           echo "MOLECULE_TEST_INSTANCE_TYPE=$INPUT_INSTANCE_TYPE"
+          echo "MOLECULE_TEST_INSTANCE=$instance"
+          echo "MOLECULE_TEST_NETWORK=$network"
           echo "MOLECULE_TEST_SUCCESS_MARKER=$marker_path"
         } >> "$GITHUB_ENV"
 
