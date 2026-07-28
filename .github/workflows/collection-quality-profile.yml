@@ -116,7 +116,13 @@ jobs:
       name: ${{ inputs['environment-name'] }}
     timeout-minutes: 180
     concurrency:
-      group: modulix-validation-incus
+      # A shared group can retain only one pending job; later collection
+      # requests otherwise cancel an already queued required profile. Runner
+      # capacity still serializes jobs that target the same physical worker.
+      group: >-
+        modulix-validation-incus-${{ github.repository_id }}-${{ github.run_id }}-${{
+        github.run_attempt }}-${{ inputs.profile }}-${{ matrix.scenario }}-${{
+        matrix.target }}
       cancel-in-progress: false
     steps:
       - name: Checkout exact collection source
