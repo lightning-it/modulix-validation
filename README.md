@@ -54,6 +54,10 @@ separate from:
 ## Current Validation
 
 - AAP Incus Nightly Matrix
+- Reusable collection Heavy and Application Acceptance execution
+
+The versioned, collection-neutral caller contract is documented in
+[`docs/collection-molecule-profile.md`](docs/collection-molecule-profile.md).
 
 HashiCorp Vault, Wunderbox, Satellite, and other service suites are planned
 extensions. They are not part of the current validated matrix yet.

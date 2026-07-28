@@ -1,0 +1,205 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: Generic collection infrastructure profile
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: Heavy or Application Acceptance profile.
+        required: true
+        type: string
+      matrix-json:
+        description: Non-empty include matrix following the documented v1 contract.
+        required: true
+        type: string
+      candidate-artifact:
+        description: Artifact containing the exact collection candidate and checksum.
+        required: true
+        type: string
+      source-sha:
+        description: Exact commit represented by the candidate.
+        required: true
+        type: string
+      collection-namespace:
+        description: Namespace from galaxy.yml.
+        required: true
+        type: string
+      collection-name:
+        description: Collection name from galaxy.yml.
+        required: true
+        type: string
+      environment-name:
+        description: Protected GitHub Environment for the selected runtime.
+        required: true
+        type: string
+    secrets:
+      HCLOUD_TOKEN:
+        required: false
+      HROBOT_LIVE_USER:
+        required: false
+      HROBOT_LIVE_PASSWORD:
+        required: false
+      HROBOT_LIVE_SERVER_IP:
+        required: false
+      HROBOT_LIVE_SERVER_NAME:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contract:
+    name: Validate generic collection profile contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable identity and matrix
+        env:
+          PROFILE: ${{ inputs.profile }}
+          MATRIX_JSON: ${{ inputs['matrix-json'] }}
+          SOURCE_SHA: ${{ inputs['source-sha'] }}
+          COLLECTION_NAMESPACE: ${{ inputs['collection-namespace'] }}
+          COLLECTION_NAME: ${{ inputs['collection-name'] }}
+        run: |
+          set -euo pipefail
+          case "$PROFILE" in
+            heavy|application_acceptance) ;;
+            *) echo "unsupported profile: $PROFILE" >&2; exit 1 ;;
+          esac
+          [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
+          [[ "$COLLECTION_NAMESPACE" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
+          [[ "$COLLECTION_NAME" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          matrix = json.loads(os.environ["MATRIX_JSON"])
+          cells = matrix.get("include") if isinstance(matrix, dict) else None
+          if not isinstance(cells, list) or not cells:
+              raise SystemExit("matrix-json must contain a non-empty include list")
+          required = {
+              "infrastructure",
+              "roles",
+              "runner",
+              "scenario",
+              "success_marker",
+              "target",
+          }
+          identity = set()
+          for index, cell in enumerate(cells):
+              if not isinstance(cell, dict):
+                  raise SystemExit(f"include[{index}] must be an object")
+              missing = sorted(required - cell.keys())
+              if missing:
+                  raise SystemExit(f"include[{index}] is missing: {', '.join(missing)}")
+              if cell["infrastructure"] not in {"incus", "external", "local"}:
+                  raise SystemExit(f"include[{index}].infrastructure is unsupported")
+              runner = cell["runner"]
+              if not isinstance(runner, list) or not all(
+                  isinstance(label, str) and label for label in runner
+              ):
+                  raise SystemExit(
+                      f"include[{index}].runner must be a non-empty label list"
+                  )
+              labels = set(runner)
+              required_labels = {"self-hosted", "linux", "x64"}
+              missing_labels = sorted(required_labels - labels)
+              if missing_labels:
+                  raise SystemExit(
+                      f"include[{index}].runner is missing required labels: "
+                      f"{', '.join(missing_labels)}"
+                  )
+              if cell["infrastructure"] == "incus" and "incus" not in labels:
+                  raise SystemExit(
+                      f"include[{index}].runner must include incus for Incus"
+                  )
+              if not isinstance(cell["roles"], list) or not cell["roles"]:
+                  raise SystemExit(f"include[{index}].roles must be non-empty")
+              for key in ("scenario", "target"):
+                  value = cell[key]
+                  if not isinstance(value, str) or re.fullmatch(
+                      r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", value
+                  ) is None:
+                      raise SystemExit(f"include[{index}].{key} is invalid")
+              marker = cell["success_marker"]
+              if not isinstance(marker, str) or re.fullmatch(
+                  r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", marker
+              ) is None or ".." in marker.split("/"):
+                  raise SystemExit(f"include[{index}].success_marker is invalid")
+              if cell["infrastructure"] == "incus":
+                  for key in ("image", "instance_type"):
+                      if not isinstance(cell.get(key), str) or not cell[key]:
+                          raise SystemExit(f"include[{index}].{key} is required for Incus")
+              cell_identity = (cell["scenario"], cell["target"])
+              if cell_identity in identity:
+                  raise SystemExit(f"duplicate cell identity: {cell_identity}")
+              identity.add(cell_identity)
+          PY
+
+  profile-cells:
+    name: ${{ inputs.profile }} / ${{ matrix.scenario }} / ${{ matrix.target }}
+    needs: validate-contract
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(inputs['matrix-json']) }}
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: ${{ inputs['environment-name'] }}
+    timeout-minutes: 180
+    concurrency:
+      group: >-
+        modulix-validation-${{ github.repository_id }}-${{ github.run_id }}-${{
+        github.run_attempt }}-${{ inputs.profile }}-${{ matrix.scenario }}-${{
+        matrix.target }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact collection source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ inputs['source-sha'] }}
+          persist-credentials: false
+      - name: Set up exact Python runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.11"
+      - name: Run centrally owned collection profile
+        uses: lightning-it/modulix-validation/.github/actions/run-collection-molecule@099595e3aea38ac58df3dce25f5a1d6dab70c01f
+        env:
+          HCLOUD_LIVE_TEST: ${{ secrets.HCLOUD_TOKEN != '' && 'true' || 'false' }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HROBOT_LIVE_ENABLED: ${{ secrets.HROBOT_LIVE_USER != '' && 'true' || 'false' }}
+          HROBOT_LIVE_USER: ${{ secrets.HROBOT_LIVE_USER }}
+          HROBOT_LIVE_PASSWORD: ${{ secrets.HROBOT_LIVE_PASSWORD }}
+          HROBOT_LIVE_SERVER_IP: ${{ secrets.HROBOT_LIVE_SERVER_IP }}
+          HROBOT_LIVE_SERVER_NAME: ${{ secrets.HROBOT_LIVE_SERVER_NAME }}
+        with:
+          profile: ${{ inputs.profile }}
+          scenario: ${{ matrix.scenario }}
+          target: ${{ matrix.target }}
+          infrastructure: ${{ matrix.infrastructure }}
+          roles: ${{ join(matrix.roles, ',') }}
+          image: ${{ matrix.image || 'not-applicable' }}
+          instance-type: ${{ matrix.instance_type || 'not-applicable' }}
+          success-marker: ${{ matrix.success_marker }}
+          candidate-artifact: ${{ inputs['candidate-artifact'] }}
+          source-sha: ${{ inputs['source-sha'] }}
+          collection-namespace: ${{ inputs['collection-namespace'] }}
+          collection-name: ${{ inputs['collection-name'] }}
+
+  profile:
+    name: Collection infrastructure profile
+    if: always()
+    needs: [validate-contract, profile-cells]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require contract and every matrix cell
+        env:
+          CONTRACT_RESULT: ${{ needs.validate-contract.result }}
+          CELLS_RESULT: ${{ needs.profile-cells.result }}
+        run: |
+          set -euo pipefail
+          test "$CONTRACT_RESULT" = success
+          test "$CELLS_RESULT" = success
