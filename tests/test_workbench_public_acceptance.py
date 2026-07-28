@@ -115,7 +115,11 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
 
         self.assertIn("matrix-json must contain a non-empty include list", workflow)
         self.assertIn("success_marker", workflow)
-        self.assertIn("GENERIC_ACTION_SHA", workflow)
+        self.assertRegex(
+            workflow,
+            r"lightning-it/modulix-validation/\.github/actions/"
+            r"run-collection-molecule@[0-9a-f]{40}",
+        )
         self.assertIn('test "$CELLS_RESULT" = success', workflow)
         self.assertIn("candidate-SHA256SUMS", action)
         self.assertIn("user.molecule-owner", action)
