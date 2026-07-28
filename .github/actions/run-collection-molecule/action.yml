@@ -119,6 +119,7 @@ runs:
           echo "INCUS_MODE=$INPUT_INSTANCE_TYPE"
           echo "INCUS_RHEL9_IMAGE=$INPUT_IMAGE"
           echo "INCUS_RHEL10_IMAGE=$INPUT_IMAGE"
+          echo "HCLOUD_LIVE_TEST_ID=hcl-$identity"
         } >> "$GITHUB_ENV"
 
     - name: Install pinned controller and exact candidate

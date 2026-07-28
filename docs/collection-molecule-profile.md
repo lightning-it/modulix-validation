@@ -51,6 +51,10 @@ Protected legacy scenarios also receive the same bounded instance as
 resource and image selection centrally controlled while those component
 scenarios migrate to the generic `MOLECULE_TEST_*` names.
 
+Live Hetzner Cloud cells receive a bounded `HCLOUD_LIVE_TEST_ID` derived from
+the same run owner. Credential presence controls the explicit live gate; a
+missing protected secret fails the scenario and cannot become passing evidence.
+
 ## Lifecycle and evidence
 
 The central action runs the scenario with automatic destruction disabled,
