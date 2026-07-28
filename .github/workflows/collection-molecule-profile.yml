@@ -166,7 +166,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run centrally owned collection profile
-        uses: lightning-it/modulix-validation/.github/actions/run-collection-molecule@f95f900d341d260f8fd6c9b5ab2b3b3b57bd38fa
+        uses: lightning-it/modulix-validation/.github/actions/run-collection-molecule@099595e3aea38ac58df3dce25f5a1d6dab70c01f
         env:
           HCLOUD_LIVE_TEST: ${{ secrets.HCLOUD_TOKEN != '' && 'true' || 'false' }}
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
