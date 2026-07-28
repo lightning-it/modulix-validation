@@ -115,6 +115,10 @@ runs:
           echo "MOLECULE_TEST_INSTANCE=$instance"
           echo "MOLECULE_TEST_NETWORK=$network"
           echo "MOLECULE_TEST_SUCCESS_MARKER=$marker_path"
+          echo "INCUS_INSTANCE_NAME=$instance"
+          echo "INCUS_MODE=$INPUT_INSTANCE_TYPE"
+          echo "INCUS_RHEL9_IMAGE=$INPUT_IMAGE"
+          echo "INCUS_RHEL10_IMAGE=$INPUT_IMAGE"
         } >> "$GITHUB_ENV"
 
     - name: Install pinned controller and exact candidate

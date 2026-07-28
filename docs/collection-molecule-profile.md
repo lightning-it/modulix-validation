@@ -45,6 +45,12 @@ write non-empty content to the marker. A zero Molecule exit code without that
 marker fails the cell, so required validation cannot pass through an internal
 skip.
 
+Protected legacy scenarios also receive the same bounded instance as
+`INCUS_INSTANCE_NAME`. `INCUS_MODE`, `INCUS_RHEL9_IMAGE`, and
+`INCUS_RHEL10_IMAGE` are derived from the validated matrix cell. This keeps
+resource and image selection centrally controlled while those component
+scenarios migrate to the generic `MOLECULE_TEST_*` names.
+
 ## Lifecycle and evidence
 
 The central action runs the scenario with automatic destruction disabled,
