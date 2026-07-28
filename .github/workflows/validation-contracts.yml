@@ -24,6 +24,6 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install pinned contract dependency
-        run: python3 -m pip install PyYAML==6.0.3
+        run: python3 -m pip install --require-hashes -r requirements-validation.lock
       - name: Validate delegated execution contracts
         run: python3 -m unittest discover -s tests -p 'test_*.py'
