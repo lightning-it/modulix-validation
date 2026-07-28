@@ -56,7 +56,7 @@ jobs:
   heavy:
     name: Heavy / nested-esxi / ${{ inputs.build-kind }}-${{ inputs.build-version }}
     needs: validate-contract
-    runs-on: [self-hosted, linux, x64, ubuntu, incus, nested-virt]
+    runs-on: [self-hosted, linux, x64, incus, nested-virt]
     environment:
       name: ${{ inputs.environment-name }}
     timeout-minutes: 180

@@ -68,7 +68,7 @@ jobs:
   heavy:
     name: Heavy / ${{ inputs.scenario }} / ${{ inputs.target }}
     needs: validate-contract
-    runs-on: [self-hosted, linux, x64, ubuntu, incus]
+    runs-on: [self-hosted, linux, x64, incus]
     environment:
       name: ${{ inputs.environment-name }}
     timeout-minutes: 180
