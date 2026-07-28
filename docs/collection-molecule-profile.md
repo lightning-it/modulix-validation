@@ -14,6 +14,10 @@ normalized evidence.
 
 Callers pin the reusable workflow to a full commit SHA and provide:
 
+The pinned commit must be reachable from a protected long-lived branch. A
+feature-branch commit is not a durable workflow dependency after its branch is
+deleted.
+
 - `profile`: `heavy` or `application_acceptance`;
 - `matrix-json`: a non-empty object with an `include` array;
 - `candidate-artifact`: an artifact containing exactly one collection archive
