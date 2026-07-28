@@ -101,6 +101,30 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertIn("runtime-collections.tar.gz", action)
         self.assertIn("missing declared runtime collections", action)
 
+    def test_generic_collection_profile_is_fail_closed_and_owner_scoped(self):
+        root = Path(__file__).parents[1]
+        workflow = (
+            root / ".github/workflows/collection-molecule-profile.yml"
+        ).read_text(encoding="utf-8")
+        action = (
+            root / ".github/actions/run-collection-molecule/action.yml"
+        ).read_text(encoding="utf-8")
+        documentation = (
+            root / "docs/collection-molecule-profile.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("matrix-json must contain a non-empty include list", workflow)
+        self.assertIn("success_marker", workflow)
+        self.assertIn("GENERIC_ACTION_SHA", workflow)
+        self.assertIn('test "$CELLS_RESULT" = success', workflow)
+        self.assertIn("candidate-SHA256SUMS", action)
+        self.assertIn("user.molecule-owner", action)
+        self.assertIn('config.get("user.molecule-owner") != owner', action)
+        self.assertIn("QUALITY_SUCCESS_MARKER", action)
+        self.assertIn('skipped="0"', action)
+        self.assertIn("profile did not produce a meaningful successful result", action)
+        self.assertIn("2886566105", documentation)
+
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
         self.assertEqual(selected, ("tiny", "application"))

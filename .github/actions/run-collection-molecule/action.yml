@@ -1,0 +1,322 @@
+# yamllint disable rule:line-length
+---
+name: Run generic collection Molecule profile
+description: Execute one Heavy or Application Acceptance cell with owned cleanup and normalized evidence.
+
+inputs:
+  profile:
+    required: true
+    description: Heavy or Application Acceptance.
+  scenario:
+    required: true
+    description: Repository-owned Molecule scenario.
+  target:
+    required: true
+    description: Stable platform or service target.
+  infrastructure:
+    required: true
+    description: incus, external, or local.
+  roles:
+    required: true
+    description: Comma-separated covered roles.
+  image:
+    required: true
+    description: Incus image or not-applicable.
+  instance-type:
+    required: true
+    description: Incus instance type or not-applicable.
+  success-marker:
+    required: true
+    description: Relative evidence path written only after meaningful verification.
+  candidate-artifact:
+    required: true
+    description: Exact candidate artifact name.
+  source-sha:
+    required: true
+    description: Exact tested source commit.
+  collection-namespace:
+    required: true
+    description: Namespace from galaxy.yml.
+  collection-name:
+    required: true
+    description: Name from galaxy.yml.
+
+runs:
+  using: composite
+  steps:
+    - name: Download exact collection candidate
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+      with:
+        name: ${{ inputs.candidate-artifact }}
+        path: ${{ runner.temp }}/collection-profile-candidate
+
+    - name: Initialize isolated cell
+      shell: bash
+      env:
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_SCENARIO: ${{ inputs.scenario }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_INFRASTRUCTURE: ${{ inputs.infrastructure }}
+        INPUT_ROLES: ${{ inputs.roles }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_INSTANCE_TYPE: ${{ inputs.instance-type }}
+        INPUT_SUCCESS_MARKER: ${{ inputs.success-marker }}
+        INPUT_SOURCE_SHA: ${{ inputs.source-sha }}
+        INPUT_NAMESPACE: ${{ inputs.collection-namespace }}
+        INPUT_NAME: ${{ inputs.collection-name }}
+      run: |
+        set -euo pipefail
+        [[ "$INPUT_PROFILE" =~ ^(heavy|application_acceptance)$ ]]
+        [[ "$INPUT_SCENARIO" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]
+        [[ "$INPUT_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]
+        [[ "$INPUT_INFRASTRUCTURE" =~ ^(incus|external|local)$ ]]
+        [[ "$INPUT_ROLES" =~ ^[a-z][a-z0-9_]*(,[a-z][a-z0-9_]*)*$ ]]
+        [[ "$INPUT_SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
+        [[ "$INPUT_NAMESPACE" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
+        [[ "$INPUT_NAME" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
+        [[ "$INPUT_SUCCESS_MARKER" != /* ]]
+        [[ "/$INPUT_SUCCESS_MARKER/" != */../* ]]
+
+        cell_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INPUT_SCENARIO}-${INPUT_TARGET}"
+        owner="${GITHUB_REPOSITORY}-${cell_key}"
+        cell_root="$RUNNER_TEMP/collection-profile/$cell_key"
+        evidence_root="$cell_root/evidence"
+        install_root="$cell_root/collections"
+        marker_path="$evidence_root/$INPUT_SUCCESS_MARKER"
+        rm -rf -- "$cell_root"
+        mkdir -p "$evidence_root" "$install_root" "$(dirname "$marker_path")"
+        {
+          echo "QUALITY_PROFILE=$INPUT_PROFILE"
+          echo "QUALITY_SCENARIO=$INPUT_SCENARIO"
+          echo "QUALITY_TARGET=$INPUT_TARGET"
+          echo "QUALITY_INFRASTRUCTURE=$INPUT_INFRASTRUCTURE"
+          echo "QUALITY_ROLES=$INPUT_ROLES"
+          echo "QUALITY_IMAGE=$INPUT_IMAGE"
+          echo "QUALITY_INSTANCE_TYPE=$INPUT_INSTANCE_TYPE"
+          echo "QUALITY_SOURCE_SHA=$INPUT_SOURCE_SHA"
+          echo "QUALITY_COLLECTION_NAMESPACE=$INPUT_NAMESPACE"
+          echo "QUALITY_COLLECTION_NAME=$INPUT_NAME"
+          echo "QUALITY_CELL_ROOT=$cell_root"
+          echo "QUALITY_EVIDENCE_ROOT=$evidence_root"
+          echo "QUALITY_INSTALL_ROOT=$install_root"
+          echo "QUALITY_SUCCESS_MARKER=$marker_path"
+          echo "MOLECULE_RUN_PROTECTED=true"
+          echo "MOLECULE_TEST_OWNER=$owner"
+          echo "MOLECULE_TEST_RUN_ID=$GITHUB_RUN_ID"
+          echo "MOLECULE_TEST_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT"
+          echo "MOLECULE_TEST_TARGET=$INPUT_TARGET"
+          echo "MOLECULE_TEST_IMAGE=$INPUT_IMAGE"
+          echo "MOLECULE_TEST_INSTANCE_TYPE=$INPUT_INSTANCE_TYPE"
+          echo "MOLECULE_TEST_SUCCESS_MARKER=$marker_path"
+        } >> "$GITHUB_ENV"
+
+    - name: Install pinned controller and exact candidate
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --disable-pip-version-check \
+          ansible-core==2.18.18 \
+          molecule==25.12.0 \
+          molecule-plugins==25.8.12
+        candidate_root="$RUNNER_TEMP/collection-profile-candidate"
+        checksum_file="$candidate_root/candidate-SHA256SUMS"
+        test -s "$checksum_file"
+        (
+          cd "$candidate_root"
+          sha256sum --check "$(basename "$checksum_file")"
+        )
+        mapfile -t candidates < <(
+          find "$candidate_root" -maxdepth 1 -type f \
+            -name "${QUALITY_COLLECTION_NAMESPACE}-${QUALITY_COLLECTION_NAME}-*.tar.gz" -print
+        )
+        test "${#candidates[@]}" -eq 1
+        ansible-galaxy collection install "${candidates[0]}" \
+          -p "$QUALITY_INSTALL_ROOT" --force
+        default_paths="$(
+          python3 -c 'from ansible import constants as C; print(":".join(C.COLLECTIONS_PATHS))'
+        )"
+        echo "ANSIBLE_COLLECTIONS_PATH=$QUALITY_INSTALL_ROOT:$default_paths" >> "$GITHUB_ENV"
+        if [ "$QUALITY_INFRASTRUCTURE" = incus ]; then
+          command -v incus
+          incus version
+          test -n "$QUALITY_IMAGE"
+          test "$QUALITY_IMAGE" != not-applicable
+        fi
+
+    - name: Run repository-owned scenario without automatic destruction
+      id: test
+      shell: bash
+      run: |
+        set -uo pipefail
+        set +e
+        molecule test -s "$QUALITY_SCENARIO" --destroy never
+        test_rc="$?"
+        set -e
+        echo "exit_code=$test_rc" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Capture scenario evidence
+      id: cleanup
+      if: always()
+      shell: bash
+      run: |
+        set -uo pipefail
+        set +e
+        molecule cleanup -s "$QUALITY_SCENARIO"
+        cleanup_rc="$?"
+        set -e
+        echo "exit_code=$cleanup_rc" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Destroy scenario resources
+      id: destroy
+      if: always()
+      shell: bash
+      run: |
+        set -uo pipefail
+        set +e
+        molecule destroy -s "$QUALITY_SCENARIO"
+        destroy_rc="$?"
+        set -e
+        echo "exit_code=$destroy_rc" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Reconcile exact owner-scoped Incus resources
+      id: reconcile
+      if: always() && inputs.infrastructure == 'incus'
+      shell: bash
+      run: |
+        set -uo pipefail
+        set +e
+        python3 - <<'PY'
+        import json
+        import os
+        import subprocess
+
+        owner = os.environ["MOLECULE_TEST_OWNER"]
+        for resource in ("list", "network list"):
+            command = ["incus", *resource.split(), "--format", "json"]
+            payload = json.loads(subprocess.check_output(command, text=True))
+            for item in payload:
+                config = item.get("config") or {}
+                if config.get("user.molecule-owner") != owner:
+                    continue
+                name = item.get("name")
+                if not isinstance(name, str) or not name:
+                    raise SystemExit(f"owned {resource} item has no safe name")
+                delete = ["incus", *resource.split()[:-1], "delete", name]
+                if resource == "list":
+                    delete.append("--force")
+                subprocess.run(delete, check=True)
+        PY
+        reconcile_rc="$?"
+        set -e
+        echo "exit_code=$reconcile_rc" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Write normalized evidence
+      id: evidence
+      if: always()
+      shell: bash
+      env:
+        TEST_RC: ${{ steps.test.outputs.exit_code }}
+        CLEANUP_RC: ${{ steps.cleanup.outputs.exit_code }}
+        DESTROY_RC: ${{ steps.destroy.outputs.exit_code }}
+        RECONCILE_RC: ${{ steps.reconcile.outputs.exit_code }}
+      run: |
+        set -euo pipefail
+        marker_present=false
+        if [ -s "$QUALITY_SUCCESS_MARKER" ]; then
+          marker_present=true
+        fi
+        reconcile_rc="${RECONCILE_RC:-0}"
+        TEST_RC="${TEST_RC:-1}" \
+          CLEANUP_RC="${CLEANUP_RC:-1}" \
+          DESTROY_RC="${DESTROY_RC:-1}" \
+          RECONCILE_RC="$reconcile_rc" \
+          MARKER_PRESENT="$marker_present" \
+          python3 - <<'PY'
+        import hashlib
+        import json
+        import os
+        from pathlib import Path
+        from xml.etree import ElementTree
+
+        root = Path(os.environ["QUALITY_EVIDENCE_ROOT"])
+        values = {
+            "test": int(os.environ["TEST_RC"]),
+            "cleanup": int(os.environ["CLEANUP_RC"]),
+            "destroy": int(os.environ["DESTROY_RC"]),
+            "reconcile": int(os.environ["RECONCILE_RC"]),
+        }
+        marker_present = os.environ["MARKER_PRESENT"] == "true"
+        passed = all(value == 0 for value in values.values()) and marker_present
+        payload = {
+            "schema_version": 1,
+            "repository": os.environ["GITHUB_REPOSITORY"],
+            "candidate_sha": os.environ["QUALITY_SOURCE_SHA"],
+            "profile": os.environ["QUALITY_PROFILE"],
+            "scenario": os.environ["QUALITY_SCENARIO"],
+            "platform": {
+                "target": os.environ["QUALITY_TARGET"],
+                "infrastructure": os.environ["QUALITY_INFRASTRUCTURE"],
+                "image": os.environ["QUALITY_IMAGE"],
+                "instance_type": os.environ["QUALITY_INSTANCE_TYPE"],
+            },
+            "roles": os.environ["QUALITY_ROLES"].split(","),
+            "owner": os.environ["MOLECULE_TEST_OWNER"],
+            "run_id": os.environ["GITHUB_RUN_ID"],
+            "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+            "lifecycle": values,
+            "success_marker_present": marker_present,
+            "result": "passed" if passed else "failed",
+        }
+        manifest = root / "manifest.json"
+        manifest.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        suite = ElementTree.Element(
+            "testsuite",
+            name=f"{payload['profile']}:{payload['scenario']}:{payload['platform']['target']}",
+            tests="1",
+            failures="0" if passed else "1",
+            skipped="0",
+        )
+        case = ElementTree.SubElement(suite, "testcase", name="meaningful-profile-execution")
+        if not passed:
+            failure = ElementTree.SubElement(case, "failure", message="profile lifecycle failed")
+            failure.text = json.dumps(
+                {"lifecycle": values, "success_marker_present": marker_present},
+                sort_keys=True,
+            )
+        ElementTree.ElementTree(suite).write(
+            root / "junit.xml",
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        (root / "SHA256SUMS").write_text(f"{digest}  manifest.json\n")
+        if not passed:
+            raise SystemExit("profile did not produce a meaningful successful result")
+        PY
+
+    - name: Upload normalized evidence
+      id: upload
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+      with:
+        name: >-
+          collection-profile-${{ inputs.profile }}-${{ inputs.scenario }}-${{
+          inputs.target }}-${{ inputs.source-sha }}-attempt-${{ github.run_attempt }}
+        path: ${{ env.QUALITY_EVIDENCE_ROOT }}/
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Enforce complete profile result
+      if: always()
+      shell: bash
+      env:
+        EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
+        UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+      run: |
+        set -euo pipefail
+        test "$EVIDENCE_OUTCOME" = success
+        test "$UPLOAD_OUTCOME" = success
