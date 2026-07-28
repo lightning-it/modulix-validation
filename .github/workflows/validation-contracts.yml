@@ -1,0 +1,29 @@
+---
+name: Validation Contracts
+
+on:
+  push:
+    branches: ["develop", "main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: validation / contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Install pinned contract dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Validate delegated execution contracts
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
