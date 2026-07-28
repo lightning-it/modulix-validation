@@ -1,0 +1,5 @@
+* @lightning-it/ent:release
+/.github/ @lightning-it/ent:release
+/.lit/ @lightning-it/ent:release
+/docs/ @lightning-it/ent:release
+/tests/ @lightning-it/ent:release
