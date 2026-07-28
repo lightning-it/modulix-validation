@@ -96,8 +96,25 @@ jobs:
                   raise SystemExit(f"include[{index}] is missing: {', '.join(missing)}")
               if cell["infrastructure"] not in {"incus", "external", "local"}:
                   raise SystemExit(f"include[{index}].infrastructure is unsupported")
-              if not isinstance(cell["runner"], (str, list)) or not cell["runner"]:
-                  raise SystemExit(f"include[{index}].runner must be non-empty")
+              runner = cell["runner"]
+              if not isinstance(runner, list) or not all(
+                  isinstance(label, str) and label for label in runner
+              ):
+                  raise SystemExit(
+                      f"include[{index}].runner must be a non-empty label list"
+                  )
+              labels = set(runner)
+              required_labels = {"self-hosted", "linux", "x64"}
+              missing_labels = sorted(required_labels - labels)
+              if missing_labels:
+                  raise SystemExit(
+                      f"include[{index}].runner is missing required labels: "
+                      f"{', '.join(missing_labels)}"
+                  )
+              if cell["infrastructure"] == "incus" and "incus" not in labels:
+                  raise SystemExit(
+                      f"include[{index}].runner must include incus for Incus"
+                  )
               if not isinstance(cell["roles"], list) or not cell["roles"]:
                   raise SystemExit(f"include[{index}].roles must be non-empty")
               for key in ("scenario", "target"):

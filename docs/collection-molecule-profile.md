@@ -36,7 +36,10 @@ success_marker: assertions/example-service-heavy.passed
 ```
 
 `infrastructure` is `incus`, `external`, or `local`. Incus cells must provide
-`image` and `instance_type`. The `(scenario, target)` pair must be unique.
+`image` and `instance_type`. Every runner selector is a label array containing
+`self-hosted`, `linux`, and `x64`; Incus cells additionally require the `incus`
+label. This prevents caller-controlled protected jobs from being routed to
+unintended runners. The `(scenario, target)` pair must be unique.
 
 The scenario receives `MOLECULE_TEST_OWNER`, run identity, target, image,
 instance type, bounded run-unique instance and network names, and

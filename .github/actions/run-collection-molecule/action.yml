@@ -48,7 +48,9 @@ runs:
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
       with:
         name: ${{ inputs.candidate-artifact }}
-        path: ${{ runner.temp }}/collection-profile-candidate
+        path: >-
+          ${{ runner.temp }}/collection-profile-candidate/${{ github.run_id }}-${{
+          github.run_attempt }}-${{ strategy.job-index }}
 
     - name: Initialize isolated cell
       shell: bash
@@ -88,6 +90,8 @@ runs:
         evidence_root="$cell_root/evidence"
         install_root="$cell_root/collections"
         marker_path="$evidence_root/$INPUT_SUCCESS_MARKER"
+        candidate_root="$RUNNER_TEMP/collection-profile-candidate/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ strategy.job-index }}"
+        venv_root="$cell_root/controller-venv"
         rm -rf -- "$cell_root"
         mkdir -p "$evidence_root" "$install_root" "$(dirname "$marker_path")"
         {
@@ -104,6 +108,8 @@ runs:
           echo "QUALITY_CELL_ROOT=$cell_root"
           echo "QUALITY_EVIDENCE_ROOT=$evidence_root"
           echo "QUALITY_INSTALL_ROOT=$install_root"
+          echo "QUALITY_CANDIDATE_ROOT=$candidate_root"
+          echo "QUALITY_VENV_ROOT=$venv_root"
           echo "QUALITY_SUCCESS_MARKER=$marker_path"
           echo "MOLECULE_RUN_PROTECTED=true"
           echo "MOLECULE_TEST_OWNER=$owner"
@@ -121,17 +127,19 @@ runs:
           echo "INCUS_RHEL10_IMAGE=$INPUT_IMAGE"
           echo "HCLOUD_LIVE_TEST_ID=hcl-$identity"
         } >> "$GITHUB_ENV"
+        echo "$venv_root/bin" >> "$GITHUB_PATH"
 
     - name: Install pinned controller and exact candidate
       shell: bash
       run: |
         set -euo pipefail
-        python3 -m pip install --disable-pip-version-check \
+        python3 -m venv "$QUALITY_VENV_ROOT"
+        "$QUALITY_VENV_ROOT/bin/python" -m pip install --disable-pip-version-check \
           ansible-core==2.18.18 \
           docker==7.1.0 \
           molecule==25.12.0 \
           molecule-plugins==25.8.12
-        candidate_root="$RUNNER_TEMP/collection-profile-candidate"
+        candidate_root="$QUALITY_CANDIDATE_ROOT"
         checksum_file="$candidate_root/candidate-SHA256SUMS"
         test -s "$checksum_file"
         (
@@ -208,7 +216,7 @@ runs:
 
         owner = os.environ["MOLECULE_TEST_OWNER"]
         for resource in ("list", "network list", "profile list"):
-            command = ["incus", *resource.split(), "--format", "json"]
+            command = ["incus", "--force-local", *resource.split(), "--format", "json"]
             payload = json.loads(subprocess.check_output(command, text=True))
             for item in payload:
                 config = item.get("config") or {}
@@ -217,7 +225,7 @@ runs:
                 name = item.get("name")
                 if not isinstance(name, str) or not name:
                     raise SystemExit(f"owned {resource} item has no safe name")
-                delete = ["incus", *resource.split()[:-1], "delete", name]
+                delete = ["incus", "--force-local", *resource.split()[:-1], "delete", name]
                 if resource == "list":
                     delete.append("--force")
                 subprocess.run(delete, check=True)

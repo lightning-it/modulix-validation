@@ -114,6 +114,8 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("matrix-json must contain a non-empty include list", workflow)
+        self.assertIn('required_labels = {"self-hosted", "linux", "x64"}', workflow)
+        self.assertIn('"incus" not in labels', workflow)
         self.assertIn("success_marker", workflow)
         self.assertRegex(
             workflow,
@@ -122,6 +124,9 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         )
         self.assertIn('test "$CELLS_RESULT" = success', workflow)
         self.assertIn("candidate-SHA256SUMS", action)
+        self.assertIn("${{ strategy.job-index }}", action)
+        self.assertIn("python3 -m venv", action)
+        self.assertIn('"incus", "--force-local"', action)
         self.assertIn("user.molecule-owner", action)
         self.assertIn('config.get("user.molecule-owner") != owner', action)
         self.assertIn("QUALITY_SUCCESS_MARKER", action)
