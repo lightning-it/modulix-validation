@@ -201,7 +201,7 @@ runs:
         import subprocess
 
         owner = os.environ["MOLECULE_TEST_OWNER"]
-        for resource in ("list", "network list"):
+        for resource in ("list", "network list", "profile list"):
             command = ["incus", *resource.split(), "--format", "json"]
             payload = json.loads(subprocess.check_output(command, text=True))
             for item in payload:
