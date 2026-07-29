@@ -28,6 +28,7 @@ Products and runtimes:
 - Normal pull requests run pre-commit, linting, syntax checks, and light tests relevant to changed files.
 - Renovate and verified shared-assets or repository-quality synchronization pull requests target `develop` and may auto-merge only after required checks pass.
 - `develop` to `main` promotion pull requests run the strongest validation profile for this repository.
+- A reviewed temporary backmerge branch synchronizes protected `main` ancestry before promoting a diverged `develop` branch.
 - Trusted `main` release workflows build and publish artifacts only after validation succeeds.
 
 ## Local Commands
