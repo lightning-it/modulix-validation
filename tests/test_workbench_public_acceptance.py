@@ -154,7 +154,15 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertNotIn("path: .validation-runtime", collection)
         self.assertIn("--require-hashes", packer)
         self.assertIn(
-            ".github/requirements/collection-quality-profile.lock",
+            "ref: ${{ github.workflow_sha }}",
+            packer,
+        )
+        self.assertIn(
+            "token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}",
+            packer,
+        )
+        self.assertIn(
+            ".modulix-validation/.github/requirements/collection-quality-profile.lock",
             packer,
         )
 

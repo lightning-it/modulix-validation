@@ -31,6 +31,8 @@ on:
         required: true
       PACKER_INSTALLER_PASSWORD_HASH:
         required: false
+      LIT_REPOSITORY_READ_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -80,6 +82,14 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.11"
+      - name: Checkout exact validation toolchain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/modulix-validation
+          ref: ${{ github.workflow_sha }}
+          path: .modulix-validation
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          persist-credentials: false
       - name: Prepare hash-locked Ansible runtime
         run: |
           set -euo pipefail
@@ -90,7 +100,7 @@ jobs:
             --no-input \
             --require-hashes \
             --requirement \
-            .github/requirements/collection-quality-profile.lock
+            .modulix-validation/.github/requirements/collection-quality-profile.lock
           echo "$runtime_venv/bin" >>"$GITHUB_PATH"
       - name: Execute component-owned Heavy entry point
         env:
