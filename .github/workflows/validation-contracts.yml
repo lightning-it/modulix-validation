@@ -41,10 +41,13 @@ jobs:
         with:
           python-version: "3.11"
       - name: Verify hash-locked Packer runtime
-        run: >-
-          python3 -m pip install
-          --disable-pip-version-check
-          --no-input
-          --require-hashes
-          --requirement
-          .github/requirements/collection-quality-profile.lock
+        run: |
+          set -euo pipefail
+          runtime_venv="${RUNNER_TEMP}/packer-runtime-lock-contract"
+          python3 -m venv "$runtime_venv"
+          "$runtime_venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement \
+            .github/requirements/collection-quality-profile.lock
