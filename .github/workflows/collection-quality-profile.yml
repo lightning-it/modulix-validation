@@ -134,19 +134,6 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.11"
-      - name: Checkout pinned validation toolchain
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          repository: lightning-it/modulix-validation
-          ref: 0f23406c2b47727bf94b54bdcb3fef8d8411de4c
-          path: .validation-runtime
-          persist-credentials: false
-      - name: Install exact validation toolchain
-        run: >-
-          python -m pip install --disable-pip-version-check --no-input
-          --require-hashes
-          --requirement
-          .validation-runtime/.github/requirements/collection-quality-profile.lock
       - name: Run validation-owned infrastructure profile
         uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@7d9e9edb4eb8f6efbd025a8da74a78f2de2d2ed4
         with:

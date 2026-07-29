@@ -115,6 +115,10 @@ jobs:
                   raise SystemExit(
                       f"include[{index}].runner must include incus for Incus"
                   )
+              if cell["infrastructure"] != "incus" and "incus" in labels:
+                  raise SystemExit(
+                      f"include[{index}].runner must not include incus for non-Incus"
+                  )
               if not isinstance(cell["roles"], list) or not cell["roles"]:
                   raise SystemExit(f"include[{index}].roles must be non-empty")
               for key in ("scenario", "target"):
