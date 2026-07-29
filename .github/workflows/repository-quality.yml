@@ -25,7 +25,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
+
+      - name: Verify Codex and Copilot instruction parity
+        run: python3 scripts/lit-push-ready.py instructions
 
       - name: Run Lightning IT repository quality checks
         run: python3 scripts/lit-repository-quality.py

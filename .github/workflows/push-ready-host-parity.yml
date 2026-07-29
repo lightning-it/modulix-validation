@@ -1,0 +1,243 @@
+---
+name: Push-ready host parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      devtool_ref:
+        description: Commit SHA or ref; the resolved commit is recorded in evidence
+        required: true
+        default: develop
+      rhel_image:
+        description: Existing entitled RHEL Incus VM image
+        required: true
+        default: local:rhel9-aap-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: push-ready-host-parity
+  cancel-in-progress: false
+
+jobs:
+  ubuntu:
+    name: Ubuntu x86_64 with Docker
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - incus
+      - nested-virt
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Devtool source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: lightning-it/container-ee-wunder-devtools-ubi9
+          ref: ${{ inputs.devtool_ref }}
+          path: devtool
+          persist-credentials: false
+
+      - name: Ensure Incus VM runtime dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if ! command -v apt-get >/dev/null || ! command -v dpkg-query >/dev/null; then
+            echo "::error::Incus runner must use a Debian-family host"
+            exit 1
+          fi
+          if ! dpkg-query -W -f='${Status}' qemu-system-modules-spice \
+            2>/dev/null | grep -q 'ok installed'; then
+            sudo apt-get update
+            sudo apt-get install -y qemu-system-modules-spice
+          fi
+
+      - name: Run Ubuntu host parity
+        env:
+          INSTANCE: parity-ubuntu-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          command -v incus >/dev/null
+          incus --force-local launch images:ubuntu/24.04/cloud "${INSTANCE}" --vm \
+            -c limits.cpu=4 \
+            -c limits.memory=8GiB
+
+          ready=false
+          for _ in $(seq 1 90); do
+            if incus --force-local exec "${INSTANCE}" -- true >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "${ready}" = true
+
+          tar -C devtool -czf "${RUNNER_TEMP}/devtool.tgz" .
+          incus --force-local file push \
+            "${RUNNER_TEMP}/devtool.tgz" "${INSTANCE}/root/devtool.tgz"
+          # The command is intentionally expanded inside the Ubuntu VM.
+          # shellcheck disable=SC2016
+          incus --force-local exec "${INSTANCE}" -- bash -lc '
+            set -euo pipefail
+            source /etc/os-release
+            test "${ID}" = ubuntu
+            test "$(uname -m)" = x86_64
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y docker.io git python3
+            systemctl enable --now docker
+            ready=false
+            for _ in $(seq 1 30); do
+              if docker info >/dev/null 2>&1; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            test "${ready}" = true
+            mkdir -p /root/devtool
+            tar -C /root/devtool -xzf /root/devtool.tgz
+            cd /root/devtool
+            printf "devtool_commit=%s\n" "$(git rev-parse HEAD)"
+            WUNDER_CONTAINER_ENGINE=docker \
+              bash scripts/verify-host-parity.sh
+          ' | tee "${RUNNER_TEMP}/ubuntu-host-parity.txt"
+
+      - name: Remove Ubuntu VM
+        if: always()
+        env:
+          INSTANCE: parity-ubuntu-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          incus --force-local delete --force "${INSTANCE}" 2>/dev/null || true
+
+      - name: Upload Ubuntu evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ubuntu-host-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ubuntu-host-parity.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  rhel:
+    name: RHEL x86_64 VM with Podman
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - incus
+      - nested-virt
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Devtool source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: lightning-it/container-ee-wunder-devtools-ubi9
+          ref: ${{ inputs.devtool_ref }}
+          path: devtool
+          persist-credentials: false
+
+      - name: Run RHEL host parity in ephemeral VM
+        env:
+          RHEL_IMAGE: ${{ inputs.rhel_image }}
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+          RHEL_9_INCUS_METADATA_URL: ${{ secrets.RHEL_9_INCUS_METADATA_URL }}
+          RHEL_9_INCUS_METADATA_SHA256: ${{ secrets.RHEL_9_INCUS_METADATA_SHA256 }}
+          RHEL_9_INCUS_QCOW2_URL: ${{ secrets.RHEL_9_INCUS_QCOW2_URL }}
+          RHEL_9_INCUS_QCOW2_SHA256: ${{ secrets.RHEL_9_INCUS_QCOW2_SHA256 }}
+        run: |
+          set -euo pipefail
+          command -v incus >/dev/null
+          if ! incus --force-local image info "${RHEL_IMAGE}" >/dev/null 2>&1; then
+            if [[ "${RHEL_IMAGE}" != local:* ]]; then
+              echo "::error::rhel_image must use a local: alias when importing artifacts"
+              exit 1
+            fi
+            required=(
+              RHEL_9_INCUS_METADATA_URL
+              RHEL_9_INCUS_METADATA_SHA256
+              RHEL_9_INCUS_QCOW2_URL
+              RHEL_9_INCUS_QCOW2_SHA256
+            )
+            for variable in "${required[@]}"; do
+              if test -z "${!variable:-}"; then
+                echo "::error::Required repository secret ${variable} is not configured"
+                exit 1
+              fi
+            done
+            artifacts="${RUNNER_TEMP}/rhel9-incus"
+            mkdir -p "${artifacts}"
+            curl -fsSL --retry 3 "${RHEL_9_INCUS_METADATA_URL}" \
+              -o "${artifacts}/metadata.tar.xz"
+            curl -fsSL --retry 3 "${RHEL_9_INCUS_QCOW2_URL}" \
+              -o "${artifacts}/rootfs.qcow2"
+            printf '%s  %s\n' "${RHEL_9_INCUS_METADATA_SHA256}" \
+              "${artifacts}/metadata.tar.xz" | sha256sum -c -
+            printf '%s  %s\n' "${RHEL_9_INCUS_QCOW2_SHA256}" \
+              "${artifacts}/rootfs.qcow2" | sha256sum -c -
+            incus --force-local image import \
+              "${artifacts}/metadata.tar.xz" "${artifacts}/rootfs.qcow2" \
+              --alias "${RHEL_IMAGE#local:}"
+          fi
+          incus --force-local launch "${RHEL_IMAGE}" "${INSTANCE}" --vm \
+            -c limits.cpu=4 \
+            -c limits.memory=8GiB
+
+          ready=false
+          for _ in $(seq 1 90); do
+            if incus --force-local exec "${INSTANCE}" -- true >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "${ready}" = true
+
+          tar -C devtool -czf "${RUNNER_TEMP}/devtool.tgz" .
+          incus --force-local file push \
+            "${RUNNER_TEMP}/devtool.tgz" "${INSTANCE}/root/devtool.tgz"
+          # The command is intentionally expanded inside the RHEL VM.
+          # shellcheck disable=SC2016
+          incus --force-local exec "${INSTANCE}" -- bash -lc '
+            set -euo pipefail
+            source /etc/os-release
+            test "${ID}" = rhel
+            test "$(uname -m)" = x86_64
+            command -v podman >/dev/null
+            command -v git >/dev/null
+            command -v python3 >/dev/null
+            mkdir -p /root/devtool
+            tar -C /root/devtool -xzf /root/devtool.tgz
+            cd /root/devtool
+            printf "devtool_commit=%s\n" "$(git rev-parse HEAD)"
+            WUNDER_CONTAINER_ENGINE=podman \
+              bash scripts/verify-host-parity.sh
+          ' | tee "${RUNNER_TEMP}/rhel-host-parity.txt"
+
+      - name: Collect RHEL diagnostics
+        if: failure()
+        env:
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          incus --force-local info "${INSTANCE}" || true
+          incus --force-local console "${INSTANCE}" --show-log || true
+
+      - name: Remove RHEL VM
+        if: always()
+        env:
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          incus --force-local delete --force "${INSTANCE}" 2>/dev/null || true
+
+      - name: Upload RHEL evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rhel-host-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rhel-host-parity.txt
+          if-no-files-found: warn
+          retention-days: 30

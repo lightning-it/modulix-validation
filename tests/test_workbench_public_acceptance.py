@@ -101,6 +101,63 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertIn("runtime-collections.tar.gz", action)
         self.assertIn("missing declared runtime collections", action)
 
+    def test_generic_collection_profile_is_fail_closed_and_owner_scoped(self):
+        root = Path(__file__).parents[1]
+        workflow = (
+            root / ".github/workflows/collection-molecule-profile.yml"
+        ).read_text(encoding="utf-8")
+        action = (
+            root / ".github/actions/run-collection-molecule/action.yml"
+        ).read_text(encoding="utf-8")
+        documentation = (
+            root / "docs/collection-molecule-profile.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("matrix-json must contain a non-empty include list", workflow)
+        self.assertIn('required_labels = {"self-hosted", "linux", "x64"}', workflow)
+        self.assertIn('"incus" not in labels', workflow)
+        self.assertIn(
+            'cell["infrastructure"] != "incus" and "incus" in labels',
+            workflow,
+        )
+        self.assertIn("success_marker", workflow)
+        self.assertRegex(
+            workflow,
+            r"lightning-it/modulix-validation/\.github/actions/"
+            r"run-collection-molecule@[0-9a-f]{40}",
+        )
+        self.assertIn('test "$CELLS_RESULT" = success', workflow)
+        self.assertIn("candidate-SHA256SUMS", action)
+        self.assertIn("${{ strategy.job-index }}", action)
+        self.assertIn("python3 -m venv", action)
+        self.assertIn('"incus", "--force-local"', action)
+        self.assertIn("user.molecule-owner", action)
+        self.assertIn('config.get("user.molecule-owner") != owner', action)
+        self.assertIn("QUALITY_SUCCESS_MARKER", action)
+        self.assertIn('skipped="0"', action)
+        self.assertIn("profile did not produce a meaningful successful result", action)
+        self.assertIn("2886566105", documentation)
+
+    def test_heavy_workflow_contracts_are_bounded_and_hash_locked(self):
+        root = Path(__file__).parents[1]
+        runbook = (
+            root / ".github/workflows/ansible-runbook-heavy-profile.yml"
+        ).read_text(encoding="utf-8")
+        collection = (
+            root / ".github/workflows/collection-quality-profile.yml"
+        ).read_text(encoding="utf-8")
+        packer = (
+            root / ".github/workflows/packer-nested-esxi-profile.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('[[ "$path" != /* ]]', runbook)
+        self.assertNotIn("path: .validation-runtime", collection)
+        self.assertIn("--require-hashes", packer)
+        self.assertIn(
+            ".github/requirements/collection-quality-profile.lock",
+            packer,
+        )
+
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
         self.assertEqual(selected, ("tiny", "application"))

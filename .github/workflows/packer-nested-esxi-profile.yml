@@ -1,0 +1,162 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: Packer nested ESXi Heavy profile
+
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        description: Exact caller commit containing the Packer candidate.
+        required: true
+        type: string
+      build-kind:
+        description: Packer build kind (rhel or ubuntu).
+        required: true
+        type: string
+      build-version:
+        description: RHEL major or Ubuntu release.
+        required: true
+        type: string
+      environment-name:
+        description: Protected GitHub Environment for Heavy execution.
+        required: true
+        type: string
+    secrets:
+      PACKER_NESTED_ESXI_USERNAME:
+        required: true
+      PACKER_NESTED_ESXI_PASSWORD:
+        required: true
+      PACKER_INSTALLER_PASSWORD:
+        required: true
+      PACKER_INSTALLER_PASSWORD_HASH:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contract:
+    name: Validate Packer Heavy contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable candidate and target
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          BUILD_KIND: ${{ inputs.build-kind }}
+          BUILD_VERSION: ${{ inputs.build-version }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$BUILD_KIND:$BUILD_VERSION" in
+            rhel:8|rhel:9|rhel:10|ubuntu:24.04|ubuntu:26.04) ;;
+            *) echo "unsupported Packer Heavy target" >&2; exit 1 ;;
+          esac
+
+  heavy:
+    name: Heavy / nested-esxi / ${{ inputs.build-kind }}-${{ inputs.build-version }}
+    needs: validate-contract
+    runs-on: [self-hosted, linux, x64, incus, nested-virt]
+    environment:
+      name: ${{ inputs.environment-name }}
+    timeout-minutes: 180
+    concurrency:
+      group: modulix-validation-packer-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact Packer candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Checkout pinned supplementary infrastructure role
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/ansible-collection-supplementary
+          ref: b129095f842c7101d2f5d742d24e752ec7d48957
+          path: collections/ansible_collections/lit/supplementary
+          persist-credentials: false
+      - name: Set up pinned Python runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.11"
+      - name: Prepare hash-locked Ansible runtime
+        run: |
+          set -euo pipefail
+          runtime_venv="${RUNNER_TEMP}/packer-heavy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 -m venv "$runtime_venv"
+          "$runtime_venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement \
+            .github/requirements/collection-quality-profile.lock
+          echo "$runtime_venv/bin" >>"$GITHUB_PATH"
+      - name: Execute component-owned Heavy entry point
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/collections
+          PACKER_REPO_DIR: .
+          PACKER_SOURCE_BRANCH: develop
+          PACKER_TARGET_BRANCH: main
+          PACKER_BUILD_KIND: ${{ inputs.build-kind }}
+          PACKER_BUILD_VERSION: ${{ inputs.build-version }}
+          NESTED_ESXI_INCUS_IMAGE: ${{ vars.PACKER_NESTED_ESXI_INCUS_IMAGE }}
+          NESTED_ESXI_ENDPOINT: ${{ vars.PACKER_NESTED_ESXI_ENDPOINT }}
+          NESTED_ESXI_USERNAME: ${{ secrets.PACKER_NESTED_ESXI_USERNAME }}
+          NESTED_ESXI_PASSWORD: ${{ secrets.PACKER_NESTED_ESXI_PASSWORD }}
+          NESTED_ESXI_CPU: ${{ vars.PACKER_NESTED_ESXI_CPU || '8' }}
+          NESTED_ESXI_MEMORY: ${{ vars.PACKER_NESTED_ESXI_MEMORY || '32GiB' }}
+          NESTED_ESXI_ROOT_DISK_SIZE: ${{ vars.PACKER_NESTED_ESXI_ROOT_DISK_SIZE }}
+          NESTED_ESXI_RAW_QEMU: ${{ vars.PACKER_NESTED_ESXI_RAW_QEMU }}
+          NESTED_ESXI_DATASTORE: ${{ vars.PACKER_NESTED_ESXI_DATASTORE || 'datastore1' }}
+          NESTED_ESXI_NETWORK: ${{ vars.PACKER_NESTED_ESXI_NETWORK || 'VM Network' }}
+          RHEL8_ISO_PATH: ${{ vars.PACKER_RHEL8_ISO_PATH }}
+          RHEL8_ISO_CHECKSUM: ${{ vars.PACKER_RHEL8_ISO_CHECKSUM }}
+          RHEL9_ISO_PATH: ${{ vars.PACKER_RHEL9_ISO_PATH }}
+          RHEL9_ISO_CHECKSUM: ${{ vars.PACKER_RHEL9_ISO_CHECKSUM }}
+          RHEL10_ISO_PATH: ${{ vars.PACKER_RHEL10_ISO_PATH }}
+          RHEL10_ISO_CHECKSUM: ${{ vars.PACKER_RHEL10_ISO_CHECKSUM }}
+          UBUNTU2404_ISO_PATH: ${{ vars.PACKER_UBUNTU2404_ISO_PATH }}
+          UBUNTU2404_ISO_CHECKSUM: ${{ vars.PACKER_UBUNTU2404_ISO_CHECKSUM }}
+          UBUNTU2604_ISO_PATH: ${{ vars.PACKER_UBUNTU2604_ISO_PATH }}
+          UBUNTU2604_ISO_CHECKSUM: ${{ vars.PACKER_UBUNTU2604_ISO_CHECKSUM }}
+          INSTALLER_USERNAME: ${{ vars.PACKER_INSTALLER_USERNAME || 'breakglass' }}
+          INSTALLER_PASSWORD: ${{ secrets.PACKER_INSTALLER_PASSWORD }}
+          INSTALLER_PASSWORD_HASH: ${{ secrets.PACKER_INSTALLER_PASSWORD_HASH }}
+        run: bash .github/scripts/packer-nested-esxi-heavy-build.sh
+      - name: Write normalized success evidence
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          BUILD_KIND: ${{ inputs.build-kind }}
+          BUILD_VERSION: ${{ inputs.build-version }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          jq -n \
+            --arg candidate_sha "$SOURCE_SHA" \
+            --arg profile heavy \
+            --arg scenario nested-esxi \
+            --arg platform "$BUILD_KIND-$BUILD_VERSION" \
+            '{candidate_sha:$candidate_sha,profile:$profile,scenario:$scenario,platform:$platform,status:"passed"}' \
+            > evidence/heavy-result.json
+      - name: Upload normalized Heavy evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: packer-heavy-${{ inputs.build-kind }}-${{ inputs.build-version }}
+          path: evidence/heavy-result.json
+          if-no-files-found: error
+
+  profile:
+    name: Packer Heavy profile
+    if: always()
+    needs: [validate-contract, heavy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require contract and Heavy execution
+        env:
+          CONTRACT_RESULT: ${{ needs.validate-contract.result }}
+          HEAVY_RESULT: ${{ needs.heavy.result }}
+        run: |
+          set -euo pipefail
+          test "$CONTRACT_RESULT" = success
+          test "$HEAVY_RESULT" = success

@@ -1,0 +1,155 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: Ansible runbook Heavy profile
+
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        description: Exact caller commit containing the runbook candidate.
+        required: true
+        type: string
+      inventory-path:
+        description: Absolute path to the protected runner inventory.
+        required: true
+        type: string
+      target:
+        description: Exact inventory hostname selected by --limit.
+        required: true
+        type: string
+      scenario:
+        description: Component-owned Heavy scenario identifier.
+        required: true
+        type: string
+      playbook:
+        description: Repository-relative Heavy playbook.
+        required: true
+        type: string
+      cleanup-playbook:
+        description: Repository-relative recovery cleanup playbook.
+        required: true
+        type: string
+      environment-name:
+        description: Protected GitHub Environment for Heavy execution.
+        required: true
+        type: string
+    secrets:
+      ANSIBLE_VAULT_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contract:
+    name: Validate runbook Heavy contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable identity and bounded paths
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          INVENTORY_PATH: ${{ inputs.inventory-path }}
+          TARGET: ${{ inputs.target }}
+          SCENARIO: ${{ inputs.scenario }}
+          PLAYBOOK: ${{ inputs.playbook }}
+          CLEANUP_PLAYBOOK: ${{ inputs.cleanup-playbook }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INVENTORY_PATH" == /* ]]
+          [[ "$TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$SCENARIO" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
+          for path in "$PLAYBOOK" "$CLEANUP_PLAYBOOK"; do
+            [[ "$path" != /* ]]
+            [[ "$path" =~ ^[A-Za-z0-9._/-]+\.ya?ml$ ]]
+            [[ "/$path/" != *"/../"* ]]
+          done
+
+  heavy:
+    name: Heavy / ${{ inputs.scenario }} / ${{ inputs.target }}
+    needs: validate-contract
+    runs-on: [self-hosted, linux, x64, incus]
+    environment:
+      name: ${{ inputs.environment-name }}
+    timeout-minutes: 180
+    concurrency:
+      group: modulix-validation-runbook-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.scenario }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact runbook candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Execute component-owned Heavy runbook with recovery cleanup
+        env:
+          INVENTORY_PATH: ${{ inputs.inventory-path }}
+          TARGET: ${{ inputs.target }}
+          PLAYBOOK: ${{ inputs.playbook }}
+          CLEANUP_PLAYBOOK: ${{ inputs.cleanup-playbook }}
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          run_id="gh-${GITHUB_RUN_ID: -12}-${GITHUB_RUN_ATTEMPT}"
+          vault_args=()
+          vault_file="${RUNNER_TEMP}/modulix-heavy-vault-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_vault() { rm -f -- "$vault_file"; }
+          trap cleanup_vault EXIT
+          if [[ -n "$VAULT_PASSWORD" ]]; then
+            umask 077
+            printf '%s' "$VAULT_PASSWORD" > "$vault_file"
+            vault_args=(--vault-password-file "$vault_file")
+          fi
+          set +e
+          ansible-playbook -i "$INVENTORY_PATH" "$PLAYBOOK" \
+            --limit "$TARGET" \
+            -e workbench_acceptance_profile=heavy \
+            -e "workbench_acceptance_run_id=$run_id" \
+            "${vault_args[@]}"
+          rc=$?
+          set -e
+          if (( rc != 0 )); then
+            ansible-playbook -i "$INVENTORY_PATH" "$CLEANUP_PLAYBOOK" \
+              --limit "$TARGET" \
+              -e workbench_acceptance_profile=heavy \
+              -e "workbench_acceptance_run_id=$run_id" \
+              "${vault_args[@]}" || true
+            exit "$rc"
+          fi
+      - name: Write normalized success evidence
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          SCENARIO: ${{ inputs.scenario }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          jq -n \
+            --arg candidate_sha "$SOURCE_SHA" \
+            --arg profile heavy \
+            --arg scenario "$SCENARIO" \
+            --arg platform "$TARGET" \
+            '{candidate_sha:$candidate_sha,profile:$profile,scenario:$scenario,platform:$platform,status:"passed"}' \
+            > evidence/heavy-result.json
+      - name: Upload normalized Heavy evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: runbook-heavy-${{ inputs.scenario }}
+          path: evidence/heavy-result.json
+          if-no-files-found: error
+
+  profile:
+    name: Ansible runbook Heavy profile
+    if: always()
+    needs: [validate-contract, heavy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require contract and Heavy execution
+        env:
+          CONTRACT_RESULT: ${{ needs.validate-contract.result }}
+          HEAVY_RESULT: ${{ needs.heavy.result }}
+        run: |
+          set -euo pipefail
+          test "$CONTRACT_RESULT" = success
+          test "$HEAVY_RESULT" = success
