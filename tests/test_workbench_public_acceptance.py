@@ -158,7 +158,11 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             packer,
         )
         self.assertIn(
-            '[[ "$VALIDATION_SHA" =~ ^[0-9a-f]{40}$ ]]',
+            "validation-sha must be a full lowercase 40-character Git SHA",
+            packer,
+        )
+        self.assertIn(
+            "source-sha must be a full lowercase 40-character Git SHA",
             packer,
         )
         self.assertIn(
