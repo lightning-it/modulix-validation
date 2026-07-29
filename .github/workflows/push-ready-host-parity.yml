@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       devtool_ref:
-        description: Immutable commit or ref in the Devtool repository
+        description: Commit SHA or ref; the resolved commit is recorded in evidence
         required: true
         default: develop
       rhel_image:
@@ -25,8 +25,8 @@ jobs:
     name: Ubuntu x86_64 with Docker
     runs-on:
       - self-hosted
-      - Linux
-      - X64
+      - linux
+      - x64
       - nested-virt
     timeout-minutes: 45
 
@@ -64,8 +64,8 @@ jobs:
     name: RHEL x86_64 VM with Podman
     runs-on:
       - self-hosted
-      - Linux
-      - X64
+      - linux
+      - x64
       - incus
       - nested-virt
     timeout-minutes: 60
@@ -117,6 +117,7 @@ jobs:
             mkdir -p /root/devtool
             tar -C /root/devtool -xzf /root/devtool.tgz
             cd /root/devtool
+            printf "devtool_commit=%s\n" "$(git rev-parse HEAD)"
             WUNDER_CONTAINER_ENGINE=podman \
               bash scripts/verify-host-parity.sh
           ' | tee "${RUNNER_TEMP}/rhel-host-parity.txt"
