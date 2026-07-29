@@ -81,11 +81,17 @@ jobs:
         with:
           python-version: "3.11"
       - name: Prepare hash-locked Ansible runtime
-        run: >-
-          python3 -m pip install --disable-pip-version-check --no-input
-          --require-hashes
-          --requirement
-          .github/requirements/collection-quality-profile.lock
+        run: |
+          set -euo pipefail
+          runtime_venv="${RUNNER_TEMP}/packer-heavy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 -m venv "$runtime_venv"
+          "$runtime_venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement \
+            .github/requirements/collection-quality-profile.lock
+          echo "$runtime_venv/bin" >>"$GITHUB_PATH"
       - name: Execute component-owned Heavy entry point
         env:
           ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/collections
