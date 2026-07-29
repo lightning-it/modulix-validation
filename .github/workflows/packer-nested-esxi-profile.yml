@@ -46,7 +46,6 @@ jobs:
     name: Validate Packer Heavy contract
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       id-token: write
     steps:
       - name: Validate immutable candidate and target
