@@ -10,6 +10,10 @@ on:
         description: Exact caller commit containing the Packer candidate.
         required: true
         type: string
+      validation-sha:
+        description: Exact modulix-validation commit containing this workflow and its lockfile.
+        required: true
+        type: string
       build-kind:
         description: Packer build kind (rhel or ubuntu).
         required: true
@@ -41,19 +45,63 @@ jobs:
   validate-contract:
     name: Validate Packer Heavy contract
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
       - name: Validate immutable candidate and target
         env:
           SOURCE_SHA: ${{ inputs.source-sha }}
+          VALIDATION_SHA: ${{ inputs.validation-sha }}
           BUILD_KIND: ${{ inputs.build-kind }}
           BUILD_VERSION: ${{ inputs.build-version }}
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source-sha must be a full lowercase 40-character Git SHA" >&2
+            exit 1
+          fi
+          if [[ ! "$VALIDATION_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "validation-sha must be a full lowercase 40-character Git SHA" >&2
+            exit 1
+          fi
           case "$BUILD_KIND:$BUILD_VERSION" in
             rhel:8|rhel:9|rhel:10|ubuntu:24.04|ubuntu:26.04) ;;
             *) echo "unsupported Packer Heavy target" >&2; exit 1 ;;
           esac
+      - name: Bind validation SHA to the called workflow identity
+        env:
+          EXPECTED_VALIDATION_SHA: ${{ inputs.validation-sha }}
+        run: |
+          set -euo pipefail
+          expected_ref="lightning-it/modulix-validation/.github/workflows/packer-nested-esxi-profile.yml@${EXPECTED_VALIDATION_SHA}"
+          token_file="$(mktemp)"
+          chmod 600 "$token_file"
+          trap 'rm -f "$token_file"' EXIT
+          curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=lit-packer-heavy-workflow-identity" \
+            >"$token_file"
+          python3 - "$expected_ref" "$token_file" <<'PY'
+          import base64
+          import json
+          from pathlib import Path
+          import sys
+
+          expected = sys.argv[1]
+          response = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          token = response.get("value", "")
+          parts = token.split(".")
+          if len(parts) != 3:
+              raise SystemExit("GitHub OIDC response did not contain a JWT")
+          payload = parts[1] + ("=" * (-len(parts[1]) % 4))
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          actual = claims.get("job_workflow_ref")
+          if actual != expected:
+              raise SystemExit(
+                  "validation-sha does not match GitHub job_workflow_ref: "
+                  f"expected {expected}, observed {actual!r}"
+              )
+          PY
 
   heavy:
     name: Heavy / nested-esxi / ${{ inputs.build-kind }}-${{ inputs.build-version }}
@@ -86,7 +134,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-validation
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ inputs.validation-sha }}
           path: .modulix-validation
           token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false

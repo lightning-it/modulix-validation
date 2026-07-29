@@ -2,12 +2,22 @@
 
 The reusable `packer-nested-esxi-profile.yml` workflow owns the GitHub Actions
 orchestration for real Packer builds on nested ESXi. The caller supplies an
-exact 40-character candidate commit, one supported build target, a protected
-environment, and inherited secrets.
+exact 40-character candidate commit, the exact 40-character
+`modulix-validation` commit used by the caller's reusable-workflow pin, one
+supported build target, a protected environment, and explicitly mapped
+secrets.
 
 The Packer templates and deterministic Heavy entry point remain in the caller
 repository. The central workflow owns the runner selection, immutable checkout,
 pinned infrastructure dependency, execution gate, and normalized evidence.
+It checks out the validation toolchain and its hash lockfile at the supplied
+validation commit; caller and validation revisions must never be inferred from
+the same GitHub context because they belong to different repositories.
+Before Heavy execution, the contract job obtains a short-lived GitHub OIDC
+identity token and requires its `job_workflow_ref` claim to equal the full
+`lightning-it/modulix-validation/.github/workflows/packer-nested-esxi-profile.yml@<validation-sha>`
+reference. The token is used only for this local identity comparison; it is
+neither logged nor exchanged with an external service.
 The component entry point must perform exact-name, owner-scoped cleanup in an
 `EXIT` trap.
 

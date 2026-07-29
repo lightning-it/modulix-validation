@@ -154,7 +154,26 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertNotIn("path: .validation-runtime", collection)
         self.assertIn("--require-hashes", packer)
         self.assertIn(
-            "ref: ${{ github.workflow_sha }}",
+            "validation-sha:",
+            packer,
+        )
+        self.assertIn(
+            "validation-sha must be a full lowercase 40-character Git SHA",
+            packer,
+        )
+        self.assertIn(
+            "source-sha must be a full lowercase 40-character Git SHA",
+            packer,
+        )
+        self.assertIn(
+            "ref: ${{ inputs.validation-sha }}",
+            packer,
+        )
+        self.assertNotIn("github.workflow_sha", packer)
+        self.assertIn("id-token: write", packer)
+        self.assertIn("job_workflow_ref", packer)
+        self.assertIn(
+            "validation-sha does not match GitHub job_workflow_ref",
             packer,
         )
         self.assertIn(
