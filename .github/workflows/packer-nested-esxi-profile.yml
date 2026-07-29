@@ -10,6 +10,10 @@ on:
         description: Exact caller commit containing the Packer candidate.
         required: true
         type: string
+      validation-sha:
+        description: Exact modulix-validation commit containing this workflow and its lockfile.
+        required: true
+        type: string
       build-kind:
         description: Packer build kind (rhel or ubuntu).
         required: true
@@ -45,11 +49,19 @@ jobs:
       - name: Validate immutable candidate and target
         env:
           SOURCE_SHA: ${{ inputs.source-sha }}
+          VALIDATION_SHA: ${{ inputs.validation-sha }}
           BUILD_KIND: ${{ inputs.build-kind }}
           BUILD_VERSION: ${{ inputs.build-version }}
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source-sha must be a full lowercase 40-character Git SHA" >&2
+            exit 1
+          fi
+          if [[ ! "$VALIDATION_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "validation-sha must be a full lowercase 40-character Git SHA" >&2
+            exit 1
+          fi
           case "$BUILD_KIND:$BUILD_VERSION" in
             rhel:8|rhel:9|rhel:10|ubuntu:24.04|ubuntu:26.04) ;;
             *) echo "unsupported Packer Heavy target" >&2; exit 1 ;;
@@ -86,7 +98,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-validation
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ inputs.validation-sha }}
           path: .modulix-validation
           token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
