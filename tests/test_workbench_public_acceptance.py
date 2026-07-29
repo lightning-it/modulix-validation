@@ -158,6 +158,10 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             packer,
         )
         self.assertIn(
+            "token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}",
+            packer,
+        )
+        self.assertIn(
             ".modulix-validation/.github/requirements/collection-quality-profile.lock",
             packer,
         )

@@ -31,6 +31,8 @@ on:
         required: true
       PACKER_INSTALLER_PASSWORD_HASH:
         required: false
+      LIT_REPOSITORY_READ_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -86,6 +88,7 @@ jobs:
           repository: lightning-it/modulix-validation
           ref: ${{ github.workflow_sha }}
           path: .modulix-validation
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
       - name: Prepare hash-locked Ansible runtime
         run: |
