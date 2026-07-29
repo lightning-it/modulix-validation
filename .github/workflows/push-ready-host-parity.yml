@@ -27,6 +27,7 @@ jobs:
       - self-hosted
       - linux
       - x64
+      - incus
       - nested-virt
     timeout-minutes: 45
 
@@ -44,6 +45,7 @@ jobs:
           INSTANCE: parity-ubuntu-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          command -v incus >/dev/null
           incus --force-local launch images:ubuntu/24.04/cloud "${INSTANCE}" --vm \
             -c limits.cpu=4 \
             -c limits.memory=8GiB
@@ -72,6 +74,15 @@ jobs:
             apt-get update
             apt-get install -y docker.io git python3
             systemctl enable --now docker
+            ready=false
+            for _ in $(seq 1 30); do
+              if docker info >/dev/null 2>&1; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            test "${ready}" = true
             mkdir -p /root/devtool
             tar -C /root/devtool -xzf /root/devtool.tgz
             cd /root/devtool
@@ -125,7 +136,12 @@ jobs:
           RHEL_9_INCUS_QCOW2_SHA256: ${{ secrets.RHEL_9_INCUS_QCOW2_SHA256 }}
         run: |
           set -euo pipefail
+          command -v incus >/dev/null
           if ! incus --force-local image info "${RHEL_IMAGE}" >/dev/null 2>&1; then
+            if [[ "${RHEL_IMAGE}" != local:* ]]; then
+              echo "::error::rhel_image must use a local: alias when importing artifacts"
+              exit 1
+            fi
             required=(
               RHEL_9_INCUS_METADATA_URL
               RHEL_9_INCUS_METADATA_SHA256
