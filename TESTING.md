@@ -47,6 +47,26 @@ bash scripts/wunder-devtools-ee.sh true
 
 Heavy Incus tests require an Ubuntu host or runner with Incus available, suitable images, and repository-specific scenario configuration. Heavy tests must use sanitized inputs and must not rely on private inventory values.
 
+## Packer Runtime Lock
+
+The reusable Packer Heavy profile installs its Python 3.11 runtime from
+`.github/requirements/collection-quality-profile.lock` with
+`--require-hashes`. Regenerate that lock for the workflow's target interpreter,
+not the maintainer's local Python version:
+
+```bash
+uv pip compile \
+  --python-version 3.11 \
+  --generate-hashes \
+  --no-emit-index-url \
+  --output-file .github/requirements/collection-quality-profile.lock \
+  .github/requirements/collection-quality-profile.in
+```
+
+The `validation / Packer runtime lock` CI job verifies a clean installation in
+a new Python 3.11 virtual environment. It must pass before a revised lock can
+be used by a protected Heavy run.
+
 ## Interpreting GitHub Actions
 
 The GitHub Actions matrix is the primary dashboard. Job names should expose the repository class, OS/runtime, and profile, for example `ansible / rhel9 / molecule-heavy-incus` or `container / ubuntu / build-smoke`.
