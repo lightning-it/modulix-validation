@@ -40,6 +40,21 @@ jobs:
           path: devtool
           persist-credentials: false
 
+      - name: Ensure Incus VM runtime dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if ! command -v apt-get >/dev/null || ! command -v dpkg-query >/dev/null; then
+            echo "::error::Incus runner must use a Debian-family host"
+            exit 1
+          fi
+          if ! dpkg-query -W -f='${Status}' qemu-system-modules-spice \
+            2>/dev/null | grep -q 'ok installed'; then
+            sudo apt-get update
+            sudo apt-get install -y qemu-system-modules-spice
+          fi
+
       - name: Run Ubuntu host parity
         env:
           INSTANCE: parity-ubuntu-${{ github.run_id }}-${{ github.run_attempt }}
