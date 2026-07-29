@@ -61,6 +61,7 @@ jobs:
           [[ "$TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
           [[ "$SCENARIO" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
           for path in "$PLAYBOOK" "$CLEANUP_PLAYBOOK"; do
+            [[ "$path" != /* ]]
             [[ "$path" =~ ^[A-Za-z0-9._/-]+\.ya?ml$ ]]
             [[ "/$path/" != *"/../"* ]]
           done

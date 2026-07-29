@@ -116,6 +116,10 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertIn("matrix-json must contain a non-empty include list", workflow)
         self.assertIn('required_labels = {"self-hosted", "linux", "x64"}', workflow)
         self.assertIn('"incus" not in labels', workflow)
+        self.assertIn(
+            'cell["infrastructure"] != "incus" and "incus" in labels',
+            workflow,
+        )
         self.assertIn("success_marker", workflow)
         self.assertRegex(
             workflow,
@@ -133,6 +137,26 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         self.assertIn('skipped="0"', action)
         self.assertIn("profile did not produce a meaningful successful result", action)
         self.assertIn("2886566105", documentation)
+
+    def test_heavy_workflow_contracts_are_bounded_and_hash_locked(self):
+        root = Path(__file__).parents[1]
+        runbook = (
+            root / ".github/workflows/ansible-runbook-heavy-profile.yml"
+        ).read_text(encoding="utf-8")
+        collection = (
+            root / ".github/workflows/collection-quality-profile.yml"
+        ).read_text(encoding="utf-8")
+        packer = (
+            root / ".github/workflows/packer-nested-esxi-profile.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('[[ "$path" != /* ]]', runbook)
+        self.assertNotIn("path: .validation-runtime", collection)
+        self.assertIn("--require-hashes", packer)
+        self.assertIn(
+            ".github/requirements/collection-quality-profile.lock",
+            packer,
+        )
 
     def test_profile_selection_is_bounded_and_ordered(self):
         selected = MODULE.select_profiles("application,tiny", MODULE.EXPECTED_PROFILES)
