@@ -1,0 +1,148 @@
+---
+name: Push-ready host parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      devtool_ref:
+        description: Commit SHA or ref; the resolved commit is recorded in evidence
+        required: true
+        default: develop
+      rhel_image:
+        description: Existing entitled RHEL Incus VM image
+        required: true
+        default: local:rhel9-aap-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: push-ready-host-parity
+  cancel-in-progress: false
+
+jobs:
+  ubuntu:
+    name: Ubuntu x86_64 with Docker
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - nested-virt
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Devtool source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: lightning-it/container-ee-wunder-devtools-ubi9
+          ref: ${{ inputs.devtool_ref }}
+          path: devtool
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Run Ubuntu host parity
+        env:
+          WUNDER_CONTAINER_ENGINE: docker
+        run: |
+          set -euo pipefail
+          cd devtool
+          {
+            printf 'devtool_commit=%s\n' "$(git rev-parse HEAD)"
+            bash scripts/verify-host-parity.sh
+          } | tee "${RUNNER_TEMP}/ubuntu-host-parity.txt"
+
+      - name: Upload Ubuntu evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ubuntu-host-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ubuntu-host-parity.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  rhel:
+    name: RHEL x86_64 VM with Podman
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - incus
+      - nested-virt
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Devtool source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: lightning-it/container-ee-wunder-devtools-ubi9
+          ref: ${{ inputs.devtool_ref }}
+          path: devtool
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Run RHEL host parity in ephemeral VM
+        env:
+          RHEL_IMAGE: ${{ inputs.rhel_image }}
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          incus --force-local image info "${RHEL_IMAGE}" >/dev/null
+          incus --force-local launch "${RHEL_IMAGE}" "${INSTANCE}" --vm \
+            -c limits.cpu=4 \
+            -c limits.memory=8GiB
+
+          ready=false
+          for _ in $(seq 1 90); do
+            if incus --force-local exec "${INSTANCE}" -- true >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "${ready}" = true
+
+          tar -C devtool -czf "${RUNNER_TEMP}/devtool.tgz" .
+          incus --force-local file push \
+            "${RUNNER_TEMP}/devtool.tgz" "${INSTANCE}/root/devtool.tgz"
+          # The command is intentionally expanded inside the RHEL VM.
+          # shellcheck disable=SC2016
+          incus --force-local exec "${INSTANCE}" -- bash -lc '
+            set -euo pipefail
+            source /etc/os-release
+            test "${ID}" = rhel
+            test "$(uname -m)" = x86_64
+            command -v podman >/dev/null
+            command -v git >/dev/null
+            command -v python3 >/dev/null
+            mkdir -p /root/devtool
+            tar -C /root/devtool -xzf /root/devtool.tgz
+            cd /root/devtool
+            printf "devtool_commit=%s\n" "$(git rev-parse HEAD)"
+            WUNDER_CONTAINER_ENGINE=podman \
+              bash scripts/verify-host-parity.sh
+          ' | tee "${RUNNER_TEMP}/rhel-host-parity.txt"
+
+      - name: Collect RHEL diagnostics
+        if: failure()
+        env:
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set +e
+          incus --force-local info "${INSTANCE}"
+          incus --force-local console "${INSTANCE}" --show-log
+
+      - name: Remove RHEL VM
+        if: always()
+        env:
+          INSTANCE: parity-rhel-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          incus --force-local delete --force "${INSTANCE}" 2>/dev/null || true
+
+      - name: Upload RHEL evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rhel-host-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rhel-host-parity.txt
+          if-no-files-found: error
+          retention-days: 30
