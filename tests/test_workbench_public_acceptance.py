@@ -170,6 +170,12 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             packer,
         )
         self.assertNotIn("github.workflow_sha", packer)
+        self.assertIn("id-token: write", packer)
+        self.assertIn("job_workflow_ref", packer)
+        self.assertIn(
+            "validation-sha does not match GitHub job_workflow_ref",
+            packer,
+        )
         self.assertIn(
             "token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}",
             packer,
