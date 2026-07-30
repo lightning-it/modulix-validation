@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -87,9 +88,19 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             "@7d9e9edb4eb8f6efbd025a8da74a78f2de2d2ed4",
             workflow,
         )
-        renovate = (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
-        self.assertIn("collection-quality-profile.yml", renovate)
-        self.assertIn('"matchDepNames": ["python"]', renovate)
+        renovate = json.loads(
+            (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(
+            any(
+                ".github/workflows/collection-quality-profile.yml"
+                in rule.get("matchFileNames", [])
+                and "python" in rule.get("matchDepNames", [])
+                and rule.get("allowedVersions") == r"/^3\.11(?:\.\d+)?$/"
+                for rule in renovate["packageRules"]
+            ),
+            "Renovate must keep collection-quality validation on Python 3.11",
+        )
 
     def test_quality_action_installs_exact_candidate_without_network_resolution(self):
         action = (
