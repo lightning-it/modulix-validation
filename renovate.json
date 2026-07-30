@@ -66,10 +66,9 @@
         "github-actions"
       ],
       "matchFileNames": [
-        ".github/workflows/collection-quality-profile.yml",
         ".github/workflows/collection-molecule-profile.yml",
-        ".github/workflows/packer-nested-esxi-profile.yml",
-        ".github/workflows/validation-contracts.yml"
+        ".github/workflows/collection-quality-profile.yml",
+        ".github/workflows/packer-nested-esxi-profile.yml"
       ],
       "matchDepNames": [
         "python"
@@ -97,7 +96,8 @@
         "github-actions"
       ],
       "matchFileNames": [
-        ".github/workflows/repository-quality.yml"
+        ".github/workflows/repository-quality.yml",
+        ".github/workflows/validation-contracts.yml"
       ],
       "matchDepNames": [
         "python"
