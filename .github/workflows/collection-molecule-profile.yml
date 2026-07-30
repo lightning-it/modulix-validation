@@ -168,7 +168,7 @@ jobs:
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Run centrally owned collection profile
         uses: lightning-it/modulix-validation/.github/actions/run-collection-molecule@92dd50377f4ac818bc3a29375cb3e9e96873f3e2
         env:
