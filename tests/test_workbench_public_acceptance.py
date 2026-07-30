@@ -91,13 +91,19 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         renovate = json.loads(
             (Path(__file__).parents[1] / "renovate.json").read_text(encoding="utf-8")
         )
+        package_rules = renovate.get("packageRules")
+        self.assertIsInstance(
+            package_rules,
+            list,
+            "Renovate must define packageRules as a list",
+        )
         self.assertTrue(
             any(
                 ".github/workflows/collection-quality-profile.yml"
                 in rule.get("matchFileNames", [])
                 and "python" in rule.get("matchDepNames", [])
                 and rule.get("allowedVersions") == r"/^3\.11(?:\.\d+)?$/"
-                for rule in renovate["packageRules"]
+                for rule in package_rules
             ),
             "Renovate must keep collection-quality validation on Python 3.11",
         )
