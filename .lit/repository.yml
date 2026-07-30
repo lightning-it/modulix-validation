@@ -29,7 +29,7 @@ heavy_incus_required: true
 preserve_main_merge_ancestry: true
 openssf_best_practices:
   required: true
-  project_id: null
+  project_id: 13888
   target_level: passing
   exception: null
 readme_badges: []

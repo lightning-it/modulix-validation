@@ -36,6 +36,7 @@ Publishing targets: `none`.
 
 [![CI](https://github.com/lightning-it/modulix-validation/actions/workflows/repository-quality.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-validation/actions/workflows/repository-quality.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lightning-it/modulix-validation/badge)](https://scorecard.dev/viewer/?uri=github.com/lightning-it/modulix-validation)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13888/badge)](https://www.bestpractices.dev/projects/13888)
 
 <!-- END LIT_QUALITY_BADGES -->
 
