@@ -141,8 +141,8 @@ jobs:
             echo "::error::source-repository is not allowlisted"
             exit 1
           }
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "::error::source-sha must be a full immutable SHA"
+          [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
+            echo "::error::source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID"
             exit 1
           }
 
