@@ -28,7 +28,7 @@ jobs:
     steps:
       - id: source
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
         run: |
           set -euo pipefail
           sha="$(gh api "repos/${SOURCE_REPOSITORY}/git/ref/heads/develop" --jq .object.sha)"
@@ -47,6 +47,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPOSITORY }}
           ref: ${{ needs.source.outputs.sha }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           path: candidate
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -74,6 +75,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPOSITORY }}
           ref: ${{ needs.source.outputs.sha }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -134,11 +136,12 @@ jobs:
           test "$BUILD_RESULT" = success
           test "$HEAVY_RESULT" = success
           test "$APPLICATION_RESULT" = success
-          printf '{"schema_version":1,"repository":"%s","source_sha":"%s","release_eligible":true}\n' \
+          # This is a migration summary, not yet a v1 release-evidence contract.
+          printf '{"schema_version":1,"repository":"%s","source_sha":"%s","release_eligible":false}\n' \
             "$SOURCE_REPOSITORY" "$SOURCE_SHA" > validation-evidence.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: supplementary-validation-evidence-${{ needs.source.outputs.sha }}
+          name: supplementary-validation-summary-${{ needs.source.outputs.sha }}
           path: validation-evidence.json
           if-no-files-found: error
           retention-days: 30

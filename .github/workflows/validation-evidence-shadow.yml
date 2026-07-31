@@ -176,7 +176,7 @@ jobs:
             --git-tree "$git_tree"
 
       - name: Upload explicitly non-releaseable shadow manifest
-        if: ${{ inputs['evidence-json'] == '' }}
+        if: ${{ (inputs['evidence-json'] || '') == '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: validation-evidence-shadow-${{ github.run_id }}-${{ github.run_attempt }}
