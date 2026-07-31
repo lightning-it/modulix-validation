@@ -130,6 +130,22 @@ jobs:
         matrix.target }}
       cancel-in-progress: false
     steps:
+      - name: Validate trusted collection source
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ inputs['source-repository'] || github.repository }}
+          SOURCE_SHA: ${{ inputs['source-sha'] }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
+            echo "::error::source-repository is not allowlisted"
+            exit 1
+          }
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::source-sha must be a full immutable SHA"
+            exit 1
+          }
+
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
