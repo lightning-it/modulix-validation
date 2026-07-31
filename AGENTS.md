@@ -260,6 +260,42 @@ When `actionlint` is available, run:
 actionlint
 ```
 
+## Push-ready Agent Contract
+
+Every pushed change is governed by this file and must be reviewed locally by
+both Codex and GitHub Copilot CLI through:
+
+```text
+python3 scripts/lit-push-ready.py push-ready
+```
+
+Run it only for a clean, committed candidate. The gate fetches the
+authoritative `origin/develop`, constructs the synthetic integration change,
+runs the one repository-owned CI profile, and gives that exact diff plus these
+instructions to both agents in read-only sandboxes. Copilot CLI must run only
+inside the immutable Devtool container; do not install or invoke an
+uncontrolled host Copilot binary. Codex must use its isolated read-only
+configuration. Neither agent may mutate the reviewed tree or waive a failed
+check.
+
+Reconcile every actionable local finding, amend the candidate, and rerun the
+complete gate until both agents and the deterministic profile pass. Push only
+the reviewed branch and `HEAD` authorized by the fresh evidence. A pre-commit
+hook may provide faster formatting feedback, but it is not the acceptance
+boundary and must not trigger authenticated agent reviews.
+
+GitHub Actions and the server-side GitHub Copilot pull-request review remain
+authoritative. After any server finding or code change, update the candidate,
+rerun the same local gate, and obtain a new current-head server review. The goal
+is a first successful required pipeline run; do not use the PR as the first
+place to discover locally reproducible failures.
+
+The one-time v2 policy bootstrap cannot use its changed engine as its own trust
+root. For that bootstrap only, run the committed canonical profile and
+`python3 scripts/lit-push-ready.py review`; protected current-head GitHub
+Actions and Copilot checks authorize merge. The exception ends once v2 is on
+`develop`.
+
 ## Secret Storage Rule
 
 - Never commit secret values, tokens, passwords, private keys, activation codes, or decrypted Vault output.
@@ -267,3 +303,28 @@ actionlint
 - A HashiCorp Vault validation suite must not depend on the ephemeral Vault target for bootstrap credentials. Bootstrap from an approved external secret backend or a workflow-scoped GitHub Secret, then keep all target state run-scoped.
 - When an external HC Vault is not configured, required application credentials must be supplied from Ansible Vault encrypted inventory variables. Workflow-only provider credentials may use scoped GitHub Secrets. Do not add new plaintext generated-secret fallbacks.
 - Tasks that read, generate, write, template, or compare secret material must use `no_log: true`.
+
+<!-- LIT AI task governance: start -->
+
+## AI model and token governance
+
+Apply `LIT-GEN-GDR-GOV-30-Budget-Conscious-AI-Model-Selection` to every
+substantive Codex or ChatGPT-assisted task. Before investigation, planning,
+tool use, implementation, or delegation, record a compact task profile in the
+task chat: work item, risk (`low`, `normal`, or `high`), smallest sufficient
+model/reasoning choice, rationale, and a concrete escalation condition.
+
+- Use the balanced, lowest reliable capability by default. Escalate to a
+  premium/frontier model or higher reasoning only for a high-risk decision,
+  complex architecture/debugging/dependencies, or a documented focused failure
+  of the standard approach. Restrict that escalation to the difficult subtask.
+- Never use Speed Mode. Do not replace verification with a more expensive model
+  or sacrifice quality to reduce elapsed time.
+- Retrieve only relevant issue, files, logs, and source records; avoid broad
+  repository or chat-history loading, speculative analysis, and unbounded retry
+  loops. Delegate only independent, bounded work that reduces total effort.
+- For GitHub or Jira work, include the task profile in the issue/task record
+  when AI assistance materially affects execution. Close with verification and
+  remaining risks; preserve durable decisions in Confluence, Jira, or GitHub.
+
+<!-- LIT AI task governance: end -->

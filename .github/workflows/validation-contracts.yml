@@ -14,19 +14,27 @@ jobs:
   contracts:
     name: validation / contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-      - name: Install pinned contract dependency
-        run: python3 -m pip install --require-hashes -r requirements-validation.lock
-      - name: Validate delegated execution contracts
-        run: python3 -m unittest discover -s tests -p 'test_*.py'
+          fetch-depth: 0
+      - name: Refresh authoritative develop ref
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth_header"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="$auth_header" \
+            git fetch --quiet --no-tags origin \
+              +refs/heads/develop:refs/remotes/origin/develop
+      - name: Run the canonical local and CI profile
+        run: scripts/lit-ci-profile.sh repository-quality
 
   packer-runtime-lock:
     name: validation / Packer runtime lock
@@ -39,7 +47,7 @@ jobs:
       - name: Setup Packer runtime Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Verify hash-locked Packer runtime
         run: |
           set -euo pipefail
