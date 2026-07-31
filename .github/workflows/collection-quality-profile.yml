@@ -21,6 +21,11 @@ on:
         description: Exact collection commit represented by the candidate.
         required: true
         type: string
+      source-repository:
+        description: Repository that contains the exact collection source.
+        required: false
+        default: ""
+        type: string
       environment-name:
         description: Protected GitHub Environment containing runtime policy and secrets.
         required: true
@@ -128,6 +133,7 @@ jobs:
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
           persist-credentials: false
       - name: Set up exact Python runtime

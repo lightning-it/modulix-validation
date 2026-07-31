@@ -1,0 +1,144 @@
+# yamllint disable rule:truthy
+---
+name: Supplementary central infrastructure validation
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supplementary-central-validation
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: lightning-it/ansible-collection-supplementary
+  PYTHON_VERSION: "3.11"
+  ANSIBLE_CORE_VERSION: "2.18.18"
+
+jobs:
+  source:
+    name: Resolve protected Supplementary candidate
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${SOURCE_REPOSITORY}/git/ref/heads/develop" --jq .object.sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  matrix:
+    name: Generate protected Heavy and Application matrix
+    needs: source
+    runs-on: ubuntu-latest
+    outputs:
+      heavy: ${{ steps.matrix.outputs.heavy }}
+      acceptance: ${{ steps.matrix.outputs.acceptance }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ needs.source.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: python -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - id: matrix
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          python scripts/validate-role-coverage.py validate
+          for profile in heavy application_acceptance; do
+            value="$(python scripts/validate-role-coverage.py matrix --profile "$profile" --target-disposition supported)"
+            python -c 'import json, sys; assert json.load(sys.stdin).get("include")' <<<"$value"
+            key="$([ "$profile" = heavy ] && echo heavy || echo acceptance)"
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+
+  build:
+    name: Build exact protected candidate
+    needs: source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          python -m pip install --disable-pip-version-check "ansible-core==${ANSIBLE_CORE_VERSION}" PyYAML==6.0.3
+          mkdir -p dist/candidate
+          ansible-galaxy collection build --output-path dist/candidate --force
+          (cd dist/candidate && sha256sum *.tar.gz > candidate-SHA256SUMS && sha256sum --check candidate-SHA256SUMS)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: supplementary-candidate-${{ needs.source.outputs.sha }}
+          path: dist/candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  heavy:
+    name: Central Heavy matrix
+    needs: [source, matrix, build]
+    uses: ./.github/workflows/collection-quality-profile.yml
+    with:
+      profile: heavy
+      matrix-json: ${{ needs.matrix.outputs.heavy }}
+      candidate-artifact: supplementary-candidate-${{ needs.source.outputs.sha }}
+      source-sha: ${{ needs.source.outputs.sha }}
+      source-repository: lightning-it/ansible-collection-supplementary
+      environment-name: ansible-collection-runtime-protected
+    secrets: inherit
+
+  application:
+    name: Central Application Acceptance matrix
+    needs: [source, matrix, build, heavy]
+    uses: ./.github/workflows/collection-quality-profile.yml
+    with:
+      profile: application_acceptance
+      matrix-json: ${{ needs.matrix.outputs.acceptance }}
+      candidate-artifact: supplementary-candidate-${{ needs.source.outputs.sha }}
+      source-sha: ${{ needs.source.outputs.sha }}
+      source-repository: lightning-it/ansible-collection-supplementary
+      environment-name: ansible-collection-runtime-protected
+    secrets: inherit
+
+  evidence:
+    name: Publish exact-SHA central evidence
+    if: always()
+    needs: [source, matrix, build, heavy, application]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          MATRIX_RESULT: ${{ needs.matrix.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          HEAVY_RESULT: ${{ needs.heavy.result }}
+          APPLICATION_RESULT: ${{ needs.application.result }}
+        run: |
+          set -euo pipefail
+          test "$MATRIX_RESULT" = success
+          test "$BUILD_RESULT" = success
+          test "$HEAVY_RESULT" = success
+          test "$APPLICATION_RESULT" = success
+          printf '{"schema_version":1,"repository":"%s","source_sha":"%s","release_eligible":true}\n' \
+            "$SOURCE_REPOSITORY" "$SOURCE_SHA" > validation-evidence.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: supplementary-validation-evidence-${{ needs.source.outputs.sha }}
+          path: validation-evidence.json
+          if-no-files-found: error
+          retention-days: 30
