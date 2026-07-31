@@ -39,7 +39,7 @@ jobs:
       - name: Setup Packer runtime Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Verify hash-locked Packer runtime
         run: |
           set -euo pipefail
