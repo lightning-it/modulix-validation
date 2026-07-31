@@ -61,6 +61,8 @@ jobs:
         env:
           PROFILE: ${{ inputs.profile }}
           MATRIX_JSON: ${{ inputs['matrix-json'] }}
+          CALLER_REPOSITORY: ${{ github.repository }}
+          SOURCE_REPOSITORY: ${{ inputs['source-repository'] || github.repository }}
           SOURCE_SHA: ${{ inputs['source-sha'] }}
         run: |
           set -euo pipefail
@@ -68,6 +70,14 @@ jobs:
             heavy|application_acceptance) ;;
             *) echo "unsupported delegated profile: $PROFILE" >&2; exit 1 ;;
           esac
+          [[ "$CALLER_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
+            echo "workflow caller is not allowlisted" >&2
+            exit 1
+          }
+          [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
+            echo "source-repository is not allowlisted" >&2
+            exit 1
+          }
           if [[ ! "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
             echo "source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID" >&2
             exit 1
@@ -130,27 +140,6 @@ jobs:
         matrix.target }}
       cancel-in-progress: false
     steps:
-      - name: Validate trusted collection source
-        shell: bash
-        env:
-          CALLER_REPOSITORY: ${{ github.repository }}
-          SOURCE_REPOSITORY: ${{ inputs['source-repository'] || github.repository }}
-          SOURCE_SHA: ${{ inputs['source-sha'] }}
-        run: |
-          set -euo pipefail
-          [[ "$CALLER_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
-            echo "::error::workflow caller is not allowlisted"
-            exit 1
-          }
-          [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
-            echo "::error::source-repository is not allowlisted"
-            exit 1
-          }
-          [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
-            echo "::error::source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID"
-            exit 1
-          }
-
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
