@@ -133,10 +133,15 @@ jobs:
       - name: Validate trusted collection source
         shell: bash
         env:
+          CALLER_REPOSITORY: ${{ github.repository }}
           SOURCE_REPOSITORY: ${{ inputs['source-repository'] || github.repository }}
           SOURCE_SHA: ${{ inputs['source-sha'] }}
         run: |
           set -euo pipefail
+          [[ "$CALLER_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
+            echo "::error::workflow caller is not allowlisted"
+            exit 1
+          }
           [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/[A-Za-z0-9_.-]+$ ]] || {
             echo "::error::source-repository is not allowlisted"
             exit 1
