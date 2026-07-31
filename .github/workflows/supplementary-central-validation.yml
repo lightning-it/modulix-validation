@@ -82,7 +82,7 @@ jobs:
           python -m pip install --disable-pip-version-check "ansible-core==${ANSIBLE_CORE_VERSION}" PyYAML==6.0.3
           mkdir -p dist/candidate
           ansible-galaxy collection build --output-path dist/candidate --force
-          (cd dist/candidate && sha256sum *.tar.gz > candidate-SHA256SUMS && sha256sum --check candidate-SHA256SUMS)
+          (cd dist/candidate && sha256sum -- *.tar.gz > candidate-SHA256SUMS && sha256sum --check candidate-SHA256SUMS)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: supplementary-candidate-${{ needs.source.outputs.sha }}
