@@ -1,0 +1,185 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: Validation evidence shadow contract (not a release check)
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      evidence-json:
+        description: "Optional v1 evidence JSON to verify. It must contain no secrets."
+        required: false
+        default: ""
+        type: string
+      candidate-repository:
+        description: "Expected candidate repository; blank uses this repository."
+        required: false
+        default: ""
+        type: string
+      source-sha:
+        description: "Expected full candidate SHA; blank uses this workflow SHA."
+        required: false
+        default: ""
+        type: string
+      git-tree:
+        description: "Expected full Git tree SHA; required when the SHA is not checked out."
+        required: false
+        default: ""
+        type: string
+      artifact-digest:
+        description: "Optional expected immutable sha256 artifact digest."
+        required: false
+        default: ""
+        type: string
+      policy-sha:
+        description: "Trusted expected policy SHA; required when verifying evidence."
+        required: false
+        default: ""
+        type: string
+      matrix-sha:
+        description: "Trusted expected matrix SHA; required when verifying evidence."
+        required: false
+        default: ""
+        type: string
+      validation-workflow-sha:
+        description: "Trusted expected validation workflow SHA; required when verifying evidence."
+        required: false
+        default: ""
+        type: string
+      bom-digest:
+        description: "Trusted expected canonical sha256 BOM digest; required when verifying evidence."
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      evidence-json:
+        description: "v1 evidence JSON to verify; never include secrets."
+        required: true
+        type: string
+      candidate-repository:
+        description: "Expected candidate repository."
+        required: true
+        type: string
+      source-sha:
+        description: "Expected full candidate SHA."
+        required: true
+        type: string
+      git-tree:
+        description: "Expected full candidate Git tree SHA, if applicable."
+        required: false
+        type: string
+      artifact-digest:
+        description: "Expected immutable sha256 artifact digest, if applicable."
+        required: false
+        type: string
+      policy-sha:
+        description: "Trusted expected policy SHA."
+        required: true
+        type: string
+      matrix-sha:
+        description: "Trusted expected matrix SHA."
+        required: true
+        type: string
+      validation-workflow-sha:
+        description: "Trusted expected validation workflow SHA."
+        required: true
+        type: string
+      bom-digest:
+        description: "Trusted expected canonical sha256 BOM digest."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-or-verify:
+    name: validation evidence / semantic shadow only / not release
+    if: >-
+      github.event_name != 'schedule' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout contract verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Create non-releaseable shadow manifest or verify supplied evidence
+        env:
+          EVIDENCE_JSON: ${{ inputs['evidence-json'] || '' }}
+          INPUT_REPOSITORY: ${{ inputs['candidate-repository'] || '' }}
+          INPUT_SOURCE_SHA: ${{ inputs['source-sha'] || '' }}
+          INPUT_GIT_TREE: ${{ inputs['git-tree'] || '' }}
+          INPUT_ARTIFACT_DIGEST: ${{ inputs['artifact-digest'] || '' }}
+          INPUT_POLICY_SHA: ${{ inputs['policy-sha'] || '' }}
+          INPUT_MATRIX_SHA: ${{ inputs['matrix-sha'] || '' }}
+          INPUT_VALIDATION_WORKFLOW_SHA: ${{ inputs['validation-workflow-sha'] || '' }}
+          INPUT_BOM_DIGEST: ${{ inputs['bom-digest'] || '' }}
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/validation-evidence-shadow"
+          install -d -m 0700 "$evidence_dir"
+
+          if [ -n "$EVIDENCE_JSON" ]; then
+            if [ "${#EVIDENCE_JSON}" -gt 1048576 ]; then
+              echo "Evidence input is larger than the 1 MiB contract limit." >&2
+              exit 1
+            fi
+            if [ -z "$INPUT_REPOSITORY" ] || [ -z "$INPUT_SOURCE_SHA" ]; then
+              echo "candidate-repository and source-sha are required to verify evidence." >&2
+              exit 1
+            fi
+            if [ -z "$INPUT_GIT_TREE" ] && [ -z "$INPUT_ARTIFACT_DIGEST" ]; then
+              echo "git-tree or artifact-digest is required to verify evidence." >&2
+              exit 1
+            fi
+            if [ -z "$INPUT_POLICY_SHA" ] || [ -z "$INPUT_MATRIX_SHA" ] || \
+              [ -z "$INPUT_VALIDATION_WORKFLOW_SHA" ] || [ -z "$INPUT_BOM_DIGEST" ]; then
+              echo "trusted policy, matrix, validation workflow and BOM identities are required." >&2
+              exit 1
+            fi
+            printf '%s' "$EVIDENCE_JSON" >"$evidence_dir/evidence.json"
+            args=(
+              semantic-verify
+              --evidence "$evidence_dir/evidence.json"
+              --repository "$INPUT_REPOSITORY"
+              --source-sha "$INPUT_SOURCE_SHA"
+              --policy-sha "$INPUT_POLICY_SHA"
+              --matrix-sha "$INPUT_MATRIX_SHA"
+              --validation-workflow-sha "$INPUT_VALIDATION_WORKFLOW_SHA"
+              --bom-digest "$INPUT_BOM_DIGEST"
+            )
+            if [ -n "$INPUT_GIT_TREE" ]; then
+              args+=(--git-tree "$INPUT_GIT_TREE")
+            fi
+            if [ -n "$INPUT_ARTIFACT_DIGEST" ]; then
+              args+=(--artifact-digest "$INPUT_ARTIFACT_DIGEST")
+            fi
+            python3 .github/scripts/validation-evidence.py "${args[@]}"
+            rm -f "$evidence_dir/evidence.json"
+            exit 0
+          fi
+
+          repository="${INPUT_REPOSITORY:-$GITHUB_REPOSITORY}"
+          source_sha="${INPUT_SOURCE_SHA:-$GITHUB_SHA}"
+          git_tree="${INPUT_GIT_TREE:-$(git rev-parse "${GITHUB_SHA}^{tree}")}"
+          python3 .github/scripts/validation-evidence.py shadow-manifest \
+            --output "$evidence_dir/shadow-manifest.json" \
+            --repository "$repository" \
+            --source-sha "$source_sha" \
+            --git-tree "$git_tree"
+
+      - name: Upload explicitly non-releaseable shadow manifest
+        if: ${{ (inputs['evidence-json'] || '') == '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: validation-evidence-shadow-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validation-evidence-shadow/shadow-manifest.json
+          if-no-files-found: error
+          retention-days: 7

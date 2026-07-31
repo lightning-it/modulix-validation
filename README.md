@@ -292,6 +292,9 @@ Private repository note: generated docs must stay generic and secret-safe.
 
 Validation proof for each released version is stored in the corresponding GitHub Release evidence.
 
+For asynchronous Heavy and Application Acceptance evidence, see
+[Prevalidated Candidate Evidence](./docs/prevalidated-candidate-evidence.md).
+
 <!-- END LIT_COMPATIBILITY_MATRIX -->
 
 ## Release Evidence

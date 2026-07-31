@@ -32,26 +32,42 @@ Products and runtimes:
 
 ## Local Commands
 
-Run the managed repository-policy checks:
+From a clean committed checkout with `origin/develop` available, run the exact
+local/CI profile:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install PyYAML==6.0.3
-.venv/bin/python scripts/lit-repository-quality.py
-.venv/bin/python scripts/lit-push-ready.py push-ready
+scripts/lit-ci-profile.sh repository-quality
 ```
 
-Run the declared pre-commit profile:
+This requires Docker or Podman. Before pushing, also run the push-ready gate
+with authenticated Copilot and Codex CLIs:
 
 ```bash
-pre-commit run --all-files
+python3 scripts/lit-push-ready.py push-ready
 ```
 
-Run the repository-specific commands declared in
-`.lit/push-ready.json` and the required CI workflow named in
-`.lit/repository.yml`. Do not substitute unrelated toolchains.
+`pre-commit run --all-files` remains an optional fast feedback loop; it is not
+the CI-parity boundary. The repository-specific command in
+`.lit/push-ready.json` and both required CI workflows invoke the exact profile
+above. Do not substitute unrelated toolchains.
 
 Heavy Incus tests require an Ubuntu host or runner with Incus available, suitable images, and repository-specific scenario configuration. They must use sanitized inputs and must not rely on private inventory values.
+
+## Prevalidated candidate evidence
+
+The fail-closed v1 contract for asynchronously produced Heavy and Application
+Acceptance evidence is documented in
+[Prevalidated Candidate Evidence](./docs/prevalidated-candidate-evidence.md).
+Run its local contract tests with:
+
+```bash
+python3 -m unittest tests/test_validation_evidence.py
+```
+
+The scheduled shadow workflow does not execute infrastructure validation and is
+not a release check or cryptographic attestation verifier. It deliberately
+produces a non-releaseable manifest so that the schedule can be verified
+without turning skipped validation into a passing check.
 
 ## Interpreting GitHub Actions
 
