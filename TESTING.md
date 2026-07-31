@@ -53,6 +53,22 @@ above. Do not substitute unrelated toolchains.
 
 Heavy Incus tests require an Ubuntu host or runner with Incus available, suitable images, and repository-specific scenario configuration. They must use sanitized inputs and must not rely on private inventory values.
 
+## Prevalidated candidate evidence
+
+The fail-closed v1 contract for asynchronously produced Heavy and Application
+Acceptance evidence is documented in
+[Prevalidated Candidate Evidence](./docs/prevalidated-candidate-evidence.md).
+Run its local contract tests with:
+
+```bash
+python3 -m unittest tests/test_validation_evidence.py
+```
+
+The scheduled shadow workflow does not execute infrastructure validation and is
+not a release check or cryptographic attestation verifier. It deliberately
+produces a non-releaseable manifest so that the schedule can be verified
+without turning skipped validation into a passing check.
+
 ## Interpreting GitHub Actions
 
 The GitHub Actions matrix is the primary dashboard. Job names should expose the repository class, OS/runtime where applicable, and profile, for example `repository / quality`.
