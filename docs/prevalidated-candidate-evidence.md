@@ -56,11 +56,11 @@ python3 .github/scripts/validation-evidence.py semantic-verify \
   --evidence /secure/path/evidence.json \
   --repository lightning-it/ansible-collection-supplementary \
   --source-sha <full-commit-sha> \
-  --git-tree <full-tree-sha> \
-  --policy-sha <full-policy-sha> \
-  --matrix-sha <full-matrix-sha> \
-  --validation-workflow-sha <full-workflow-sha> \
-  --bom-digest sha256:<canonical-bom-digest>
+  --git-tree "<full-tree-sha>" \
+  --policy-sha "<full-policy-sha>" \
+  --matrix-sha "<full-matrix-sha>" \
+  --validation-workflow-sha "<full-workflow-sha>" \
+  --bom-digest "sha256:<canonical-bom-digest>"
 ```
 
 For artifact-built candidates, use `--artifact-digest sha256:<64-lowercase-hex>`
