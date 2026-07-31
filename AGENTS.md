@@ -260,6 +260,42 @@ When `actionlint` is available, run:
 actionlint
 ```
 
+## Push-ready Agent Contract
+
+Every pushed change is governed by this file and must be reviewed locally by
+both Codex and GitHub Copilot CLI through:
+
+```text
+python3 scripts/lit-push-ready.py push-ready
+```
+
+Run it only for a clean, committed candidate. The gate fetches the
+authoritative `origin/develop`, constructs the synthetic integration change,
+runs the one repository-owned CI profile, and gives that exact diff plus these
+instructions to both agents in read-only sandboxes. Copilot CLI must run only
+inside the immutable Devtool container; do not install or invoke an
+uncontrolled host Copilot binary. Codex must use its isolated read-only
+configuration. Neither agent may mutate the reviewed tree or waive a failed
+check.
+
+Reconcile every actionable local finding, amend the candidate, and rerun the
+complete gate until both agents and the deterministic profile pass. Push only
+the reviewed branch and `HEAD` authorized by the fresh evidence. A pre-commit
+hook may provide faster formatting feedback, but it is not the acceptance
+boundary and must not trigger authenticated agent reviews.
+
+GitHub Actions and the server-side GitHub Copilot pull-request review remain
+authoritative. After any server finding or code change, update the candidate,
+rerun the same local gate, and obtain a new current-head server review. The goal
+is a first successful required pipeline run; do not use the PR as the first
+place to discover locally reproducible failures.
+
+The one-time v2 policy bootstrap cannot use its changed engine as its own trust
+root. For that bootstrap only, run the committed canonical profile and
+`python3 scripts/lit-push-ready.py review`; protected current-head GitHub
+Actions and Copilot checks authorize merge. The exception ends once v2 is on
+`develop`.
+
 ## Secret Storage Rule
 
 - Never commit secret values, tokens, passwords, private keys, activation codes, or decrypted Vault output.
