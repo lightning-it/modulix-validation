@@ -22,6 +22,10 @@ written to artifacts. The central action uploads only normalized JUnit,
 candidate-bound manifests, and checksums. Raw logs and object bodies are not
 artifacts.
 
+Each identity consists of an access key, secret key, and project ID. The
+bucket-owning Admin project and the Writer, Reader, and Reviewer projects must
+be four distinct Hetzner projects; the scenario fails closed otherwise.
+
 The scenario must clean run-owned mutable fixtures idempotently. Governance-
 locked fixtures that cannot yet be removed retain explicit ownership and
 expiry metadata for the scheduled collector; cleanup must never select by a

@@ -1,0 +1,113 @@
+# yamllint disable rule:truthy
+---
+name: Collection release transition validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repository:
+        description: Collection repository that produced the immutable release.
+        required: true
+        default: lightning-it/ansible-collection-supplementary
+        type: string
+      source_sha:
+        description: Exact 40-character release commit SHA.
+        required: true
+        type: string
+      version:
+        description: Exact semantic collection version.
+        required: true
+        type: string
+      artifact_sha256:
+        description: SHA-256 of the collection tarball already published by the source workflow.
+        required: true
+        type: string
+      artifact_name:
+        description: Collection tarball filename.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collection-release-transition-${{ inputs.source_repository }}-${{ inputs.version }}
+  cancel-in-progress: true
+
+jobs:
+  transition-noop:
+    name: Transition / Nexus promotion command (not executed)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable release identity
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/ansible-collection-[a-z0-9-]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          [[ "$ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "${ARTIFACT_NAME}" = "${ARTIFACT_NAME##*/}"
+          [[ "$ARTIFACT_NAME" =~ ^[a-z0-9_]+-[a-z0-9_]+-${VERSION//./\\.}\\.tar\\.gz$ ]]
+
+      - name: Describe target Nexus-to-Galaxy promotion without executing it
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          echo "TRANSITION MODE: Heavy/Application validation and Nexus promotion are not active yet."
+          echo "The source release workflow has already published ${ARTIFACT_NAME} to galaxy.ansible.com."
+          echo "No infrastructure test and no second Galaxy publication is executed by this workflow."
+          echo "Future command after verified Nexus download and SHA-256 ${ARTIFACT_SHA256}:"
+          echo "ansible-galaxy collection publish '${ARTIFACT_NAME}' --server production"
+
+      - name: Persist explicit transition evidence
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = {
+              "schema_version": 1,
+              "mode": "transition-noop",
+              "repository": os.environ["SOURCE_REPOSITORY"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "version": os.environ["VERSION"],
+              "artifact": {
+                  "name": os.environ["ARTIFACT_NAME"],
+                  "sha256": os.environ["ARTIFACT_SHA256"],
+                  "current_source": "galaxy.ansible.com",
+                  "target_candidate_source": "wunderbox-nexus",
+              },
+              "heavy_executed": False,
+              "application_acceptance_executed": False,
+              "galaxy_publication_executed": False,
+              "release_eligible": False,
+              "validated": False,
+          }
+          Path("validation-transition-evidence.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: collection-transition-evidence-${{ inputs.source_sha }}
+          path: validation-transition-evidence.json
+          if-no-files-found: error
+          retention-days: 30
