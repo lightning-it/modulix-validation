@@ -52,6 +52,8 @@ on:
         required: false
       LIT_REPOSITORY_READ_TOKEN:
         required: false
+      RELEASE_AUTOMATION_APP_PRIVATE_KEY:
+        required: false
       HETZNER_S3_ADMIN_ACCESS_KEY:
         required: false
       HETZNER_S3_ADMIN_SECRET_KEY:
@@ -82,6 +84,8 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           MATRIX_JSON: ${{ inputs['matrix-json'] }}
           SOURCE_SHA: ${{ inputs['source-sha'] }}
+          SOURCE_REPOSITORY: ${{ inputs['source-repository'] }}
+          CALLER_REPOSITORY: ${{ github.repository }}
           COLLECTION_NAMESPACE: ${{ inputs['collection-namespace'] }}
           COLLECTION_NAME: ${{ inputs['collection-name'] }}
         run: |
@@ -93,6 +97,10 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
           [[ "$COLLECTION_NAMESPACE" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
           [[ "$COLLECTION_NAME" =~ ^[a-z][a-z0-9_]{0,63}$ ]]
+          case "${SOURCE_REPOSITORY:-$CALLER_REPOSITORY}" in
+            "$CALLER_REPOSITORY"|lightning-it/ansible-collection-cloud|lightning-it/ansible-collection-supplementary) ;;
+            *) echo "source-repository is not allowlisted" >&2; exit 1 ;;
+          esac
           python3 - <<'PY'
           import json
           import os
@@ -183,6 +191,19 @@ jobs:
         matrix.target }}
       cancel-in-progress: false
     steps:
+      - name: Mint least-privilege source checkout token
+        id: source-app
+        if: >-
+          inputs['source-repository'] != '' &&
+          inputs['source-repository'] != github.repository
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs['source-repository'] == 'lightning-it/ansible-collection-cloud' && 'ansible-collection-cloud' || 'ansible-collection-supplementary' }}
+          permission-contents: read
+
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -191,7 +212,7 @@ jobs:
           token: >-
             ${{ (inputs['source-repository'] == '' ||
             inputs['source-repository'] == github.repository) && github.token ||
-            secrets.LIT_REPOSITORY_READ_TOKEN }}
+            steps.source-app.outputs.token }}
           persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
