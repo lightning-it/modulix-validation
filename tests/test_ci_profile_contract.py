@@ -117,6 +117,17 @@ class CiProfileContractTests(unittest.TestCase):
                 set(gap),
             )
 
+    def test_collection_release_transition_is_an_explicit_noop(self):
+        workflow = (
+            ROOT / ".github/workflows/collection-release-transition.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"mode": "transition-noop"', workflow)
+        self.assertIn('"release_eligible": False', workflow)
+        self.assertIn('"heavy_executed": False', workflow)
+        self.assertIn('"galaxy_publication_executed": False', workflow)
+        self.assertIn("ansible-galaxy collection publish", workflow)
+        self.assertNotIn("collection-quality-profile.yml", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
