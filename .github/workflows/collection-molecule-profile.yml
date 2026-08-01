@@ -50,6 +50,8 @@ on:
         required: false
       HROBOT_LIVE_SERVER_NAME:
         required: false
+      LIT_REPOSITORY_READ_TOKEN:
+        required: false
       HETZNER_S3_ADMIN_ACCESS_KEY:
         required: false
       HETZNER_S3_ADMIN_SECRET_KEY:
@@ -186,6 +188,7 @@ jobs:
         with:
           repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
