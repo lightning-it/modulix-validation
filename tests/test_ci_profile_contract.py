@@ -126,6 +126,11 @@ class CiProfileContractTests(unittest.TestCase):
         self.assertIn('"release_eligible": False', workflow)
         self.assertIn('"heavy_executed": False', workflow)
         self.assertIn('"galaxy_publication_executed": False', workflow)
+        self.assertIn(
+            '[[ "$VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+'
+            '(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$ ]]',
+            workflow,
+        )
         workflow_document = yaml.safe_load(workflow)
         publish_lines = [
             line.strip()
