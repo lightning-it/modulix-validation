@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: supplementary-release-validation-${{ inputs.version }}
+  group: collection-release-transition-${{ inputs.source_repository }}-${{ inputs.version }}
   cancel-in-progress: true
 
 jobs:
@@ -75,7 +75,7 @@ jobs:
           ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           from pathlib import Path

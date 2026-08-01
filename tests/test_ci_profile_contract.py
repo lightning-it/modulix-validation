@@ -117,7 +117,7 @@ class CiProfileContractTests(unittest.TestCase):
                 set(gap),
             )
 
-    def test_supplementary_controller_is_an_explicit_transition_noop(self):
+    def test_collection_release_transition_is_an_explicit_noop(self):
         workflow = (
             ROOT / ".github/workflows/collection-release-transition.yml"
         ).read_text(encoding="utf-8")
