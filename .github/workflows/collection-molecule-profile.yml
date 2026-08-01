@@ -22,6 +22,11 @@ on:
         description: Exact commit represented by the candidate.
         required: true
         type: string
+      source-repository:
+        description: Repository containing the exact collection source; defaults to the caller repository.
+        required: false
+        type: string
+        default: ""
       collection-namespace:
         description: Namespace from galaxy.yml.
         required: true
@@ -44,6 +49,24 @@ on:
       HROBOT_LIVE_SERVER_IP:
         required: false
       HROBOT_LIVE_SERVER_NAME:
+        required: false
+      LIT_REPOSITORY_READ_TOKEN:
+        required: false
+      HETZNER_S3_ADMIN_ACCESS_KEY:
+        required: false
+      HETZNER_S3_ADMIN_SECRET_KEY:
+        required: false
+      HETZNER_S3_WRITER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_WRITER_SECRET_KEY:
+        required: false
+      HETZNER_S3_READER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_READER_SECRET_KEY:
+        required: false
+      HETZNER_S3_REVIEWER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_REVIEWER_SECRET_KEY:
         required: false
 
 permissions:
@@ -163,7 +186,12 @@ jobs:
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
+          token: >-
+            ${{ (inputs['source-repository'] == '' ||
+            inputs['source-repository'] == github.repository) && github.token ||
+            secrets.LIT_REPOSITORY_READ_TOKEN }}
           persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
@@ -179,6 +207,14 @@ jobs:
           HROBOT_LIVE_PASSWORD: ${{ secrets.HROBOT_LIVE_PASSWORD }}
           HROBOT_LIVE_SERVER_IP: ${{ secrets.HROBOT_LIVE_SERVER_IP }}
           HROBOT_LIVE_SERVER_NAME: ${{ secrets.HROBOT_LIVE_SERVER_NAME }}
+          HETZNER_S3_ADMIN_ACCESS_KEY: ${{ secrets.HETZNER_S3_ADMIN_ACCESS_KEY }}
+          HETZNER_S3_ADMIN_SECRET_KEY: ${{ secrets.HETZNER_S3_ADMIN_SECRET_KEY }}
+          HETZNER_S3_WRITER_ACCESS_KEY: ${{ secrets.HETZNER_S3_WRITER_ACCESS_KEY }}
+          HETZNER_S3_WRITER_SECRET_KEY: ${{ secrets.HETZNER_S3_WRITER_SECRET_KEY }}
+          HETZNER_S3_READER_ACCESS_KEY: ${{ secrets.HETZNER_S3_READER_ACCESS_KEY }}
+          HETZNER_S3_READER_SECRET_KEY: ${{ secrets.HETZNER_S3_READER_SECRET_KEY }}
+          HETZNER_S3_REVIEWER_ACCESS_KEY: ${{ secrets.HETZNER_S3_REVIEWER_ACCESS_KEY }}
+          HETZNER_S3_REVIEWER_SECRET_KEY: ${{ secrets.HETZNER_S3_REVIEWER_SECRET_KEY }}
         with:
           profile: ${{ inputs.profile }}
           scenario: ${{ matrix.scenario }}
