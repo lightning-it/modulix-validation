@@ -189,8 +189,9 @@ jobs:
           repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
           token: >-
-            ${{ inputs['source-repository'] != '' &&
-            secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+            ${{ (inputs['source-repository'] == '' ||
+            inputs['source-repository'] == github.repository) && github.token ||
+            secrets.LIT_REPOSITORY_READ_TOKEN }}
           persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
