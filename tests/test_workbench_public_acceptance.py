@@ -144,6 +144,23 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
             r"run-collection-molecule@[0-9a-f]{40}",
         )
         self.assertIn('test "$CELLS_RESULT" = success', workflow)
+        self.assertIn("source-repository is not allowlisted", workflow)
+        self.assertIn("Require cross-repository App credentials", workflow)
+        self.assertIn(
+            "RELEASE_AUTOMATION_APP_CLIENT_ID is required for cross-repository checkout.",
+            workflow,
+        )
+        self.assertIn(
+            "RELEASE_AUTOMATION_APP_PRIVATE_KEY is required for cross-repository checkout.",
+            workflow,
+        )
+        self.assertIn("id: source-app", workflow)
+        self.assertIn("permission-contents: read", workflow)
+        self.assertIn("steps.source-app.outputs.token", workflow)
+        self.assertNotIn(
+            "secrets.LIT_REPOSITORY_READ_TOKEN }}\n          persist-credentials",
+            workflow,
+        )
         self.assertIn("candidate-SHA256SUMS", action)
         self.assertIn("${{ strategy.job-index }}", action)
         self.assertIn("python3 -m venv", action)
