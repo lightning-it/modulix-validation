@@ -8,7 +8,7 @@ retention_days: 30
 matrix:
   include:
     - runner: [self-hosted, linux, x64, hetzner-s3]
-      scenario: hetzner-object-storage-heavy
+      scenario: hetzner_object_storage_heavy
       target: fsn1
       infrastructure: external
       roles: [hetzner_object_storage]
