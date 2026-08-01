@@ -119,7 +119,7 @@ class CiProfileContractTests(unittest.TestCase):
 
     def test_supplementary_controller_is_an_explicit_transition_noop(self):
         workflow = (
-            ROOT / ".github/workflows/supplementary-central-validation.yml"
+            ROOT / ".github/workflows/collection-release-transition.yml"
         ).read_text(encoding="utf-8")
         self.assertIn('"mode": "transition-noop"', workflow)
         self.assertIn('"release_eligible": False', workflow)

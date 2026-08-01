@@ -1,6 +1,6 @@
 # yamllint disable rule:truthy
 ---
-name: Supplementary central release validation
+name: Collection release transition validation
 
 on:
   workflow_dispatch:
@@ -48,11 +48,11 @@ jobs:
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPOSITORY" = lightning-it/ansible-collection-supplementary
+          [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/ansible-collection-[a-z0-9-]+$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ "$ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          test "$ARTIFACT_NAME" = "lit-supplementary-${VERSION}.tar.gz"
+          [[ "$ARTIFACT_NAME" =~ ^[a-z0-9_]+-[a-z0-9_]+-${VERSION//./\\.}\\.tar\\.gz$ ]]
 
       - name: Describe target Nexus-to-Galaxy promotion without executing it
         env:
@@ -106,7 +106,7 @@ jobs:
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: supplementary-transition-evidence-${{ inputs.source_sha }}
+          name: collection-transition-evidence-${{ inputs.source_sha }}
           path: validation-transition-evidence.json
           if-no-files-found: error
           retention-days: 30
