@@ -50,8 +50,9 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_REPOSITORY" =~ ^lightning-it/ansible-collection-[a-z0-9-]+$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]
           [[ "$ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "${ARTIFACT_NAME}" = "${ARTIFACT_NAME##*/}"
           [[ "$ARTIFACT_NAME" =~ ^[a-z0-9_]+-[a-z0-9_]+-${VERSION//./\\.}\\.tar\\.gz$ ]]
 
       - name: Describe target Nexus-to-Galaxy promotion without executing it
