@@ -118,20 +118,28 @@ class CiProfileContractTests(unittest.TestCase):
             )
 
     def test_collection_release_transition_is_an_explicit_noop(self):
-        workflow = (
+        workflow_path = (
             ROOT / ".github/workflows/collection-release-transition.yml"
-        ).read_text(encoding="utf-8")
+        )
+        workflow = workflow_path.read_text(encoding="utf-8")
         self.assertIn('"mode": "transition-noop"', workflow)
         self.assertIn('"release_eligible": False', workflow)
         self.assertIn('"heavy_executed": False', workflow)
         self.assertIn('"galaxy_publication_executed": False', workflow)
-        self.assertIn(
-            'echo "ansible-galaxy collection publish',
-            workflow,
-        )
-        self.assertNotRegex(
-            workflow,
-            re.compile(r"(?m)^\s*ansible-galaxy collection publish(?:\s|$)"),
+        workflow_document = yaml.safe_load(workflow)
+        publish_lines = [
+            line.strip()
+            for job in workflow_document["jobs"].values()
+            for step in job.get("steps", [])
+            for line in step.get("run", "").splitlines()
+            if "ansible-galaxy collection publish" in line
+        ]
+        self.assertEqual(
+            [
+                'echo "ansible-galaxy collection publish '
+                "'${ARTIFACT_NAME}' --server production\""
+            ],
+            publish_lines,
         )
         self.assertNotIn("collection-quality-profile.yml", workflow)
 
