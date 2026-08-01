@@ -4,7 +4,9 @@ The workflow `.github/workflows/lit-cloud-hetzner-object-storage-heavy.yml` is
 the only supported executor for the protected Hetzner Object Storage Heavy
 scenario. It requires an exact 40-character candidate SHA, builds and
 checksums that collection artifact, and executes the repository-owned scenario
-through the central `collection-molecule-profile.yml` lifecycle.
+through the central `collection-molecule-profile.yml` lifecycle. The executor
+checks out `lightning-it/ansible-collection-cloud` explicitly at the candidate
+SHA; generic callers continue to default to their caller repository.
 
 The versioned matrix is
 `inventories/heavy/hetzner-object-storage.yml`. It declares deterministic,

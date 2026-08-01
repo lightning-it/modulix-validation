@@ -22,6 +22,11 @@ on:
         description: Exact commit represented by the candidate.
         required: true
         type: string
+      source-repository:
+        description: Repository containing the exact collection source; defaults to the caller repository.
+        required: false
+        type: string
+        default: ""
       collection-namespace:
         description: Namespace from galaxy.yml.
         required: true
@@ -179,6 +184,7 @@ jobs:
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
           persist-credentials: false
       - name: Set up exact Python runtime

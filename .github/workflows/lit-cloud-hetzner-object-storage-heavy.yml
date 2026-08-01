@@ -94,6 +94,7 @@ jobs:
       matrix-json: ${{ needs.prepare.outputs.matrix }}
       candidate-artifact: cloud-candidate-${{ inputs.source_sha }}
       source-sha: ${{ inputs.source_sha }}
+      source-repository: lightning-it/ansible-collection-cloud
       collection-namespace: lit
       collection-name: cloud
       environment-name: lit-cloud-hetzner-object-storage-heavy
