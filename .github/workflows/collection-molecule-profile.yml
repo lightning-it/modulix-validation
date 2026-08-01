@@ -45,6 +45,22 @@ on:
         required: false
       HROBOT_LIVE_SERVER_NAME:
         required: false
+      HETZNER_S3_ADMIN_ACCESS_KEY:
+        required: false
+      HETZNER_S3_ADMIN_SECRET_KEY:
+        required: false
+      HETZNER_S3_WRITER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_WRITER_SECRET_KEY:
+        required: false
+      HETZNER_S3_READER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_READER_SECRET_KEY:
+        required: false
+      HETZNER_S3_REVIEWER_ACCESS_KEY:
+        required: false
+      HETZNER_S3_REVIEWER_SECRET_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -179,6 +195,14 @@ jobs:
           HROBOT_LIVE_PASSWORD: ${{ secrets.HROBOT_LIVE_PASSWORD }}
           HROBOT_LIVE_SERVER_IP: ${{ secrets.HROBOT_LIVE_SERVER_IP }}
           HROBOT_LIVE_SERVER_NAME: ${{ secrets.HROBOT_LIVE_SERVER_NAME }}
+          HETZNER_S3_ADMIN_ACCESS_KEY: ${{ secrets.HETZNER_S3_ADMIN_ACCESS_KEY }}
+          HETZNER_S3_ADMIN_SECRET_KEY: ${{ secrets.HETZNER_S3_ADMIN_SECRET_KEY }}
+          HETZNER_S3_WRITER_ACCESS_KEY: ${{ secrets.HETZNER_S3_WRITER_ACCESS_KEY }}
+          HETZNER_S3_WRITER_SECRET_KEY: ${{ secrets.HETZNER_S3_WRITER_SECRET_KEY }}
+          HETZNER_S3_READER_ACCESS_KEY: ${{ secrets.HETZNER_S3_READER_ACCESS_KEY }}
+          HETZNER_S3_READER_SECRET_KEY: ${{ secrets.HETZNER_S3_READER_SECRET_KEY }}
+          HETZNER_S3_REVIEWER_ACCESS_KEY: ${{ secrets.HETZNER_S3_REVIEWER_ACCESS_KEY }}
+          HETZNER_S3_REVIEWER_SECRET_KEY: ${{ secrets.HETZNER_S3_REVIEWER_SECRET_KEY }}
         with:
           profile: ${{ inputs.profile }}
           scenario: ${{ matrix.scenario }}
