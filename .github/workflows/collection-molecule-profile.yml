@@ -58,17 +58,25 @@ on:
         required: false
       HETZNER_S3_ADMIN_SECRET_KEY:
         required: false
+      HETZNER_S3_ADMIN_PROJECT_ID:
+        required: false
       HETZNER_S3_WRITER_ACCESS_KEY:
         required: false
       HETZNER_S3_WRITER_SECRET_KEY:
+        required: false
+      HETZNER_S3_WRITER_PROJECT_ID:
         required: false
       HETZNER_S3_READER_ACCESS_KEY:
         required: false
       HETZNER_S3_READER_SECRET_KEY:
         required: false
+      HETZNER_S3_READER_PROJECT_ID:
+        required: false
       HETZNER_S3_REVIEWER_ACCESS_KEY:
         required: false
       HETZNER_S3_REVIEWER_SECRET_KEY:
+        required: false
+      HETZNER_S3_REVIEWER_PROJECT_ID:
         required: false
 
 permissions:
