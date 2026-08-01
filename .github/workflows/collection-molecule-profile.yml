@@ -191,6 +191,24 @@ jobs:
         matrix.target }}
       cancel-in-progress: false
     steps:
+      - name: Require cross-repository App credentials
+        if: >-
+          inputs['source-repository'] != '' &&
+          inputs['source-repository'] != github.repository
+        env:
+          APP_CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_CLIENT_ID" || {
+            echo "RELEASE_AUTOMATION_APP_CLIENT_ID is required for cross-repository checkout." >&2
+            exit 1
+          }
+          test -n "$APP_PRIVATE_KEY" || {
+            echo "RELEASE_AUTOMATION_APP_PRIVATE_KEY is required for cross-repository checkout." >&2
+            exit 1
+          }
+
       - name: Mint least-privilege source checkout token
         id: source-app
         if: >-

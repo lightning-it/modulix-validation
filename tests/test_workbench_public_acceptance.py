@@ -145,6 +145,15 @@ class WorkbenchAcceptanceTests(unittest.TestCase):
         )
         self.assertIn('test "$CELLS_RESULT" = success', workflow)
         self.assertIn("source-repository is not allowlisted", workflow)
+        self.assertIn("Require cross-repository App credentials", workflow)
+        self.assertIn(
+            "RELEASE_AUTOMATION_APP_CLIENT_ID is required for cross-repository checkout.",
+            workflow,
+        )
+        self.assertIn(
+            "RELEASE_AUTOMATION_APP_PRIVATE_KEY is required for cross-repository checkout.",
+            workflow,
+        )
         self.assertIn("id: source-app", workflow)
         self.assertIn("permission-contents: read", workflow)
         self.assertIn("steps.source-app.outputs.token", workflow)
