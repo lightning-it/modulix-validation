@@ -125,7 +125,14 @@ class CiProfileContractTests(unittest.TestCase):
         self.assertIn('"release_eligible": False', workflow)
         self.assertIn('"heavy_executed": False', workflow)
         self.assertIn('"galaxy_publication_executed": False', workflow)
-        self.assertIn("ansible-galaxy collection publish", workflow)
+        self.assertIn(
+            'echo "ansible-galaxy collection publish',
+            workflow,
+        )
+        self.assertNotRegex(
+            workflow,
+            re.compile(r"(?m)^\s*ansible-galaxy collection publish(?:\s|$)"),
+        )
         self.assertNotIn("collection-quality-profile.yml", workflow)
 
 
