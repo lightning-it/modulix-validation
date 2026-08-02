@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -459,6 +460,45 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ASCII control") as caught:
             MODULE.string(f"{marker}\tvalue", "security string")
         self.assertNotIn(marker, str(caught.exception))
+
+    def test_malformed_urls_fail_without_parser_value_leakage(self):
+        parser_marker = "SENSITIVE-PARSER-ERROR-MARKER"
+        with mock.patch.object(
+            MODULE,
+            "urlsplit",
+            side_effect=ValueError(parser_marker),
+        ) as parser:
+            with self.assertRaisesRegex(
+                ValueError, "producer.releaseUrl must use HTTPS"
+            ) as caught:
+                MODULE.https_url(
+                    "https://example.com/release", "producer.releaseUrl"
+                )
+        parser.assert_called_once_with("https://example.com/release")
+        self.assertNotIn(parser_marker, str(caught.exception))
+
+        cli_marker = "SENSITIVE-CLI-URL-MARKER"
+        malformed = f"https://[{cli_marker}/release"
+        document = delivered_fixture()
+        document["producer"]["releaseUrl"] = malformed
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "malformed-url.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/validate-mlx90-delivery.py"),
+                    str(path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("producer.releaseUrl must use HTTPS", completed.stderr)
+        self.assertNotIn(cli_marker, completed.stderr)
+        self.assertNotIn(malformed, completed.stderr)
 
     def test_cli_and_nested_json_reject_duplicate_keys_without_values(self):
         cases = {

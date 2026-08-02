@@ -288,14 +288,18 @@ def positive_integer(value: Any, field: str) -> int:
 
 def https_url(value: Any, field: str) -> str:
     value = string(value, field)
-    parsed = urlsplit(value)
+    requirement = f"{field} must use HTTPS without user information"
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise ValueError(requirement) from None
     if (
         parsed.scheme != "https"
         or not parsed.netloc
         or parsed.username is not None
         or parsed.password is not None
     ):
-        fail(f"{field} must use HTTPS without user information")
+        fail(requirement)
     return value
 
 
