@@ -1,183 +1,383 @@
-# MLX-90 finalizer library (inert foundation)
+# MLX-90 immutable final acceptance
 
-## Current stage
+`mlx90-final-acceptance.yml` is the protected, fail-closed finalizer for the
+MLX-90 collection-to-container delivery chain. It can create a `delivered`
+claim only after independently verifying the signed producer evidence, the
+signed container evidence, the live GitHub identities, every required OCI
+digest, and an immutable acceptance profile specific to the security fix.
 
-This branch is stage B2, the third and still deliberately inert part of the
-MLX-90 final-acceptance stack. It contains the reviewed data contracts from
-stage A, the local finalizer library from stage B1, and the complete dedicated
-finalizer test suite. It does **not** contain the MLX-90 GitHub Actions
-workflow, workflow shell implementation, or workflow-contract tests. No
-existing workflow calls the library. B2 retains B1's core behavior block and
-shared fixtures, then extends that same test module with the full adversarial,
-BuildKit, boundary, leakage, CLI, and cross-binding matrix without duplicating
-the fixture layer. B2 also adds the independent delivery validator's
-malformed-URL sanitization and its parser/CLI leakage regression.
+The workflow is a foundation, not evidence that a release has passed. The
+repository currently allowlists only the historical
+`lit.supplementary/mlx90-fixture` profile with `releaseEligible: false` and a
+non-success command. Consequently, the workflow cannot currently produce a
+`delivered` result. A real security fix needs authoritative producer evidence
+and a separately reviewed profile change before dispatch.
 
-The library can validate explicitly supplied local files and can write local
-receipt, report, and terminal-evidence files when invoked manually. It cannot
-fetch GitHub or registry state, verify a live workflow run, execute the profile
-command, sign or upload evidence, publish a Release, or dispatch promotion by
-itself. Those operations remain absent until the separate activation stage C.
+## Dispatch contract
 
-## Contract files present now
+The release automation GitHub App dispatches the workflow on protected `main`
+with these required string inputs:
 
-| Path | Current purpose |
+| Input | Exact meaning |
 | --- | --- |
-| `acceptance/mlx90/profiles.json` | Fixed profile allowlist consumed by the finalizer library |
-| `scripts/finalize-mlx90-delivery.py` | Local parsing, evidence, receipt, report, and terminal-result library |
-| `scripts/validate-mlx90-delivery.py` | Independent offline validator for an already-created terminal result |
-| `tests/test_mlx90_finalizer_smoke.py` | CI-discovered import/compile and no-clobber writer smoke tests |
-| `tests/test_mlx90_finalizer.py` | B1 core behavior plus B2 adversarial, BuildKit, boundary, CLI, tampering, and cross-binding expansion |
-| `tests/test_mlx90_delivery.py` | Positive and negative tests for the terminal-result validator |
-| `docs/mlx90-final-acceptance.md` | Current inert-library contract and ownership documentation |
+| `correlation_id` | Run-unique nonsecret correlation identifier |
+| `producer_evidence_url` | Stable GitHub Release URL of `security-release-evidence.json` |
+| `producer_evidence_bundle_url` | The preceding URL plus `.sigstore.json` |
+| `producer_evidence_sha256` | Lowercase SHA-256 of the producer evidence without a prefix |
+| `consumer_pr` | Merged consumer pull-request number |
+| `consumer_head_sha` | Exact reviewed pull-request head SHA |
+| `consumer_merge_sha` | Exact merge SHA and container source SHA |
+| `container_release_id` | Numeric GitHub Release ID |
+| `container_release_tag` | Exact v-prefixed semantic release tag |
+| `container_release_run_id` | Successful Container Build & Publish run ID |
 
-## Profile ownership and use
+The workflow rejects any other actor, repository, ref, mutable SHA, release
+binding, or evidence URL. It does not accept an arbitrary shell command. The
+only executed acceptance command comes from the reviewed
+`acceptance/mlx90/profiles.json` allowlist.
 
-`scripts/finalize-mlx90-delivery.py` is now the explicit consumer of
-`acceptance/mlx90/profiles.json`. Commands that validate evidence, write a
-receipt or report, or finalize a result receive the file through the required
-`--profiles` argument. `load_profiles()` enforces the exact schema and
-`eligible_profile()` requires the evidence-selected profile to exist and have
-`releaseEligible: true`. The `profile-command` subcommand returns only the
-reviewed fixed argument vector; it does not execute it.
+The App needs `Actions: write` to call the workflow-dispatch endpoint and
+`Actions: read` to inspect the resulting run. The protected verification job
+mints a one-hour installation token from the existing organization-managed
+`RELEASE_AUTOMATION_APP_CLIENT_ID` variable and
+`RELEASE_AUTOMATION_APP_PRIVATE_KEY` secret. It first rejects every dispatch
+whose actor, ref, or repository differs from the exact MLX-90 contract. The
+token creation is then fail-closed on App slug
+`lightning-it-release-automation`, installation ID `148019054`, and exactly
+these three read-only evidence repositories:
 
-The only current profile is
-`lit.supplementary/mlx90-fixture`, with `releaseEligible: false` and
-`containerCommand: ["/bin/false"]`. Finalizer preflight therefore rejects it as
-non-release-eligible. A future real profile must be added in a separate review
-tied to authoritative producer evidence, use a fixed nonsecret argument
-vector, and be suitable for both collection-bearing variants.
+- `lightning-it/ansible-collection-supplementary`
+- `lightning-it/container-ee-wunder-ansible-ubi9`
+- `lightning-it/shared-assets-lit`
 
-The independent `scripts/validate-mlx90-delivery.py` remains an output
-validator. It validates the syntax and evidence binding of the profile recorded
-in a terminal result but deliberately does not select or execute a command and
-does not read the allowlist.
+The minted token requests only `Actions: read`, `Contents: read`, and
+`Pull requests: read`, is revoked automatically at the end of the job, and is
+used for private cross-repository API reads, immutable policy checkout, and
+authenticated GitHub Release asset downloads. It is not a personal token and
+does not introduce a new secret. The same-repository persistence job continues
+to use only its repository-scoped `GITHUB_TOKEN`. Job permissions are:
 
-## Finalizer contract implemented in this stage
+| Job | Actions | Contents | OIDC | Other permissions |
+| --- | --- | --- | --- | --- |
+| `verify` | read | read | write, for keyless evidence signing | none |
+| `persist` | read | write, for the immutable evidence release | none | none |
 
-The local library validates exact dispatch identities, producer and container
-evidence schemas, immutable URLs and digests, the three variant identities,
-CycloneDX and provenance bindings, OCI index structure, BuildKit SPDX/SLSA
-subjects, installed collection observations, and the exact typed receipt set.
-It rejects unknown fields, duplicate receipts, stale or foreign run bindings,
-variant substitution, changed evidence digests, and cross-receipt disagreement.
+The `verify` job runs in the existing protected
+`ansible-collection-runtime-protected` environment. The `persist` job receives
+only the signed same-run artifact and cannot create a result unless all prior
+verification succeeded.
 
-`verify-index` hashes the bounded raw file bytes and requires the exact signed
-variant `manifestDigest` before JSON decoding or semantic index acceptance.
-Whitespace or any other byte change therefore fails even when platform digests
-are unchanged. The BuildKit verifier uses the same digest-bound loader.
+## Required evidence
 
-Both the finalizer and the independent delivery validator enforce the same
-strict, lossless RFC3339 timestamp profile before parsing: uppercase `T`,
-complete seconds, and uppercase `Z` or a colon-delimited numeric offset are
-mandatory. Fractions may be omitted or contain 1–6 decimal digits. Alternate
-separators, missing seconds or zones, longer fractions, comma fractions,
-lowercase `t`/`z`, invalid calendar values, and leap seconds fail closed.
-Only after that grammar check, the parser converts a terminal `Z` to `+00:00`
-and right-pads a present 1–6 digit fraction to six digits. This lossless parser
-representation makes every permitted precision work on Python 3.9 and later
-without broadening the accepted input grammar.
+Producer evidence must satisfy the canonical
+`lit.security-release/v1` policy from `lightning-it/shared-assets-lit`, pinned
+in the workflow to commit
+`1c6a1d43af638d081108d820b3576e401d9f0857`. The producer evidence and its
+Sigstore bundle must be immutable assets of the matching producer release.
 
-Producer collection versions, producer affected/fixed versions, and container
-release tags use the complete SemVer 2.0.0 grammar in both libraries. Major,
-minor, patch, and numeric prerelease identifiers reject leading zeroes except
-for the single identifier `0`; prerelease and build metadata are nonempty,
+The container release must expose exactly one
+`mlx90-container-evidence.json` and one matching
+`mlx90-container-evidence.json.sigstore.json`. The signed JSON binds:
+
+- the Security/Evidence ID and producer evidence URL plus digest;
+- producer source SHA, collection version, and collection digest;
+- consumer pull request, pre-merge base SHA, reviewed head SHA, and two-parent
+  merge SHA;
+- container release ID, tag, source SHA, workflow run ID, and run attempt;
+- distinct `public`, `certified`, and `bootstrap` images;
+- each OCI manifest digest and exact `linux/amd64` and `linux/arm64` platform
+  digest;
+- immutable signature, SBOM, and provenance references for every variant; and
+- an explicit `not_revoked` observation and timestamp.
+
+The finalizer re-resolves the producer and container tags, the merged consumer
+pull request, and the successful container workflow run through GitHub. It
+then verifies the collection archive's signature and checks its CycloneDX SBOM
+and provenance against the producer SHA, version, and digest. For the container
+it verifies OCI index contents, including exactly one BuildKit attestation
+manifest for each exact platform manifest, and verifies the index signature
+against the exact container workflow identity and workflow SHA. It also hashes
+the raw index bytes against the evidence manifest digest. Only after that
+raw-byte check may `verify-index` apply semantic JSON acceptance; the BuildKit
+path uses the same digest-bound loader. Cosign verification then gates fetching
+each attestation manifest by the
+descriptor digest covered by the signed index and each in-toto layer by the
+digest covered by that manifest. The layer bytes and sizes must match their
+descriptors, and every SPDX and SLSA in-toto subject must name exactly the
+SHA-bound `mlx90-candidate-<consumer-merge-sha>` reference created by the
+Security build for its platform and carry that platform manifest's exact
+SHA-256 digest. Release, bare-version, and `sha-<12>` aliases are created only
+after the candidate has passed the consumer's verification and revocation
+check, so the finalizer verifies those three live aliases separately against
+the accepted, signed index digest. It does not require or inspect `latest`
+before delivery; the consumer moves that mutable tag only after authenticating
+the durable `delivered` callback.
+
+The current container workflow does not publish separate Cosign signatures for
+these SPDX and SLSA layers. `cosign verify-attestation` would therefore not
+establish their trust.
+The enforced cryptographic chain is instead the keyless Cosign signature over
+the immutable multiarch index, then
+`index -> attestation manifest -> in-toto layer -> platform subject`. The live
+SPDX predicate must be SPDX 2.3, identify Syft and BuildKit, and contain real
+packages, files, and relationships. The live SLSA v1 predicate must bind the
+variant profile, Dockerfile, repository, protected release tag, merge SHA,
+platform, workflow, run ID, and run attempt. Its builder and timestamps are
+validated as well. Registry blobs are fetched anonymously from the fixed Quay
+host over HTTPS. Public blobs use the direct anonymous path. A `401` is accepted
+only when its single Bearer challenge exactly names Quay's fixed token endpoint,
+the `quay.io` service, and the validated repository's pull-only scope. The
+resulting short-lived anonymous pull token is bounded and passed to curl only
+through standard input; it is never persisted, logged, or placed in process
+arguments. Curl's default cross-origin credential stripping remains in force
+(`--location-trusted` is forbidden) while following at most the registry's
+single HTTPS CDN redirect. Downloads are capped at 64 MiB and checked against
+both the signed descriptor digest and exact size. Every downloaded byte
+sequence remains an ephemeral runner input rather than published evidence.
+
+The separately signed container evidence binds all release-asset digests to
+that same workflow identity and SHA. The referenced Cosign signature receipt
+must also be present byte-for-byte in the live cryptographic verification.
+Each referenced Trivy CycloneDX SBOM must identify the exact
+`image@manifestDigest`. The referenced release provenance must bind the
+repository, tag, source SHA, workflow run, immutable image, signature receipt
+digest, and SBOM digest. Malformed or unrelated referenced assets therefore
+fail even when their file digest is listed in the signed container evidence.
+The finalizer then pulls every image by manifest digest, confirms the pulled
+digest, checks
+that the exact collection version is installed in `public` and `certified`,
+and runs the fixed profile in both collection-bearing variants. The existing
+`bootstrap` product contract intentionally contains no collections; acceptance
+therefore proves that `lit.supplementary` is absent and records a null installed
+version instead of manufacturing a false version claim. Its manifest,
+platform, signature, SBOM, provenance, and immutable-pull checks remain
+mandatory.
+
+Every evidence timestamp uses the strict RFC3339 profile enforced by both the
+finalizer and the independent delivery validator: an uppercase `T`, complete
+hours/minutes/seconds, and either uppercase `Z` or a colon-delimited numeric
+timezone offset are mandatory. Fractional seconds may be omitted or contain
+exactly 1–6 decimal digits, matching the parser's lossless microsecond
+precision. Alternate separators, missing seconds or zones, longer fractions,
+comma fractions, lowercase `t`/`z`, invalid calendar values, and leap seconds
+fail closed rather than being normalized or truncated.
+Only after that grammar check, the Python parser input converts a terminal `Z`
+to `+00:00` and right-pads a present 1–6 digit fraction to six digits. This is
+lossless and preserves the accepted grammar while making every permitted
+fractional precision work consistently on Python 3.9 and later.
+
+Every producer collection version, producer affected/fixed version, and
+container release tag uses the complete SemVer 2.0.0 grammar. Major, minor,
+patch, and numeric prerelease identifiers reject leading zeroes except for the
+single identifier `0`; prerelease and build metadata are nonempty,
 dot-separated ASCII identifiers containing only letters, digits, and hyphens.
-Numeric build identifiers may retain leading zeroes. Every semantic-version
-value is limited to 255 ASCII characters before the full grammar is evaluated,
-which bounds work for adversarial invalid prerelease strings. Malformed,
-overlong, or Unicode lookalike versions fail closed, including in the
-installed-version helper.
+Numeric build identifiers may retain leading zeroes as required by SemVer.
+Every semantic-version value is limited to 255 ASCII characters. The Python
+and shell validators enforce that bound before evaluating the full grammar,
+which also bounds work for adversarial invalid prerelease strings. Malformed,
+overlong, or Unicode lookalike versions fail closed in the dispatch identity,
+producer evidence, finalizer helpers, callback, and independent delivery
+validator.
 
 All contract strings reject every ASCII control character (`U+0000` through
 `U+001F` and `U+007F`) before URL parsing or other semantic interpretation.
-Both libraries reject duplicate object keys at every nesting level,
-control-bearing keys, non-standard or non-finite numeric values, oversized
-numbers, and excessive nesting. The finalizer additionally accepts only LF or
-CRLF JSONL records. UTF-8 inputs must be regular, non-symlink files bounded to
-10 MiB in the delivery CLI and 64 MiB in the finalizer. Parse errors report only
-the contract field and failure class and do not echo untrusted keys, values,
-tokens, malformed URL parser details, observed/expected collection versions, or
-secret material.
+All untrusted JSON and JSONL inputs use a duplicate-key-rejecting object hook
+at every nesting level and reject control-bearing object keys, non-standard or
+non-finite numeric values, oversized numbers, excessive nesting, and non-LF
+JSONL separators. Reads are restricted to regular, non-symlink UTF-8 files and
+bounded to 10 MiB in the delivery validator and 64 MiB in the finalizer. Parse
+errors identify only the contract field and failure class; they do not echo
+untrusted keys, values, tokens, or secret material.
 
-Digest-bound inputs use one non-following, nonblocking regular-file snapshot
-for digest, size, and parsing, with device/inode/size/mtime/ctime stability
-checks. Downloaded release assets, including the collection, are capped at
-10 MiB; other OCI/BuildKit inputs are capped at 64 MiB. Symlinks, FIFOs,
-devices, oversized inputs, and files that change during the read fail with
-fixed value-free diagnostics.
-
-Every JSON evidence output uses the same no-clobber writer. Existing regular
-files and symlinks are rejected, the temporary file is created exclusively,
-and an atomic hard link fails closed if a target appears during publication.
-The temporary file is removed after success or failure; no output is an
-in-place update target.
-
-`finalize` publishes delivered and acceptance as a create-new pair: both
-targets are preflighted and both documents serialized into exclusive temporary
-files first. A first-link failure writes no second output. A second-link failure
-removes the first only when its device/inode matches the owned temporary hard
-link, never a foreign replacement; all owned temporaries are cleaned.
+Files whose bytes are bound by a digest use one non-following, nonblocking
+descriptor read. The finalizer requires a regular file, enforces a 10 MiB cap
+for every downloaded release asset (including the collection archive) and a
+64 MiB cap for other OCI/BuildKit inputs, and compares device, inode, byte
+size, modification time, and change time before and after the bounded read.
+Digest, size, and JSON/JSONL parsing are all derived from that same immutable
+byte snapshot. A symlink, FIFO, device, oversized input, or file that changes
+during the read fails with a fixed value-free diagnostic.
 
 Acceptance profile IDs are limited to 255 ASCII characters and contain exactly
 one slash separating two grammar-validated segments. Additional or empty
 segments, dot segments, and trailing slashes fail closed.
 
-Producer provenance must contain canonical positive run and attempt strings.
-The typed `producer-central-ci` receipt must bind that provenance digest to the
-exact `Collection CI` workflow run and attempt and to exactly one completed,
-successful `Collection / Release Validation` job. The library does not query
-that run; stage C's shell must produce the observation from live paginated REST
-responses before the library will accept it.
+The producer provenance run ID and attempt must be canonical positive decimal
+values. The finalizer resolves that exact historical attempt through GitHub,
+requires the `Collection CI` workflow at `.github/workflows/collection-ci.yml`
+to be a successful protected-`main` push for the producer source SHA, and reads
+the complete paginated job set for the same attempt. Exactly one job may be
+named `Collection / Release Validation`, and that one job must be completed
+successfully. A dedicated typed receipt binds the provenance digest, run,
+attempt, workflow, source identity, and central gate job. A skipped transition
+adapter or a successful run without that exact central gate cannot satisfy
+producer acceptance.
 
-Each initial producer/container revocation receipt binds an exact canonical
-snapshot of the consumed release assets and its independently recomputed
-digest. The library validates the correct repository and numeric release ID,
-the exact consumed URL set, numeric asset IDs, filenames, uploaded state, byte
-sizes, canonical URL order, and digest. The final revocation receipt binds both
-release tag commits, both final snapshots, and separate initial/final snapshot
-digest fields. Receipt-set validation cross-binds those initial fields and
-snapshots to the initial receipts, recomputes the final digests, and requires
-initial and final observations to match. Live tag resolution, pagination,
-receipt-file readback, and asset downloads remain responsibilities of stage C.
+Every successful live check emits one typed
+`lit.security-release.verification-receipt/v1` document. The exact receipt set
+covers producer evidence and identity, initial producer/container revocation,
+producer and container Cosign verification, producer/container materials, the
+exact producer central-CI attempt and validation gate, consumer and
+container-release identity, and for every variant the OCI index,
+three immutable tags, live image signature, release materials, BuildKit
+attestations, pull by digest, and installed collection state. `public` and
+`certified` additionally require a receipt for the exact reviewed profile
+command; `bootstrap` must not have one. Every receipt carries the correlation
+ID, both evidence-file digests, finalizer workflow SHA, run ID, run attempt,
+timestamp, receipt type, and type-specific observations. Receipts never contain
+tokens, private keys, or secret values.
 
-Only a complete, current, run-owned receipt set can produce a verification
-report and terminal `delivered` evidence. The resulting
-`mlx90-final-acceptance.json` must also pass the independent delivery validator.
-No signed or durable live evidence exists merely because these local functions
-and tests are present.
+Every finalizer JSON output uses one no-clobber writer. It rejects an existing
+regular file or symlink, creates its temporary file exclusively, and publishes
+through an atomic hard link that fails if another writer created the target in
+the meantime. The temporary file is cleaned after success or failure. Evidence,
+receipt, report, bundle, delivered, and acceptance paths are never treated as
+in-place update targets.
 
-## Forward activation contract
+`finalize` publishes delivered and acceptance as one create-new pair. It
+preflights both targets, serializes both documents, and creates both temporary
+files exclusively before linking either output. If the acceptance link fails,
+the delivered link from that invocation is removed only when its device and
+inode still equal the owned temporary hard link; a foreign replacement is
+never removed. A delivered-link failure never writes acceptance, and all owned
+temporary links are cleaned on success or failure.
 
-Stage C will separately add the protected workflow and shell orchestration. It
-must acquire only scoped short-lived credentials, verify live producer central
-CI, releases, tags, OCI state and signatures, download consumed assets again by
-numeric ID, and persist exactly six verified assets in a Release whose REST
-response says `immutable: true`. It must expose no callback output until every
-check succeeds. Governance enablement, Producer PR #595, promotion, container
-release, and final acceptance remain external prerequisites rather than claims
-made by this inert branch.
+The collector accepts only the exact filename/type set, rejects duplicates,
+foreign run bindings, stale timestamps, changed evidence digests, variant
+substitution, and cross-receipt digest disagreement. It derives the report's
+checks and variant observations only from that validated receipt set. Supplying
+the producer and container evidence documents without receipts cannot create a
+report. Each initial producer/container revocation receipt contains the exact
+canonical metadata snapshot of every release asset whose bytes were consumed
+and its independently calculated digest. The receipt validator checks the
+correct repository and numeric release ID, the exact consumed URL set, numeric
+asset IDs, filenames, uploaded state, byte sizes, URL ordering, and canonical
+digest before that initial observation becomes durable.
 
-## Verification available in this stage
+Immediately before report creation, the workflow fetches both releases again
+and emits the final receipt only when neither live release contains an
+applicable revocation asset. The same boundary resolves both release tags to
+their required commits again and obtains each complete paginated REST asset
+list. It reads the trusted initial snapshot digests back from the newly written
+receipt files, rather than relying only on mutable shell variables, and compares
+the final canonical snapshots against that durable readback. Every selected
+asset is then downloaded again by numeric asset ID and byte-compared with every
+local file used for verification. The workflow fetches both releases and their
+complete asset lists once more after those downloads; tag commits and snapshot
+digests must remain unchanged. The final typed receipt binds both final
+snapshots, both initial/final snapshot digests, and both final tag commits.
+Receipt-set validation cross-binds its initial digest fields and snapshots to
+the two initial revocation receipts, recomputes the final snapshot digests, and
+requires initial and final values to match. The final receipt must be the latest
+observation.
 
-Only checks backed by files present through stage B2 are listed here:
+## Durable result
+
+After every check passes, the workflow creates:
+
+- `security-release-delivered.json`, compatible with the canonical producer
+  evidence policy;
+- `mlx90-final-acceptance.json`, containing the complete three-variant
+  acceptance matrix;
+- `mlx90-verification-report.json`, binding the correlation ID and exact
+  producer/container evidence digests to every observed check;
+- `mlx90-verification-receipts.json`, the exact run-owned typed receipt bundle;
+- `SHA256SUMS`; and
+- `SHA256SUMS.sigstore.json`, a keyless signature bundle bound to the exact
+  finalizer workflow SHA.
+
+The six-file set is uploaded as a same-run artifact, verified again in a
+separate least-privilege job, and persisted without replacement in a GitHub
+Release whose tag is derived from the acceptance digest. Persistence first
+creates an owned draft through the REST API and binds every subsequent write,
+paginated asset read, and asset download to its positive numeric release or
+asset ID. It uploads only missing assets through the release's ID-bound upload
+URL, accepts a partial draft on retry only when its run marker, target SHA,
+metadata, and every existing byte match the current signed evidence, and never
+overwrites an asset. The complete draft must contain exactly six unique assets
+in `uploaded` state. All six are downloaded by asset ID, byte-compared,
+checksum-verified, and signature-verified before publication. The published
+durable copy is then independently listed with full REST pagination and all six
+assets are downloaded by ID and verified again before the workflow reports
+success.
+
+Publication is successful only when the numeric Release REST response exposes
+`immutable: true` and the exact six-asset metadata snapshot remains unchanged
+after the final downloads. Until immutable releases are enabled for
+`lightning-it/modulix-validation` by Governance, persistence therefore fails
+closed and exposes no callback outputs. The workflow neither requests nor adds
+repository-administration permission to change that setting itself.
+
+The final report and final acceptance document bind the receipt bundle by its
+exact asset name, full SHA-256, and byte size, together with the finalizer run
+and attempt already bound by those documents. Persistence includes the bundle
+in `SHA256SUMS`, byte-compares it during draft recovery and after publication,
+and recomputes the digest and size referenced by the acceptance document. A
+direct durable download URL cannot be embedded in the self-hashed acceptance
+document because its release tag is derived from that document's digest. After
+publication, the persistence step therefore exposes the actual release tag,
+the Release REST response's `html_url`, and the exact `browser_download_url`
+values returned by the paginated asset API for final acceptance, final report,
+and receipt bundle, together with their digests, as separate run outputs. It
+validates those live URLs against the expected repository, evidence tag, and
+asset names instead of constructing substitutes. Those external-evidence
+outputs are created only after all six published assets have been downloaded
+and verified byte-for-byte.
+
+Only after that published `delivered` copy passes the local delivery validator,
+checksum verification, byte comparison, and Cosign verification does the
+persistence job expose callback outputs. A dependent protected job then mints
+a short-lived App token scoped only to
+`lightning-it/container-ee-wunder-ansible-ubi9` with `Actions: write`. It
+rejects any App slug other than `lightning-it-release-automation`, any
+installation ID other than `148019054`, and any token repository set other
+than that single consumer repository. The callback dispatches
+`security-release-promote-tags.yml` on consumer `main` with exactly these four
+inputs:
+
+- `final_acceptance_url`;
+- `final_acceptance_sha256`;
+- `consumer_merge_sha`; and
+- `container_release_tag`.
+
+The acceptance URL's immutable release tag must derive from the first 16 hex
+characters of its full SHA-256 digest. No mutable image tag is changed by the
+finalizer itself. The consumer workflow reauthenticates the durable acceptance
+before its protected promotion job can move convenience tags.
+
+## Enabling a real security profile
+
+A regular pull request may add a release-eligible profile only after the
+producer owns an authoritative Security/Evidence ID and a concrete acceptance
+procedure for that exact fix. The profile must use a fixed argument vector,
+must be safe for all three published variants, and must not depend on a mutable
+tag, a free-form dispatch input, a private credential, or an unreviewed remote
+script.
+
+Before merging such a profile, verify that the producer and container evidence
+contracts are live, the dispatch actor is the release automation App, and the
+protected environment reviewers can validate the exact workflow SHA. Do not
+dispatch the foundation against the historical fixture and do not interpret a
+blocked preflight as delivery evidence.
+
+## Local verification
+
+Run the repository-owned test and lint profile before pushing a change. The
+focused checks are:
 
 ```bash
 python3 -m unittest \
-  tests.test_mlx90_delivery tests.test_mlx90_finalizer_smoke \
-  tests.test_mlx90_finalizer
-python3 scripts/lit-repository-quality.py
+  tests.test_mlx90_delivery \
+  tests.test_mlx90_finalizer_smoke \
+  tests.test_mlx90_finalizer \
+  tests.test_mlx90_workflow_contract
+shellcheck .github/scripts/mlx90-final-acceptance.sh
+actionlint .github/workflows/mlx90-final-acceptance.yml
+git diff --check
 ```
 
-Do not invoke the MLX-90 workflow-contract, ShellCheck, or actionlint commands
-from this stage: the corresponding MLX-90 activation files do not exist yet.
+The mandatory clean, committed acceptance boundary remains:
 
-## References
-
-- MLX-90 ADR: <https://wiki.cloud.l-it.io/wiki/spaces/LIT/pages/2894659587>
-- REL-20 implementation status:
-  <https://wiki.cloud.l-it.io/wiki/spaces/LIT/pages/2894790704>
-- Governance issue:
-  <https://github.com/lightning-it/github-management-lit/issues/267>
-- Producer repair:
-  <https://github.com/lightning-it/ansible-collection-supplementary/pull/595>
+```bash
+python3 scripts/lit-push-ready.py push-ready
+```
