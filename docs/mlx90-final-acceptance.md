@@ -124,10 +124,16 @@ packages, files, and relationships. The live SLSA v1 predicate must bind the
 variant profile, Dockerfile, repository, protected release tag, merge SHA,
 platform, workflow, run ID, and run attempt. Its builder and timestamps are
 validated as well. Registry blobs are fetched anonymously from the fixed Quay
-host over HTTPS, without credentials, following at most the registry's single
-HTTPS CDN redirect, with a 64 MiB limit. Every downloaded byte sequence is
-checked against its signed digest and remains an ephemeral runner input rather
-than published evidence.
+host over HTTPS. Public blobs use the direct anonymous path. A `401` is accepted
+only when its single Bearer challenge exactly names Quay's fixed token endpoint,
+the `quay.io` service, and the validated repository's pull-only scope. The
+resulting short-lived anonymous pull token is bounded and passed to curl only
+through standard input; it is never persisted, logged, or placed in process
+arguments. Curl's default cross-origin credential stripping remains in force
+(`--location-trusted` is forbidden) while following at most the registry's
+single HTTPS CDN redirect. Downloads are capped at 64 MiB and checked against
+both the signed descriptor digest and exact size. Every downloaded byte
+sequence remains an ephemeral runner input rather than published evidence.
 
 The separately signed container evidence binds all release-asset digests to
 that same workflow identity and SHA. The referenced Cosign signature receipt

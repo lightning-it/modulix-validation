@@ -345,20 +345,115 @@ verify_reference() {
     || fail_closed "immutable reference digest mismatch"
 }
 
+validate_quay_bearer_challenge() {
+  local headers="$1"
+  local repository="$2"
+  python3 - "$headers" "$repository" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+
+header_path = Path(sys.argv[1])
+expected_repository = sys.argv[2]
+try:
+    raw_headers = header_path.read_bytes()
+except OSError:
+    raise SystemExit(1)
+if not raw_headers or len(raw_headers) > 65_536 or b"\x00" in raw_headers:
+    raise SystemExit(1)
+try:
+    header_text = raw_headers.decode("ascii")
+except UnicodeDecodeError:
+    raise SystemExit(1)
+
+blocks = [
+    block
+    for block in re.split(r"\r?\n\r?\n", header_text)
+    if block.strip()
+]
+if not blocks:
+    raise SystemExit(1)
+lines = blocks[-1].splitlines()
+if not lines or re.fullmatch(
+    r"HTTP/(?:1\.[01]|2|3) 401(?:[ \t][\x20-\x7e]*)?", lines[0]
+) is None:
+    raise SystemExit(1)
+
+challenges = []
+for line in lines[1:]:
+    if not line or line[0] in " \t" or ":" not in line:
+        raise SystemExit(1)
+    name, value = line.split(":", 1)
+    if re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) is None:
+        raise SystemExit(1)
+    if name.lower() == "www-authenticate":
+        challenges.append(value.strip())
+if len(challenges) != 1:
+    raise SystemExit(1)
+
+scheme = re.match(r"(?i:Bearer)[ \t]+", challenges[0])
+if scheme is None:
+    raise SystemExit(1)
+parameters = challenges[0][scheme.end() :]
+parameter = re.compile(
+    r'([A-Za-z][A-Za-z0-9_-]*)[ \t]*=[ \t]*"([^"\\\r\n]*)"'
+)
+parsed = {}
+position = 0
+while position < len(parameters):
+    while position < len(parameters) and parameters[position] in " \t":
+        position += 1
+    match = parameter.match(parameters, position)
+    if match is None:
+        raise SystemExit(1)
+    key = match.group(1).lower()
+    if key in parsed:
+        raise SystemExit(1)
+    parsed[key] = match.group(2)
+    position = match.end()
+    while position < len(parameters) and parameters[position] in " \t":
+        position += 1
+    if position == len(parameters):
+        break
+    if parameters[position] != ",":
+        raise SystemExit(1)
+    position += 1
+    if position == len(parameters):
+        raise SystemExit(1)
+
+expected = {
+    "realm": "https://quay.io/v2/auth",
+    "service": "quay.io",
+    "scope": f"repository:{expected_repository}:pull",
+}
+if parsed != expected:
+    raise SystemExit(1)
+PY
+}
+
 download_quay_blob() {
   local image="$1"
   local digest="$2"
-  local output="$3"
-  local repository
+  local expected_size="$3"
+  local output="$4"
+  local repository headers curl_status token_response token
   [[ "$image" =~ ^quay\.io/[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._/-][a-z0-9]+)*$ ]] \
     || fail_closed "BuildKit blob image is outside the Quay allowlist"
   [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
     || fail_closed "BuildKit blob digest is invalid"
+  [[ "$expected_size" =~ ^[1-9][0-9]*$ ]] \
+    && [ "$expected_size" -le 67108864 ] \
+    || fail_closed "BuildKit blob size is invalid or exceeds 64 MiB"
   [ ! -e "$output" ] && [ ! -L "$output" ] \
     || fail_closed "BuildKit blob output already exists"
   repository="${image#quay.io/}"
-  curl \
+  headers="$(mktemp "${output}.headers.XXXXXX")" \
+    || fail_closed "cannot create BuildKit response header snapshot"
+  if curl \
+    --disable \
     --fail \
+    --remove-on-error \
     --silent \
     --show-error \
     --proto '=https' \
@@ -368,10 +463,85 @@ download_quay_blob() {
     --tlsv1.2 \
     --max-time 300 \
     --max-filesize 67108864 \
+    --dump-header "$headers" \
     --output "$output" \
     "https://quay.io/v2/${repository}/blobs/${digest}"
+  then
+    rm -f -- "$headers"
+  else
+    curl_status=$?
+    if [ "$curl_status" -ne 22 ] \
+      || ! validate_quay_bearer_challenge \
+        "$headers" "$repository" 2>/dev/null
+    then
+      rm -f -- "$headers"
+      fail_closed "Quay blob request did not return the required Bearer challenge"
+    fi
+    rm -f -- "$headers"
+    set +x
+    if ! token_response="$(curl \
+      --disable \
+      --fail \
+      --remove-on-error \
+      --silent \
+      --show-error \
+      --proto '=https' \
+      --tlsv1.2 \
+      --max-time 30 \
+      --max-filesize 65536 \
+      --get \
+      --data-urlencode 'service=quay.io' \
+      --data-urlencode "scope=repository:${repository}:pull" \
+      'https://quay.io/v2/auth')"
+    then
+      fail_closed "anonymous Quay pull-token request failed"
+    fi
+    if ! token="$(jq -er '
+      if type == "object"
+        and (.token | type) == "string"
+        and (.token | length) >= 1
+        and (.token | length) <= 8192
+        and (.token | test("^[A-Za-z0-9._~-]+$"))
+      then .token
+      else error("invalid anonymous pull token")
+      end
+    ' <<<"$token_response" 2>/dev/null)"
+    then
+      unset token_response
+      fail_closed "anonymous Quay pull-token response is invalid"
+    fi
+    unset token_response
+    if ! printf 'oauth2-bearer = "%s"\n' "$token" \
+      | curl \
+        --disable \
+        --config - \
+        --fail \
+        --remove-on-error \
+        --silent \
+        --show-error \
+        --proto '=https' \
+        --proto-redir '=https' \
+        --location \
+        --max-redirs 1 \
+        --tlsv1.2 \
+        --max-time 300 \
+        --max-filesize 67108864 \
+        --output "$output" \
+        "https://quay.io/v2/${repository}/blobs/${digest}"
+    then
+      unset token
+      fail_closed "authenticated anonymous Quay blob request failed"
+    fi
+    unset token
+  fi
   [ -s "$output" ] \
     || fail_closed "downloaded BuildKit blob is empty"
+  [ -f "$output" ] && [ ! -L "$output" ] \
+    || fail_closed "downloaded BuildKit blob is not a regular file"
+  [ "$(wc -c <"$output" | tr -d '[:space:]')" = "$expected_size" ] \
+    || fail_closed "downloaded BuildKit blob size differs from its descriptor"
+  [ "sha256:$(sha256sum "$output" | awk '{print $1}')" = "$digest" ] \
+    || fail_closed "downloaded BuildKit blob digest differs from its descriptor"
 }
 
 resolve_tag_commit() {
@@ -1057,7 +1227,8 @@ PY
   local variant image manifest image_ref index_path installed_path resolved
   local attestation reference_file attestation_root attestation_digest
   local platform platform_digest safe_platform attestation_manifest_path
-  local predicate_name predicate_type layer_digest statement_path
+  local predicate_name predicate_type layer_descriptor layer_digest layer_size
+  local statement_path
   local container_version short_consumer_sha immutable_tag live_tag_digest
   local receipt_checked_at live_signature_digest tag_digests platform_digests
   local buildkit_platforms repo_digests installed_state installed_version
@@ -1188,18 +1359,21 @@ PY
           slsa) predicate_type="https://slsa.dev/provenance/v1" ;;
           *) fail_closed "unsupported BuildKit predicate" ;;
         esac
-        layer_digest="$(jq -er \
+        layer_descriptor="$(jq -ec \
           --arg predicate "$predicate_type" '
             [.layers[] | select(
               .mediaType == "application/vnd.in-toto+json"
               and .annotations["in-toto.io/predicate-type"] == $predicate
             )]
-            | if length == 1 then .[0].digest
+            | if length == 1 then .[0] | {digest, size}
               else error("exact BuildKit predicate layer is not unique")
               end
           ' "$attestation_manifest_path")"
+        layer_digest="$(jq -er '.digest' <<<"$layer_descriptor")"
+        layer_size="$(jq -er '.size' <<<"$layer_descriptor")"
         statement_path="$attestation_root/${safe_platform}-${predicate_name}.json"
-        download_quay_blob "$image" "$layer_digest" "$statement_path"
+        download_quay_blob \
+          "$image" "$layer_digest" "$layer_size" "$statement_path"
       done
     done
     python3 "$FINALIZER" verify-buildkit-attestations \

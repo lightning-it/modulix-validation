@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -20,6 +21,152 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         self.workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.workflow = yaml.safe_load(self.workflow_text)
         self.script = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    def _run_quay_blob_download(
+        self,
+        challenge=None,
+        direct=False,
+        token_json='{"token":"synthetic.jwt_token"}',
+    ):
+        blob = b"verified-buildkit-blob\n"
+        digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\nverify_mode() {")]
+                + '\ndownload_quay_blob "$@"\n',
+                encoding="utf-8",
+            )
+            fake_curl = root / "fake-curl.sh"
+            fake_curl.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [ -f "${QUAY_TEST_CALLS:?}" ]; then
+  read -r count <"$QUAY_TEST_CALLS"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$QUAY_TEST_CALLS"
+printf 'call-%s\n' "$count" >>"${QUAY_TEST_ARGV:?}"
+output=""
+headers=""
+service=""
+scope=""
+config_stdin=false
+arguments=("$@")
+for ((index = 0; index < ${#arguments[@]}; index++)); do
+  argument="${arguments[$index]}"
+  printf '%s\n' "$argument" >>"$QUAY_TEST_ARGV"
+  case "$argument" in
+    --output)
+      index=$((index + 1))
+      output="${arguments[$index]}"
+      printf '%s\n' "$output" >>"$QUAY_TEST_ARGV"
+      ;;
+    --dump-header)
+      index=$((index + 1))
+      headers="${arguments[$index]}"
+      printf '%s\n' "$headers" >>"$QUAY_TEST_ARGV"
+      ;;
+    --data-urlencode)
+      index=$((index + 1))
+      value="${arguments[$index]}"
+      printf '%s\n' "$value" >>"$QUAY_TEST_ARGV"
+      case "$value" in
+        service=*) service="${value#service=}" ;;
+        scope=*) scope="${value#scope=}" ;;
+      esac
+      ;;
+    --config)
+      index=$((index + 1))
+      [ "${arguments[$index]}" = "-" ] || exit 91
+      printf '%s\n' - >>"$QUAY_TEST_ARGV"
+      config_stdin=true
+      ;;
+  esac
+done
+
+case "$count" in
+  1)
+    [ -n "$headers" ] && [ -n "$output" ] || exit 92
+    if [ "${QUAY_TEST_DIRECT:?}" = 1 ]; then
+      printf 'HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n' \
+        >"$headers"
+      printf 'verified-buildkit-blob\n' >"$output"
+      exit 0
+    fi
+    printf 'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: %s\r\n\r\n' \
+      "${QUAY_TEST_CHALLENGE-}" >"$headers"
+    exit 22
+    ;;
+  2)
+    [ "$service" = "quay.io" ] || exit 93
+    [ "$scope" = "repository:lightning-it/ee-wunder:pull" ] || exit 94
+    [ "${arguments[${#arguments[@]} - 1]}" = "https://quay.io/v2/auth" ] \
+      || exit 95
+    [ -z "$output" ] || exit 96
+    printf '%s\n' "${QUAY_TEST_TOKEN_JSON:?}"
+    ;;
+  3)
+    $config_stdin || exit 97
+    config="$(cat)"
+    [ "$config" = 'oauth2-bearer = "synthetic.jwt_token"' ] || exit 98
+    [[ "$*" != *synthetic.jwt_token* ]] || exit 99
+    [ -n "$output" ] || exit 100
+    printf 'verified-buildkit-blob\n' >"$output"
+    printf 'authenticated\n' >"${QUAY_TEST_AUTH_SEEN:?}"
+    ;;
+  *) exit 101 ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            bash_env = root / "bash-env.sh"
+            bash_env.write_text(
+                'curl() { bash "${QUAY_TEST_FAKE_CURL:?}" "$@"; }\n',
+                encoding="utf-8",
+            )
+            output = root / "blob.json"
+            calls = root / "calls.txt"
+            argv_log = root / "argv.txt"
+            auth_seen = root / "auth-seen.txt"
+            env = {
+                **os.environ,
+                "BASH_ENV": str(bash_env),
+                "QUAY_TEST_ARGV": str(argv_log),
+                "QUAY_TEST_AUTH_SEEN": str(auth_seen),
+                "QUAY_TEST_CALLS": str(calls),
+                "QUAY_TEST_CHALLENGE": challenge or "",
+                "QUAY_TEST_DIRECT": "1" if direct else "0",
+                "QUAY_TEST_FAKE_CURL": str(fake_curl),
+                "QUAY_TEST_TOKEN_JSON": token_json,
+                "RUNNER_TEMP": str(root),
+            }
+            completed = subprocess.run(
+                [
+                    "bash",
+                    str(driver),
+                    "quay.io/lightning-it/ee-wunder",
+                    digest,
+                    str(len(blob)),
+                    str(output),
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return {
+                "completed": completed,
+                "output_exists": output.exists(),
+                "output": output.read_bytes() if output.exists() else None,
+                "calls": int(calls.read_text(encoding="utf-8").strip()),
+                "argv": argv_log.read_text(encoding="utf-8"),
+                "auth_seen": auth_seen.exists(),
+                "blob": blob,
+            }
 
     def test_dispatch_contract_is_exact_and_has_no_implicit_trigger(self):
         trigger = self.workflow.get("on", self.workflow.get(True))
@@ -212,22 +359,24 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
             "repos/${repository}/releases/assets/${asset_id}",
             self.script,
         )
-        self.assertEqual(1, self.script.count("\n  curl \\\n"))
+        self.assertIn("validate_quay_bearer_challenge", self.script)
+        self.assertIn("'https://quay.io/v2/auth'", self.script)
+        self.assertIn("oauth2-bearer", self.script)
+        self.assertIn('"$layer_digest" "$layer_size"', self.script)
         self.assertNotIn("Authorization:", self.script)
+        self.assertNotIn("--location-trusted", self.script)
         self.assertIn("immutable reference digest mismatch", self.script)
         self.assertNotIn(
             'immutable reference digest mismatch: ${url}', self.script
         )
-        self.assertEqual(1, self.script.count("--location"))
+        self.assertEqual(2, self.script.count("--location"))
         signed_index = self.script.index(
             '      "$image_ref" >"$INPUT_ROOT/${variant}-signature-live.json"'
         )
         immutable_alias = self.script.index(
             '        "${image}:${immutable_tag}" --format'
         )
-        attached_payload = self.script.index(
-            '        download_quay_blob "$image" "$layer_digest"'
-        )
+        attached_payload = self.script.index("        download_quay_blob \\")
         self.assertLess(signed_index, immutable_alias)
         self.assertLess(immutable_alias, attached_payload)
         self.assertNotIn(
@@ -275,6 +424,86 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, self.script)
+
+    def test_quay_blob_download_supports_direct_anonymous_access(self):
+        result = self._run_quay_blob_download(direct=True)
+        completed = result["completed"]
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(1, result["calls"])
+        self.assertEqual(result["blob"], result["output"])
+        self.assertFalse(result["auth_seen"])
+
+    def test_quay_blob_download_uses_exact_anonymous_bearer_exchange(self):
+        challenge = (
+            'Bearer service="quay.io", '
+            'scope="repository:lightning-it/ee-wunder:pull",'
+            'realm="https://quay.io/v2/auth"'
+        )
+        result = self._run_quay_blob_download(challenge=challenge)
+        completed = result["completed"]
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(3, result["calls"])
+        self.assertEqual(result["blob"], result["output"])
+        self.assertTrue(result["auth_seen"])
+        for captured in (completed.stdout, completed.stderr, result["argv"]):
+            self.assertNotIn("synthetic.jwt_token", captured)
+
+    def test_quay_blob_download_rejects_untrusted_bearer_challenges(self):
+        challenges = (
+            'Bearer realm="https://evil.example/token",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull"',
+            'Bearer realm="https://quay.io/v2/auth",service="registry.example",'
+            'scope="repository:lightning-it/ee-wunder:pull"',
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/other:pull"',
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull,push"',
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull",account="someone"',
+            'Bearer realm="https://quay.io/v2/auth",'
+            'realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull"',
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull",',
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull"\r\n'
+            'WWW-Authenticate: Bearer realm="https://quay.io/v2/auth",'
+            'service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull"',
+            "",
+        )
+        for challenge in challenges:
+            with self.subTest(challenge=challenge):
+                result = self._run_quay_blob_download(challenge=challenge)
+                completed = result["completed"]
+                self.assertNotEqual(0, completed.returncode)
+                self.assertEqual(1, result["calls"])
+                self.assertFalse(result["output_exists"])
+                self.assertFalse(result["auth_seen"])
+                self.assertNotIn("synthetic.jwt_token", completed.stdout)
+                self.assertNotIn("synthetic.jwt_token", completed.stderr)
+                self.assertNotIn("synthetic.jwt_token", result["argv"])
+                if challenge:
+                    self.assertNotIn(challenge, completed.stdout)
+                    self.assertNotIn(challenge, completed.stderr)
+
+    def test_quay_blob_download_rejects_unsafe_token_content(self):
+        challenge = (
+            'Bearer realm="https://quay.io/v2/auth",service="quay.io",'
+            'scope="repository:lightning-it/ee-wunder:pull"'
+        )
+        result = self._run_quay_blob_download(
+            challenge=challenge,
+            token_json='{"token":"unsafe token"}',
+        )
+        completed = result["completed"]
+        self.assertNotEqual(0, completed.returncode)
+        self.assertEqual(2, result["calls"])
+        self.assertFalse(result["output_exists"])
+        self.assertFalse(result["auth_seen"])
+        self.assertNotIn("unsafe token", completed.stdout)
+        self.assertNotIn("unsafe token", completed.stderr)
+        self.assertNotIn("unsafe token", result["argv"])
 
     def test_persistence_recovers_only_matching_drafts_before_publish(self):
         for required in (
