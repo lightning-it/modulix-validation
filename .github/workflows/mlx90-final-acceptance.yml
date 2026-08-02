@@ -1,0 +1,248 @@
+# yamllint disable rule:truthy rule:line-length
+---
+name: MLX-90 Immutable Final Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      correlation_id:
+        description: Immutable caller correlation identifier.
+        required: true
+        type: string
+      producer_evidence_url:
+        description: HTTPS URL of the signed producer release evidence asset.
+        required: true
+        type: string
+      producer_evidence_bundle_url:
+        description: HTTPS URL of the producer evidence Sigstore bundle.
+        required: true
+        type: string
+      producer_evidence_sha256:
+        description: Lowercase SHA-256 of the producer evidence, without a prefix.
+        required: true
+        type: string
+      consumer_pr:
+        description: Consumer pull-request number bound by the signed evidence.
+        required: true
+        type: string
+      consumer_head_sha:
+        description: Exact reviewed consumer pull-request head SHA.
+        required: true
+        type: string
+      consumer_merge_sha:
+        description: Exact consumer merge SHA and container source SHA.
+        required: true
+        type: string
+      container_release_id:
+        description: Numeric GitHub container release ID.
+        required: true
+        type: string
+      container_release_tag:
+        description: Exact v-prefixed semantic container release tag.
+        required: true
+        type: string
+      container_release_run_id:
+        description: Exact successful Container Build & Publish run ID.
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: mlx90-final-acceptance-${{ inputs.correlation_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: MLX-90 / immutable digest acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment:
+      name: ansible-collection-runtime-protected
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      evidence-tag: ${{ steps.acceptance.outputs.evidence-tag }}
+    steps:
+      - name: Reject every non-App dispatch before secret access
+        env:
+          DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_REF" = "refs/heads/main"
+          test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
+
+      - name: Checkout exact finalizer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Mint exact read-only MLX-90 evidence token
+        id: evidence-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # The pinned v3 contract uses client-id; app-id is deprecated.
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ansible-collection-supplementary
+            container-ee-wunder-ansible-ubi9
+            shared-assets-lit
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Verify exact App installation and token repository scope
+        env:
+          APP_INSTALLATION_ID: ${{ steps.evidence-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.evidence-app.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.evidence-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "lightning-it-release-automation"
+          test "$APP_INSTALLATION_ID" = "148019054"
+          actual_repositories="$(
+            gh api --paginate \
+              "installation/repositories?per_page=100" \
+              | jq -sc '[.[].repositories[].full_name] | sort | unique'
+          )"
+          expected_repositories='[
+            "lightning-it/ansible-collection-supplementary",
+            "lightning-it/container-ee-wunder-ansible-ubi9",
+            "lightning-it/shared-assets-lit"
+          ]'
+          jq -e \
+            --argjson actual "$actual_repositories" \
+            --argjson expected "$expected_repositories" \
+            '$actual == $expected' <<<"{}" >/dev/null
+
+      - name: Checkout immutable canonical MLX-90 policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: lightning-it/shared-assets-lit
+          ref: 1c6a1d43af638d081108d820b3576e401d9f0857
+          path: .mlx90-policy
+          token: ${{ steps.evidence-app.outputs.token }}
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Verify immutable chain and create signed final evidence
+        id: acceptance
+        env:
+          GH_TOKEN: ${{ steps.evidence-app.outputs.token }}
+          INPUT_CORRELATION_ID: ${{ inputs.correlation_id }}
+          INPUT_PRODUCER_EVIDENCE_URL: ${{ inputs.producer_evidence_url }}
+          INPUT_PRODUCER_EVIDENCE_BUNDLE_URL: ${{ inputs.producer_evidence_bundle_url }}
+          INPUT_PRODUCER_EVIDENCE_SHA256: ${{ inputs.producer_evidence_sha256 }}
+          INPUT_CONSUMER_PR: ${{ inputs.consumer_pr }}
+          INPUT_CONSUMER_HEAD_SHA: ${{ inputs.consumer_head_sha }}
+          INPUT_CONSUMER_MERGE_SHA: ${{ inputs.consumer_merge_sha }}
+          INPUT_CONTAINER_RELEASE_ID: ${{ inputs.container_release_id }}
+          INPUT_CONTAINER_RELEASE_TAG: ${{ inputs.container_release_tag }}
+          INPUT_CONTAINER_RELEASE_RUN_ID: ${{ inputs.container_release_run_id }}
+        run: bash .github/scripts/mlx90-final-acceptance.sh verify
+
+      - name: Upload signed final evidence for same-run persistence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mlx90-final-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mlx90-final-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  persist:
+    name: MLX-90 / persist immutable evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: verify
+    outputs:
+      final_acceptance_url: ${{ steps.persistence.outputs.final_acceptance_url }}
+      final_acceptance_sha256: ${{ steps.persistence.outputs.final_acceptance_sha256 }}
+      evidence_release_tag: ${{ steps.persistence.outputs.evidence_release_tag }}
+      evidence_release_url: ${{ steps.persistence.outputs.evidence_release_url }}
+      verification_report_url: ${{ steps.persistence.outputs.verification_report_url }}
+      verification_report_sha256: ${{ steps.persistence.outputs.verification_report_sha256 }}
+      receipt_bundle_url: ${{ steps.persistence.outputs.receipt_bundle_url }}
+      receipt_bundle_sha256: ${{ steps.persistence.outputs.receipt_bundle_sha256 }}
+      consumer_merge_sha: ${{ steps.persistence.outputs.consumer_merge_sha }}
+      container_release_tag: ${{ steps.persistence.outputs.container_release_tag }}
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout exact persistence guard
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download signed same-run evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mlx90-final-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mlx90-final-evidence
+
+      - name: Persist without replacement and verify the durable copy
+        id: persistence
+        env:
+          EVIDENCE_TAG: ${{ needs.verify.outputs.evidence-tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/mlx90-final-acceptance.sh persist
+
+  post-delivery:
+    name: MLX-90 / dispatch post-delivery tag promotion
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: persist
+    environment:
+      name: ansible-collection-runtime-protected
+    permissions:
+      contents: read
+    steps:
+      - name: Reject non-App callback before secret access
+        env:
+          DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_REF" = "refs/heads/main"
+          test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
+
+      - name: Checkout exact post-delivery callback guard
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Mint exact Actions-only promotion callback token
+        id: promotion-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # The pinned v3 contract uses client-id; app-id is deprecated.
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: container-ee-wunder-ansible-ubi9
+          permission-actions: write
+
+      - name: Verify App scope and dispatch exact durable acceptance
+        env:
+          APP_INSTALLATION_ID: ${{ steps.promotion-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.promotion-app.outputs.app-slug }}
+          CONSUMER_MERGE_SHA: ${{ needs.persist.outputs.consumer_merge_sha }}
+          CONTAINER_RELEASE_TAG: ${{ needs.persist.outputs.container_release_tag }}
+          FINAL_ACCEPTANCE_SHA256: ${{ needs.persist.outputs.final_acceptance_sha256 }}
+          FINAL_ACCEPTANCE_URL: ${{ needs.persist.outputs.final_acceptance_url }}
+          GH_TOKEN: ${{ steps.promotion-app.outputs.token }}
+        run: bash .github/scripts/mlx90-final-acceptance.sh callback

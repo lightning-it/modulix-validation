@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "lit.supplementary/mlx90-fixture": {
+      "containerCommand": [
+        "/bin/false"
+      ],
+      "description": "Historical v3.1.2/#488 dry-run fixture; never release eligible.",
+      "releaseEligible": false
+    }
+  },
+  "schemaVersion": 1
+}
