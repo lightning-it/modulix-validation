@@ -70,12 +70,22 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
             if Path(call.args[0]) == root
         ]
         self.assertEqual(1, len(top_level_copies))
+        copied_workspace = Path(top_level_copies[0].args[1])
         fmt_commands = [command for command in observed_commands if "fmt" in command]
         self.assertEqual(1, len(fmt_commands))
         fmt_command = fmt_commands[0]
-        self.assertEqual(["fmt", "-check", "-recursive"], fmt_command[2:])
-        self.assertTrue(fmt_command[1].startswith("-chdir="))
-        fmt_workspace = Path(fmt_command[1].split("=", 1)[1])
+        self.assertEqual(
+            [
+                "terraform",
+                f"-chdir={copied_workspace}",
+                "fmt",
+                "-check",
+                "-recursive",
+            ],
+            fmt_command,
+        )
+        fmt_workspace = Path(fmt_command[1].removeprefix("-chdir="))
+        self.assertEqual(copied_workspace, fmt_workspace)
         self.assertEqual("workspace", fmt_workspace.name)
         self.assertEqual(executable_temp.resolve(), fmt_workspace.parent.parent.resolve())
         self.assertEqual(4, len(observed_data_dirs))
