@@ -53,6 +53,11 @@ RAW_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 FINALIZER_INPUT_MAX_BYTES = 64 * 1024 * 1024
+RELEASE_ASSET_MAX_BYTES = 10 * 1024 * 1024
+COLLECTION_ARCHIVE_MAX_BYTES = RELEASE_ASSET_MAX_BYTES
+MATERIAL_FILE_ERROR = "material is not a bounded regular file"
+CLI_CONTRACT_ERROR = "input does not satisfy the required contract"
+CLI_IO_ERROR = "file operation failed"
 JSON_MAX_NESTING = 128
 JSON_NUMBER_MAX_LENGTH = 4300
 SEMVER_MAX_LENGTH = 255
@@ -481,22 +486,108 @@ def load_json(path: Path, field: str) -> Any:
     return parse_json(read_bounded_utf8(path, field), field)
 
 
-def file_digest(path: Path) -> str:
+@dataclass(frozen=True)
+class SecureFileSnapshot:
+    payload: bytes | None
+    digest: str
+    size: int
+
+
+def secure_file_snapshot(
+    path: Path,
+    maximum_bytes: int = FINALIZER_INPUT_MAX_BYTES,
+    *,
+    capture_payload: bool = False,
+) -> SecureFileSnapshot:
     digest = hashlib.sha256()
+    payload = bytearray() if capture_payload else None
+    descriptor: int | None = None
     try:
-        with path.open("rb") as stream:
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        if not no_follow and stat.S_ISLNK(os.lstat(path).st_mode):
+            fail(MATERIAL_FILE_ERROR)
+        flags = (
+            os.O_RDONLY
+            | no_follow
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > maximum_bytes
+        ):
+            fail(MATERIAL_FILE_ERROR)
+        size = 0
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    fail(MATERIAL_FILE_ERROR)
                 digest.update(chunk)
+                if payload is not None:
+                    payload.extend(chunk)
+            after = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            or size != before.st_size
+        ):
+            fail(MATERIAL_FILE_ERROR)
     except OSError as exc:
-        raise ValueError("file digest cannot be calculated") from exc
-    return "sha256:" + digest.hexdigest()
+        raise ValueError(MATERIAL_FILE_ERROR) from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                raise ValueError(MATERIAL_FILE_ERROR) from exc
+    return SecureFileSnapshot(
+        None if payload is None else bytes(payload),
+        "sha256:" + digest.hexdigest(),
+        size,
+    )
 
 
-def file_size(path: Path) -> int:
-    try:
-        return path.stat().st_size
-    except OSError as exc:
-        raise ValueError("file size cannot be read") from exc
+def file_digest_and_size(
+    path: Path,
+    maximum_bytes: int = FINALIZER_INPUT_MAX_BYTES,
+) -> tuple[str, int]:
+    snapshot = secure_file_snapshot(path, maximum_bytes)
+    return snapshot.digest, snapshot.size
+
+
+def file_digest(
+    path: Path,
+    maximum_bytes: int = FINALIZER_INPUT_MAX_BYTES,
+) -> str:
+    return file_digest_and_size(path, maximum_bytes)[0]
+
+
+def parse_json_snapshot(snapshot: SecureFileSnapshot, field: str) -> Any:
+    if snapshot.payload is None:  # pragma: no cover - internal contract.
+        fail(MATERIAL_FILE_ERROR)
+    return parse_json(decode_utf8(snapshot.payload, field), field)
+
+
+def resolved_evidence_digest(path: Path, supplied: str | None) -> str:
+    if supplied is None:
+        return file_digest(path, RELEASE_ASSET_MAX_BYTES)
+    return require_digest(supplied, "validated evidence digest")
 
 
 def safe_output(path: Path) -> None:
@@ -520,13 +611,13 @@ def serialize_json(value: Any) -> str:
 
 
 def prepare_json_output(
-    path: Path, serialized: str
+    path: Path, serialized: bytes
 ) -> tuple[Path, os.stat_result]:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         if temporary.exists() or temporary.is_symlink():
             fail("temporary output already exists")
-        with temporary.open("x", encoding="utf-8") as stream:
+        with temporary.open("xb") as stream:
             stream.write(serialized)
         return temporary, os.lstat(temporary)
     except FileExistsError:
@@ -549,9 +640,10 @@ def unlink_owned(path: Path, owner: os.stat_result) -> None:
         raise ValueError("owned output cleanup failed") from exc
 
 
-def write_json(path: Path, value: Any) -> None:
+def write_json(path: Path, value: Any) -> tuple[str, int]:
     safe_output(path)
-    temporary, owner = prepare_json_output(path, serialize_json(value))
+    serialized = serialize_json(value).encode("utf-8")
+    temporary, owner = prepare_json_output(path, serialized)
     try:
         try:
             os.link(temporary, path)
@@ -561,6 +653,7 @@ def write_json(path: Path, value: Any) -> None:
             raise ValueError("output cannot be published") from exc
     finally:
         unlink_owned(temporary, owner)
+    return "sha256:" + hashlib.sha256(serialized).hexdigest(), len(serialized)
 
 
 def write_json_pair(
@@ -577,8 +670,8 @@ def write_json_pair(
         fail("delivered and acceptance outputs must be different files")
     safe_output(first_path)
     safe_output(second_path)
-    first_serialized = serialize_json(first_value)
-    second_serialized = serialize_json(second_value)
+    first_serialized = serialize_json(first_value).encode("utf-8")
+    second_serialized = serialize_json(second_value).encode("utf-8")
     first_temporary = second_temporary = None
     first_owner = second_owner = None
     try:
@@ -821,12 +914,12 @@ def validate_producer_evidence(
     if (
         not isinstance(identifiers, list)
         or not identifiers
-        or len(identifiers) != len(set(identifiers))
         or any(
             not isinstance(item, str)
             or SECURITY_IDENTIFIER.fullmatch(item) is None
             for item in identifiers
         )
+        or len(identifiers) != len(set(identifiers))
     ):
         fail("security.identifiers must be a non-empty unique string list")
     affected_version = require_string(
@@ -1106,16 +1199,45 @@ def verify_producer_materials(
     sbom_path: Path,
     provenance_path: Path,
 ) -> None:
-    artifact = producer_evidence["artifact"]
-    expected_digest = artifact["digest"]
-    if file_digest(collection_path) != expected_digest:
+    artifact = require_mapping(producer_evidence.get("artifact"), "artifact")
+    require_exact(
+        artifact,
+        {
+            "collection",
+            "version",
+            "digest",
+            "releaseUrl",
+            "signature",
+            "sbom",
+            "provenance",
+        },
+        "artifact",
+    )
+    expected_digest = require_digest(artifact["digest"], "artifact.digest")
+    sbom_reference = require_reference(artifact["sbom"], "artifact.sbom")
+    provenance_reference = require_reference(
+        artifact["provenance"], "artifact.provenance"
+    )
+    if (
+        file_digest(collection_path, COLLECTION_ARCHIVE_MAX_BYTES)
+        != expected_digest
+    ):
         fail("collection archive digest does not match producer evidence")
-    if file_digest(sbom_path) != artifact["sbom"]["digest"]:
+    sbom_snapshot = secure_file_snapshot(
+        sbom_path, RELEASE_ASSET_MAX_BYTES, capture_payload=True
+    )
+    provenance_snapshot = secure_file_snapshot(
+        provenance_path, RELEASE_ASSET_MAX_BYTES, capture_payload=True
+    )
+    if sbom_snapshot.digest != sbom_reference["digest"]:
         fail("SBOM digest does not match producer evidence")
-    if file_digest(provenance_path) != artifact["provenance"]["digest"]:
+    if provenance_snapshot.digest != provenance_reference["digest"]:
         fail("provenance digest does not match producer evidence")
 
-    sbom = require_mapping(load_json(sbom_path, "producer SBOM"), "producer SBOM")
+    sbom = require_mapping(
+        parse_json_snapshot(sbom_snapshot, "producer SBOM"),
+        "producer SBOM",
+    )
     if sbom.get("bomFormat") != "CycloneDX":
         fail("producer SBOM must be CycloneDX")
     require_string(sbom.get("specVersion"), "producer SBOM specVersion")
@@ -1147,7 +1269,7 @@ def verify_producer_materials(
         fail("producer SBOM is not bound to the collection digest")
 
     provenance = require_mapping(
-        load_json(provenance_path, "producer provenance"),
+        parse_json_snapshot(provenance_snapshot, "producer provenance"),
         "producer provenance",
     )
     expected_candidate = f"lit-supplementary-{artifact['version']}.tar.gz"
@@ -1279,8 +1401,7 @@ def validate_consumed_asset_snapshot(
     return value
 
 
-def load_json_or_json_lines(path: Path, field: str) -> list[Any]:
-    text = read_bounded_utf8(path, field)
+def parse_json_or_json_lines(text: str, field: str) -> list[Any]:
     try:
         value = strict_json_loads(text)
     except StrictJsonError as exc:
@@ -1303,6 +1424,10 @@ def load_json_or_json_lines(path: Path, field: str) -> list[Any]:
             fail(f"{field} must not be empty")
         return value
     return [value]
+
+
+def load_json_or_json_lines(path: Path, field: str) -> list[Any]:
+    return parse_json_or_json_lines(read_bounded_utf8(path, field), field)
 
 
 def verify_container_materials(
@@ -1334,6 +1459,7 @@ def verify_container_materials(
     )
 
     reference_urls: dict[str, str] = {}
+    material_snapshots: dict[str, SecureFileSnapshot] = {}
     for reference, path in (
         ("signature", signature_path),
         ("sbom", sbom_path),
@@ -1345,10 +1471,16 @@ def verify_container_materials(
         reference_urls[reference] = require_https(
             expected.get("url"), f"{variant_name}.{reference}.url"
         )
-        if file_digest(path) != expected.get("digest"):
+        material_snapshots[reference] = secure_file_snapshot(
+            path, RELEASE_ASSET_MAX_BYTES, capture_payload=True
+        )
+        if material_snapshots[reference].digest != expected.get("digest"):
             fail(f"{variant_name} {reference} file digest mismatch")
 
-    signature = load_json(signature_path, f"{variant_name} signature receipt")
+    signature = parse_json_snapshot(
+        material_snapshots["signature"],
+        f"{variant_name} signature receipt",
+    )
     live_signature = load_json(
         live_signature_path, f"{variant_name} live signature receipt"
     )
@@ -1385,7 +1517,12 @@ def verify_container_materials(
                 "cryptographic verification"
             )
 
-    sbom = require_mapping(load_json(sbom_path, f"{variant_name} SBOM"), "SBOM")
+    sbom = require_mapping(
+        parse_json_snapshot(
+            material_snapshots["sbom"], f"{variant_name} SBOM"
+        ),
+        "SBOM",
+    )
     if sbom.get("bomFormat") != "CycloneDX":
         fail(f"{variant_name} SBOM must be CycloneDX")
     require_string(sbom.get("specVersion"), f"{variant_name} SBOM specVersion")
@@ -1412,8 +1549,14 @@ def verify_container_materials(
     ):
         fail(f"{variant_name} SBOM does not identify Trivy as its generator")
 
-    statements = load_json_or_json_lines(
-        provenance_path, f"{variant_name} release provenance"
+    provenance_payload = material_snapshots["provenance"].payload
+    if provenance_payload is None:  # pragma: no cover - internal contract.
+        fail(MATERIAL_FILE_ERROR)
+    statements = parse_json_or_json_lines(
+        decode_utf8(
+            provenance_payload, f"{variant_name} release provenance"
+        ),
+        f"{variant_name} release provenance",
     )
     if len(statements) != 1:
         fail("release provenance must contain exactly one statement")
@@ -1508,11 +1651,19 @@ def verify_container_materials(
     expected_subjects = {
         signature_name: {
             "name": signature_name,
-            "digest": {"sha256": file_digest(signature_path).removeprefix("sha256:")},
+            "digest": {
+                "sha256": material_snapshots["signature"].digest.removeprefix(
+                    "sha256:"
+                )
+            },
         },
         sbom_name: {
             "name": sbom_name,
-            "digest": {"sha256": file_digest(sbom_path).removeprefix("sha256:")},
+            "digest": {
+                "sha256": material_snapshots["sbom"].digest.removeprefix(
+                    "sha256:"
+                )
+            },
         },
         image_ref: {"name": image_ref},
     }
@@ -1535,7 +1686,15 @@ def validate_verification_report(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, Any]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     payload = require_mapping(payload, "verification report")
     require_exact(
         payload,
@@ -1574,12 +1733,14 @@ def validate_verification_report(
     )
     if revocation_checked_at > checked_at:
         fail("container revocation check is later than final verification")
-    if payload["producerEvidenceDigest"] != file_digest(producer_path):
+    if payload["producerEvidenceDigest"] != producer_digest:
         fail("verification producer evidence digest mismatch")
-    if payload["containerEvidenceDigest"] != file_digest(container_path):
+    if payload["containerEvidenceDigest"] != container_digest:
         fail("verification container evidence digest mismatch")
-    receipt_bundle_payload = load_json(
-        receipt_bundle_path, "verification receipt bundle"
+    receipt_bundle_snapshot = secure_file_snapshot(
+        receipt_bundle_path,
+        RELEASE_ASSET_MAX_BYTES,
+        capture_payload=True,
     )
     receipt_reference = require_mapping(
         payload["receiptBundle"], "verification receiptBundle"
@@ -1591,11 +1752,14 @@ def validate_verification_report(
     )
     expected_receipt_reference = {
         "assetName": "mlx90-verification-receipts.json",
-        "digest": file_digest(receipt_bundle_path),
-        "size": file_size(receipt_bundle_path),
+        "digest": receipt_bundle_snapshot.digest,
+        "size": receipt_bundle_snapshot.size,
     }
     if receipt_reference != expected_receipt_reference:
         fail("verification receipt bundle reference mismatch")
+    receipt_bundle_payload = parse_json_snapshot(
+        receipt_bundle_snapshot, "verification receipt bundle"
+    )
     receipts = validate_receipt_bundle(
         receipt_bundle_payload,
         identity,
@@ -1607,6 +1771,8 @@ def validate_verification_report(
         workflow_sha=workflow_sha,
         run_id=run_id,
         run_attempt=run_attempt,
+        producer_digest=producer_digest,
+        container_digest=container_digest,
     )
     if checked_at != require_timestamp(
         receipts["final-revocation"]["checkedAt"],
@@ -2439,7 +2605,15 @@ def verification_receipt(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, Any]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     receipt_type = EXPECTED_RECEIPT_TYPES.get(receipt_id)
     if receipt_type is None:
         fail("receipt ID is not part of the exact MLX-90 receipt set")
@@ -2461,8 +2635,8 @@ def verification_receipt(
         "receiptId": receipt_id,
         "receiptType": receipt_type,
         "correlationId": identity.correlation_id,
-        "producerEvidenceDigest": file_digest(producer_path),
-        "containerEvidenceDigest": file_digest(container_path),
+        "producerEvidenceDigest": producer_digest,
+        "containerEvidenceDigest": container_digest,
         "finalizer": receipt_run(workflow_sha, run_id, run_attempt),
         "checkedAt": checked_at,
         "observations": copy.deepcopy(observations),
@@ -2481,7 +2655,15 @@ def validate_receipt(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, Any]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     payload = require_mapping(payload, "verification receipt")
     require_exact(
         payload,
@@ -2510,9 +2692,9 @@ def validate_receipt(
         fail("receipt type does not match its exact receipt ID")
     if payload["correlationId"] != identity.correlation_id:
         fail("receipt correlation ID mismatch")
-    if payload["producerEvidenceDigest"] != file_digest(producer_path):
+    if payload["producerEvidenceDigest"] != producer_digest:
         fail("receipt producer evidence digest mismatch")
-    if payload["containerEvidenceDigest"] != file_digest(container_path):
+    if payload["containerEvidenceDigest"] != container_digest:
         fail("receipt container evidence digest mismatch")
     if payload["finalizer"] != receipt_run(workflow_sha, run_id, run_attempt):
         fail("receipt is foreign to this workflow run or attempt")
@@ -2548,7 +2730,15 @@ def validate_receipt_set(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, dict[str, Any]]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     by_id: dict[str, dict[str, Any]] = {}
     for item in receipts:
         receipt = validate_receipt(
@@ -2562,6 +2752,8 @@ def validate_receipt_set(
             workflow_sha=workflow_sha,
             run_id=run_id,
             run_attempt=run_attempt,
+            producer_digest=producer_digest,
+            container_digest=container_digest,
         )
         receipt_id = receipt["receiptId"]
         if receipt_id in by_id:
@@ -2655,6 +2847,8 @@ def load_receipt_directory(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     try:
         if receipt_root.is_symlink() or not receipt_root.is_dir():
@@ -2691,6 +2885,8 @@ def load_receipt_directory(
         workflow_sha=workflow_sha,
         run_id=run_id,
         run_attempt=run_attempt,
+        producer_digest=producer_digest,
+        container_digest=container_digest,
     )
 
 
@@ -2703,13 +2899,21 @@ def receipt_bundle(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, Any]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     return {
         "apiVersion": RECEIPT_BUNDLE_API_VERSION,
         "kind": "SecurityReleaseVerificationReceiptBundle",
         "correlationId": identity.correlation_id,
-        "producerEvidenceDigest": file_digest(producer_path),
-        "containerEvidenceDigest": file_digest(container_path),
+        "producerEvidenceDigest": producer_digest,
+        "containerEvidenceDigest": container_digest,
         "finalizer": receipt_run(workflow_sha, run_id, run_attempt),
         "receipts": [copy.deepcopy(receipts[name]) for name in sorted(receipts)],
     }
@@ -2727,7 +2931,15 @@ def validate_receipt_bundle(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, dict[str, Any]]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     payload = require_mapping(payload, "verification receipt bundle")
     require_exact(
         payload,
@@ -2749,9 +2961,9 @@ def validate_receipt_bundle(
         fail("unsupported verification receipt bundle schema")
     if payload["correlationId"] != identity.correlation_id:
         fail("receipt bundle correlation ID mismatch")
-    if payload["producerEvidenceDigest"] != file_digest(producer_path):
+    if payload["producerEvidenceDigest"] != producer_digest:
         fail("receipt bundle producer evidence digest mismatch")
-    if payload["containerEvidenceDigest"] != file_digest(container_path):
+    if payload["containerEvidenceDigest"] != container_digest:
         fail("receipt bundle container evidence digest mismatch")
     if payload["finalizer"] != receipt_run(workflow_sha, run_id, run_attempt):
         fail("receipt bundle is foreign to this workflow run or attempt")
@@ -2780,6 +2992,8 @@ def validate_receipt_bundle(
         workflow_sha=workflow_sha,
         run_id=run_id,
         run_attempt=run_attempt,
+        producer_digest=producer_digest,
+        container_digest=container_digest,
     )
 
 
@@ -2796,7 +3010,15 @@ def verification_report(
     workflow_sha: str,
     run_id: int,
     run_attempt: int,
+    producer_digest: str | None = None,
+    container_digest: str | None = None,
 ) -> dict[str, Any]:
+    producer_digest = resolved_evidence_digest(
+        producer_path, producer_digest
+    )
+    container_digest = resolved_evidence_digest(
+        container_path, container_digest
+    )
     receipts = load_receipt_directory(
         receipt_root,
         identity,
@@ -2808,6 +3030,8 @@ def verification_report(
         workflow_sha=workflow_sha,
         run_id=run_id,
         run_attempt=run_attempt,
+        producer_digest=producer_digest,
+        container_digest=container_digest,
     )
     bundle = receipt_bundle(
         receipts,
@@ -2817,8 +3041,12 @@ def verification_report(
         workflow_sha=workflow_sha,
         run_id=run_id,
         run_attempt=run_attempt,
+        producer_digest=producer_digest,
+        container_digest=container_digest,
     )
-    write_json(receipt_bundle_output, bundle)
+    receipt_bundle_digest, receipt_bundle_size = write_json(
+        receipt_bundle_output, bundle
+    )
 
     observed_variants: dict[str, Any] = {}
     for name in VARIANTS:
@@ -2847,12 +3075,12 @@ def verification_report(
         "apiVersion": "lit.security-release.verification/v1",
         "correlationId": identity.correlation_id,
         "checkedAt": receipts["final-revocation"]["checkedAt"],
-        "producerEvidenceDigest": file_digest(producer_path),
-        "containerEvidenceDigest": file_digest(container_path),
+        "producerEvidenceDigest": producer_digest,
+        "containerEvidenceDigest": container_digest,
         "receiptBundle": {
             "assetName": "mlx90-verification-receipts.json",
-            "digest": file_digest(receipt_bundle_output),
-            "size": file_size(receipt_bundle_output),
+            "digest": receipt_bundle_digest,
+            "size": receipt_bundle_size,
         },
         "checks": checks,
         "variants": observed_variants,
@@ -2874,14 +3102,15 @@ def load_verified_index(
         variant.get("manifestDigest"), f"{variant_name}.manifestDigest"
     )
     field = f"{variant_name} OCI index"
-    payload = read_bounded_bytes(index_path, field)
-    observed = "sha256:" + hashlib.sha256(payload).hexdigest()
-    if observed != expected:
+    snapshot = secure_file_snapshot(
+        index_path, FINALIZER_INPUT_MAX_BYTES, capture_payload=True
+    )
+    if snapshot.digest != expected:
         fail(
             f"{variant_name} raw OCI index digest does not match "
             "container evidence"
         )
-    return parse_json(decode_utf8(payload, field), field)
+    return parse_json_snapshot(snapshot, field)
 
 
 def verify_index(
@@ -2944,7 +3173,26 @@ def verify_index(
         observed[key] = require_digest(
             descriptor.get("digest"), "OCI index platform digest"
         )
-    expected = container_evidence["variants"][variant_name]["platformDigests"]
+    variants = require_mapping(
+        container_evidence.get("variants"), "container variants"
+    )
+    variant = require_mapping(
+        variants.get(variant_name), f"container variants.{variant_name}"
+    )
+    expected = require_mapping(
+        variant.get("platformDigests"),
+        f"container variants.{variant_name}.platformDigests",
+    )
+    require_exact(
+        expected,
+        set(PLATFORMS),
+        f"container variants.{variant_name}.platformDigests",
+    )
+    for platform in PLATFORMS:
+        require_digest(
+            expected[platform],
+            f"container variants.{variant_name}.platformDigests.{platform}",
+        )
     if observed != expected:
         fail("OCI index platform digests do not match container evidence")
     if set(attestation_targets) != set(expected.values()):
@@ -3307,6 +3555,8 @@ def verify_buildkit_attestations(
     index_path: Path,
     attestation_root: Path,
 ) -> None:
+    if variant_name not in VARIANTS:
+        fail("variant is not allowlisted")
     if attestation_root.is_symlink() or not attestation_root.is_dir():
         fail("BuildKit attestation root must be a regular directory")
     variants = require_mapping(
@@ -3329,16 +3579,23 @@ def verify_buildkit_attestations(
     for platform in PLATFORMS:
         basename = platform.replace("/", "-")
         manifest_path = attestation_root / f"{basename}-manifest.json"
-        manifest = require_mapping(
-            load_json(manifest_path, f"{platform} attestation manifest"),
-            f"{platform} attestation manifest",
+        manifest_snapshot = secure_file_snapshot(
+            manifest_path,
+            FINALIZER_INPUT_MAX_BYTES,
+            capture_payload=True,
         )
         binding = bindings[platform]
-        if file_digest(manifest_path) != binding["attestationDigest"]:
+        if manifest_snapshot.digest != binding["attestationDigest"]:
             fail(
                 f"{platform} attestation manifest is not bound to the "
                 "signed OCI index"
             )
+        manifest = require_mapping(
+            parse_json_snapshot(
+                manifest_snapshot, f"{platform} attestation manifest"
+            ),
+            f"{platform} attestation manifest",
+        )
         require_exact(
             manifest,
             {"schemaVersion", "mediaType", "config", "layers"},
@@ -3402,18 +3659,23 @@ def verify_buildkit_attestations(
             fail(f"{platform} attestation manifest is missing SPDX or SLSA")
         for predicate_type, filename in predicate_paths.items():
             statement_path = attestation_root / f"{basename}-{filename}.json"
-            statement = load_json(
-                statement_path, f"{platform} {filename} statement"
+            statement_snapshot = secure_file_snapshot(
+                statement_path,
+                FINALIZER_INPUT_MAX_BYTES,
+                capture_payload=True,
             )
             layer = layer_by_predicate[predicate_type]
             if (
-                file_digest(statement_path) != layer["digest"]
-                or file_size(statement_path) != layer["size"]
+                statement_snapshot.digest != layer["digest"]
+                or statement_snapshot.size != layer["size"]
             ):
                 fail(
                     f"{platform} {filename} payload is not bound to its "
                     "attestation manifest"
                 )
+            statement = parse_json_snapshot(
+                statement_snapshot, f"{platform} {filename} statement"
+            )
             predicate = verify_buildkit_statement(
                 statement,
                 predicate_type,
@@ -3505,18 +3767,41 @@ def validated_inputs(
     dict[str, dict[str, Any]],
     dict[str, Any],
     dict[str, Any],
+    SecureFileSnapshot,
+    SecureFileSnapshot,
 ]:
     identity = identity_from_args(args)
     profiles = load_profiles(args.profiles)
-    producer_payload = load_json(args.producer_evidence, "producer evidence")
-    if file_digest(args.producer_evidence) != (
+    producer_snapshot = secure_file_snapshot(
+        args.producer_evidence,
+        RELEASE_ASSET_MAX_BYTES,
+        capture_payload=True,
+    )
+    if producer_snapshot.digest != (
         f"sha256:{identity.producer_evidence_sha256}"
     ):
         fail("producer evidence file digest does not match dispatch identity")
+    producer_payload = parse_json_snapshot(
+        producer_snapshot, "producer evidence"
+    )
     producer = validate_producer_evidence(producer_payload, identity, profiles)
-    container_payload = load_json(args.container_evidence, "container evidence")
+    container_snapshot = secure_file_snapshot(
+        args.container_evidence,
+        RELEASE_ASSET_MAX_BYTES,
+        capture_payload=True,
+    )
+    container_payload = parse_json_snapshot(
+        container_snapshot, "container evidence"
+    )
     container = validate_container_evidence(container_payload, identity, producer)
-    return identity, profiles, producer, container
+    return (
+        identity,
+        profiles,
+        producer,
+        container,
+        producer_snapshot,
+        container_snapshot,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3611,7 +3896,7 @@ def main() -> int:
             identity_from_args(args)
             print("immutable dispatch inputs accepted")
         elif args.command == "preflight":
-            _, _, producer, _ = validated_inputs(args)
+            _, _, producer, _, _, _ = validated_inputs(args)
             print(
                 f"preflight accepted {producer['metadata']['id']} with "
                 f"profile {producer['acceptance']['profile']}"
@@ -3679,7 +3964,16 @@ def main() -> int:
             expected = "absent" if args.expect_absent else args.version
             print(f"installed collection state accepted: {args.collection} {expected}")
         elif args.command == "write-receipt":
-            identity, profiles, producer, container = validated_inputs(args)
+            (
+                identity,
+                profiles,
+                producer,
+                container,
+                producer_snapshot,
+                container_snapshot,
+            ) = validated_inputs(args)
+            if args.receipt_id not in EXPECTED_RECEIPT_TYPES:
+                fail("receipt ID is not part of the exact MLX-90 receipt set")
             if args.output.name != f"{args.receipt_id}.json":
                 fail("verification receipt output filename must equal receiptId.json")
             write_json(
@@ -3700,11 +3994,20 @@ def main() -> int:
                     workflow_sha=args.workflow_sha,
                     run_id=args.run_id,
                     run_attempt=args.run_attempt,
+                    producer_digest=producer_snapshot.digest,
+                    container_digest=container_snapshot.digest,
                 ),
             )
             print("wrote verification receipt")
         elif args.command == "write-report":
-            identity, profiles, producer, container = validated_inputs(args)
+            (
+                identity,
+                profiles,
+                producer,
+                container,
+                producer_snapshot,
+                container_snapshot,
+            ) = validated_inputs(args)
             write_json(
                 args.output,
                 verification_report(
@@ -3719,11 +4022,20 @@ def main() -> int:
                     workflow_sha=args.workflow_sha,
                     run_id=args.run_id,
                     run_attempt=args.run_attempt,
+                    producer_digest=producer_snapshot.digest,
+                    container_digest=container_snapshot.digest,
                 ),
             )
             print("wrote verification report")
         elif args.command == "finalize":
-            identity, profiles, producer, container = validated_inputs(args)
+            (
+                identity,
+                profiles,
+                producer,
+                container,
+                producer_snapshot,
+                container_snapshot,
+            ) = validated_inputs(args)
             verification = validate_verification_report(
                 load_json(args.verification_report, "verification report"),
                 identity,
@@ -3736,6 +4048,8 @@ def main() -> int:
                 workflow_sha=args.workflow_sha,
                 run_id=args.run_id,
                 run_attempt=args.run_attempt,
+                producer_digest=producer_snapshot.digest,
+                container_digest=container_snapshot.digest,
             )
             delivered, acceptance = build_final_evidence(
                 identity,
@@ -3756,7 +4070,11 @@ def main() -> int:
             print("wrote final acceptance")
         else:  # pragma: no cover - argparse enforces subcommands.
             fail("unsupported command")
-    except (OSError, ValueError) as exc:
+    except (KeyError, TypeError, IndexError):
+        parser.error(CLI_CONTRACT_ERROR)
+    except OSError:
+        parser.error(CLI_IO_ERROR)
+    except ValueError as exc:
         parser.error(str(exc))
     return 0
 

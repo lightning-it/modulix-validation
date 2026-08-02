@@ -15,6 +15,12 @@ in diagnostics. Atomic publication, cleanup, and paired rollback are
 device/inode-bound. Receipt snapshots, digests, run identity, freshness, and
 revocation state are cross-bound and fail closed.
 
+Digest-bound inputs use one non-following, bounded regular-file snapshot for
+digest, size, and parsing, with device/inode/time stability checks. Downloaded
+release assets, including the collection, are capped at 10 MiB; other
+OCI/BuildKit inputs are capped at 64 MiB. Symlinks, FIFOs, devices, oversized
+or changing inputs fail with fixed value-free diagnostics.
+
 ## Verification
 
 ```bash
