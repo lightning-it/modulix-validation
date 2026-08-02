@@ -73,7 +73,7 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
         self.assertEqual(observed_data_dirs[2], observed_data_dirs[3])
         self.assertNotEqual(observed_data_dirs[0], observed_data_dirs[2])
 
-    def test_validation_rejects_symlinks_before_terraform_init(self) -> None:
+    def test_validation_rejects_symlinks_before_any_terraform_process(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary_root = Path(directory)
             root = temporary_root / "repo"
@@ -106,10 +106,7 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
                 ):
                     QUALITY.check_terraform("terraform_module")
 
-            self.assertEqual(
-                [mock.call(["terraform", "fmt", "-check", "-recursive"])],
-                run.call_args_list,
-            )
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

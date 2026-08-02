@@ -202,7 +202,6 @@ def check_terraform(repo_type: str) -> None:
     if repo_type == "terraform_module" and not any(path.parent == ROOT for path in tf_files):
         raise AssertionError("Terraform module repository has no root *.tf files")
     if shutil_which("terraform"):
-        run(["terraform", "fmt", "-check", "-recursive"])
         if repo_type == "terraform_module":
             validation_roots = [ROOT]
         else:
@@ -272,6 +271,7 @@ def check_terraform(repo_type: str) -> None:
                             "Terraform validation workspace may not contain "
                             f"symlinks: {candidate.relative_to(workspace)}"
                         )
+            run(["terraform", "fmt", "-check", "-recursive"])
             data_root.mkdir()
             previous_data_dir = os.environ.get("TF_DATA_DIR")
             try:
