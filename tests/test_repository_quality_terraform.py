@@ -81,7 +81,10 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
             executable_temp = temporary_root / "executable-temp"
             executable_temp.mkdir()
             external_file = temporary_root / "external.tf"
-            external_file.write_text("resource \"null_resource\" \"external\" {}\n")
+            external_file.write_text(
+                "resource \"null_resource\" \"external\" {}\n",
+                encoding="utf-8",
+            )
             (root / "main.tf").write_text("terraform {}\n", encoding="utf-8")
             (root / "linked.tf").symlink_to(external_file)
 
