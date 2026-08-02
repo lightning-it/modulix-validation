@@ -20,8 +20,10 @@ SPEC.loader.exec_module(QUALITY)
 class RepositoryQualityTerraformTests(unittest.TestCase):
     def test_policy_copies_once_and_isolates_root_data_dirs(self) -> None:
         observed_data_dirs: list[str] = []
+        observed_commands: list[list[str]] = []
 
         def capture_data_dir(command: list[str]) -> None:
+            observed_commands.append(command)
             if "init" in command or "validate" in command:
                 observed_data_dirs.append(os.environ["TF_DATA_DIR"])
 
@@ -68,6 +70,14 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
             if Path(call.args[0]) == root
         ]
         self.assertEqual(1, len(top_level_copies))
+        fmt_commands = [command for command in observed_commands if "fmt" in command]
+        self.assertEqual(1, len(fmt_commands))
+        fmt_command = fmt_commands[0]
+        self.assertEqual(["fmt", "-check", "-recursive"], fmt_command[2:])
+        self.assertTrue(fmt_command[1].startswith("-chdir="))
+        fmt_workspace = Path(fmt_command[1].split("=", 1)[1])
+        self.assertEqual("workspace", fmt_workspace.name)
+        self.assertEqual(executable_temp.resolve(), fmt_workspace.parent.parent.resolve())
         self.assertEqual(4, len(observed_data_dirs))
         self.assertEqual(observed_data_dirs[0], observed_data_dirs[1])
         self.assertEqual(observed_data_dirs[2], observed_data_dirs[3])
@@ -103,6 +113,45 @@ class RepositoryQualityTerraformTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     AssertionError,
                     r"workspace may not contain symlinks: linked\.tf",
+                ):
+                    QUALITY.check_terraform("terraform_module")
+
+            run.assert_not_called()
+
+    def test_validation_rejects_directory_symlink_before_terraform(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory)
+            root = temporary_root / "repo"
+            root.mkdir()
+            executable_temp = temporary_root / "executable-temp"
+            executable_temp.mkdir()
+            external_directory = temporary_root / "external"
+            external_directory.mkdir()
+            (external_directory / "external.tf").write_text(
+                "resource \"null_resource\" \"external\" {}\n",
+                encoding="utf-8",
+            )
+            (root / "main.tf").write_text("terraform {}\n", encoding="utf-8")
+            (root / "linked-directory").symlink_to(
+                external_directory,
+                target_is_directory=True,
+            )
+
+            with mock.patch.object(QUALITY, "ROOT", root), \
+                 mock.patch.object(
+                     QUALITY,
+                     "shutil_which",
+                     return_value="/usr/bin/terraform",
+                 ), \
+                 mock.patch.object(QUALITY, "run") as run, \
+                 mock.patch.dict(
+                     os.environ,
+                     {"HOME": str(executable_temp)},
+                     clear=True,
+                 ):
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    r"workspace may not contain symlinks: linked-directory",
                 ):
                     QUALITY.check_terraform("terraform_module")
 

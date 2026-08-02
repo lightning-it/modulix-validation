@@ -271,7 +271,15 @@ def check_terraform(repo_type: str) -> None:
                             "Terraform validation workspace may not contain "
                             f"symlinks: {candidate.relative_to(workspace)}"
                         )
-            run(["terraform", "fmt", "-check", "-recursive"])
+            run(
+                [
+                    "terraform",
+                    f"-chdir={workspace}",
+                    "fmt",
+                    "-check",
+                    "-recursive",
+                ]
+            )
             data_root.mkdir()
             previous_data_dir = os.environ.get("TF_DATA_DIR")
             try:
