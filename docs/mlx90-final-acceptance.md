@@ -4,7 +4,7 @@
 MLX-90 collection-to-container delivery chain. It can create a `delivered`
 claim only after independently verifying the signed producer evidence, the
 signed container evidence, the live GitHub identities, every required OCI
-digest, and a fixed fix-specific acceptance profile.
+digest, and an immutable acceptance profile specific to the security fix.
 
 The workflow is a foundation, not evidence that a release has passed. The
 repository currently allowlists only the historical
