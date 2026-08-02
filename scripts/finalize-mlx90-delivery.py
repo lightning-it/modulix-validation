@@ -878,6 +878,21 @@ def eligible_profile(
     return profile
 
 
+def require_security_identifiers(value: Any) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(
+            not isinstance(item, str)
+            or SECURITY_IDENTIFIER.fullmatch(item) is None
+            for item in value
+        )
+        or len(value) != len(set(value))
+    ):
+        fail("security.identifiers must be a non-empty unique string list")
+    return value
+
+
 def validate_producer_evidence(
     payload: Any,
     identity: DispatchIdentity,
@@ -920,18 +935,7 @@ def validate_producer_evidence(
         {"identifiers", "affectedVersion", "fixedVersion"},
         "security",
     )
-    identifiers = security["identifiers"]
-    if (
-        not isinstance(identifiers, list)
-        or not identifiers
-        or any(
-            not isinstance(item, str)
-            or SECURITY_IDENTIFIER.fullmatch(item) is None
-            for item in identifiers
-        )
-        or len(identifiers) != len(set(identifiers))
-    ):
-        fail("security.identifiers must be a non-empty unique string list")
+    identifiers = require_security_identifiers(security["identifiers"])
     affected_version = require_string(
         security["affectedVersion"], "security.affectedVersion"
     )
