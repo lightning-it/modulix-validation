@@ -58,6 +58,7 @@ COLLECTION_ARCHIVE_MAX_BYTES = RELEASE_ASSET_MAX_BYTES
 MATERIAL_FILE_ERROR = "material is not a bounded regular file"
 CLI_CONTRACT_ERROR = "input does not satisfy the required contract"
 CLI_IO_ERROR = "file operation failed"
+CLI_ARGUMENT_ERROR = "command arguments do not satisfy the required contract"
 JSON_MAX_NESTING = 128
 JSON_NUMBER_MAX_LENGTH = 4300
 SEMVER_MAX_LENGTH = 255
@@ -224,6 +225,15 @@ class JsonNumberRangeError(StrictJsonError):
 
 class JsonNestingError(StrictJsonError):
     """Raised without echoing an excessively nested JSON value."""
+
+
+class ValueFreeArgumentParser(argparse.ArgumentParser):
+    sanitize_errors = True
+
+    def error(self, message: str) -> None:
+        if self.sanitize_errors:
+            message = CLI_ARGUMENT_ERROR
+        super().error(message)
 
 
 def reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -3805,7 +3815,7 @@ def validated_inputs(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = ValueFreeArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
     validate_inputs = commands.add_parser("validate-inputs")
@@ -3891,6 +3901,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    parser.sanitize_errors = False
     try:
         if args.command == "validate-inputs":
             identity_from_args(args)
