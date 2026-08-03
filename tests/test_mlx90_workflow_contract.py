@@ -168,6 +168,26 @@ esac
                 "blob": blob,
             }
 
+    def _run_container_workflow_dag(self, workflow_text):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\nverify_mode() {")]
+                + '\nverify_container_workflow_dag "$1"\n',
+                encoding="utf-8",
+            )
+            workflow = root / "container-build-publish.yml"
+            workflow.write_text(workflow_text, encoding="utf-8")
+            return subprocess.run(
+                ["bash", str(driver), str(workflow)],
+                cwd=ROOT,
+                env={**os.environ, "RUNNER_TEMP": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
     def test_dispatch_contract_is_exact_and_has_no_implicit_trigger(self):
         trigger = self.workflow.get("on", self.workflow.get(True))
         self.assertEqual({"workflow_dispatch"}, set(trigger))
@@ -183,12 +203,22 @@ esac
                 "container_release_id",
                 "container_release_tag",
                 "container_release_run_id",
+                "container_publish_run_attempt",
             },
             set(trigger["workflow_dispatch"]["inputs"]),
         )
         for value in trigger["workflow_dispatch"]["inputs"].values():
             self.assertIs(value["required"], True)
             self.assertEqual("string", value["type"])
+        acceptance_step = next(
+            step
+            for step in self.workflow["jobs"]["verify"]["steps"]
+            if step.get("id") == "acceptance"
+        )
+        self.assertEqual(
+            "${{ inputs.container_publish_run_attempt }}",
+            acceptance_step["env"]["INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"],
+        )
 
     def test_job_permissions_are_minimal_and_explicit(self):
         self.assertEqual({}, self.workflow["permissions"])
@@ -424,6 +454,92 @@ esac
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, self.script)
+
+    def test_container_evidence_and_publisher_attempts_are_independent(self):
+        required = (
+            '--container-publish-run-attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"',
+            'X-GitHub-Api-Version: 2026-03-10',
+            '.target_commitish == $sha',
+            '.immutable == true',
+            '.author.login == $actor',
+            'releases/tags/${INPUT_CONTAINER_RELEASE_TAG}',
+            'and .event == "workflow_dispatch"',
+            '/attempts/${container_evidence_run_attempt}',
+            '/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}',
+            '/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1',
+            '/git/blobs/${container_workflow_blob_sha}',
+            'needs: [build, upload-trivy-sarif]',
+            '"Build & push image to Quay.io"',
+            '"Attach signed release evidence"',
+            'and .actor.login == $actor',
+            'and .status == "completed"',
+            'and .conclusion == "success"',
+            "publishRunAttempt: $publish_run_attempt",
+            "workflowBlobSha: $workflow_blob_sha",
+            'publisherNeeds: ["build", "upload-trivy-sarif"]',
+        )
+        for value in required:
+            with self.subTest(required=value):
+                self.assertIn(value, self.script)
+        self.assertNotIn("container_sarif_job", self.script)
+        self.assertNotIn(
+            '--arg name "Upload Trivy release gate SARIF"', self.script
+        )
+
+        container_identity = self.script.index(
+            'container_identity="https://github.com/${CONSUMER_REPOSITORY}/"'
+        )
+        signature = self.script.index(
+            "  cosign verify-blob ", container_identity
+        )
+        evidence_attempt = self.script.index(
+            'container_evidence_run_attempt="$(jq -er', signature
+        )
+        publisher_run = self.script.index(
+            'container_run="$(gh api \\', evidence_attempt
+        )
+        self.assertLess(signature, evidence_attempt)
+        self.assertLess(evidence_attempt, publisher_run)
+
+    def test_container_workflow_dag_supports_attach_only_retries(self):
+        valid = """---
+jobs:
+  build:
+    runs-on: ubuntu-latest
+  upload-trivy-sarif:
+    needs: build
+  attach-release-evidence:
+    needs: [build, upload-trivy-sarif]
+"""
+        accepted = self._run_container_workflow_dag(valid)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+        invalid = (
+            valid.replace(
+                "needs: [build, upload-trivy-sarif]", "needs: [build]"
+            ),
+            valid.replace(
+                "  attach-release-evidence:\n",
+                "  attach-release-evidence:\n  attach-release-evidence:\n",
+            ),
+            valid.replace("  upload-trivy-sarif:\n", ""),
+            valid.replace(
+                "  attach-release-evidence:\n",
+                "  attach-release-evidence:\n    if: always()\n",
+            ),
+            valid.replace(
+                "  build:\n",
+                "  build:\n    continue-on-error: true\n",
+            ),
+        )
+        for workflow in invalid:
+            with self.subTest(workflow=workflow):
+                rejected = self._run_container_workflow_dag(workflow)
+                self.assertNotEqual(0, rejected.returncode)
+                self.assertIn(
+                    "container workflow publisher DAG is not exact",
+                    rejected.stderr,
+                )
 
     def test_quay_blob_download_supports_direct_anonymous_access(self):
         result = self._run_quay_blob_download(direct=True)

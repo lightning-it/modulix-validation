@@ -724,6 +724,7 @@ class DispatchIdentity:
     container_release_id: int
     container_release_tag: str
     container_release_run_id: int
+    container_publish_run_attempt: int
 
     def validate(self) -> None:
         if CORRELATION_ID.fullmatch(self.correlation_id) is None:
@@ -753,6 +754,10 @@ class DispatchIdentity:
         ):
             fail("container_release_tag must be v-prefixed semantic version")
         require_positive(self.container_release_run_id, "container_release_run_id")
+        require_positive(
+            self.container_publish_run_attempt,
+            "container_publish_run_attempt",
+        )
 
 
 def validate_producer_asset_url(
@@ -1172,7 +1177,11 @@ def validate_container_evidence(
         fail("container release source SHA mismatch")
     if release.get("workflowRunId") != identity.container_release_run_id:
         fail("container release workflow run mismatch")
-    require_positive(release.get("workflowRunAttempt"), "release.workflowRunAttempt")
+    evidence_run_attempt = require_positive(
+        release.get("workflowRunAttempt"), "release.workflowRunAttempt"
+    )
+    if evidence_run_attempt > identity.container_publish_run_attempt:
+        fail("container evidence run attempt is later than publisher attempt")
     expected_release_url = (
         f"https://github.com/{CONSUMER_REPOSITORY}/releases/tag/"
         f"{identity.container_release_tag}"
@@ -2273,15 +2282,40 @@ def validate_receipt_observations(
                 "sourceSha",
                 "workflowRunId",
                 "workflowRunAttempt",
+                "publishRunAttempt",
                 "runRepository",
+                "headRepository",
                 "event",
                 "workflowPath",
+                "workflowBlobSha",
+                "publisherNeeds",
                 "headSha",
                 "headBranch",
+                "actor",
+                "immutable",
+                "targetCommitish",
+                "author",
+                "evidenceRunStatus",
+                "evidenceRunConclusion",
                 "status",
                 "conclusion",
+                "buildJobId",
+                "buildJobName",
+                "buildJobStatus",
+                "buildJobConclusion",
+                "publisherJobId",
+                "publisherJobName",
+                "publisherJobStatus",
+                "publisherJobConclusion",
             },
             "container-release observations",
+        )
+        require_positive(observations["buildJobId"], "container build job ID")
+        require_positive(
+            observations["publisherJobId"], "container publisher job ID"
+        )
+        require_sha(
+            observations["workflowBlobSha"], "container workflow blob SHA"
         )
         expected = {
             "releaseId": identity.container_release_id,
@@ -2292,14 +2326,44 @@ def validate_receipt_observations(
             "sourceSha": identity.consumer_merge_sha,
             "workflowRunId": identity.container_release_run_id,
             "workflowRunAttempt": release["workflowRunAttempt"],
+            "publishRunAttempt": identity.container_publish_run_attempt,
             "runRepository": CONSUMER_REPOSITORY,
-            "event": "release",
+            "headRepository": CONSUMER_REPOSITORY,
+            "event": "workflow_dispatch",
             "workflowPath": CONTAINER_WORKFLOW,
+            "workflowBlobSha": observations["workflowBlobSha"],
+            "publisherNeeds": ["build", "upload-trivy-sarif"],
             "headSha": identity.consumer_merge_sha,
             "headBranch": identity.container_release_tag,
+            "actor": CONTAINER_RELEASE_ACTOR,
+            "immutable": True,
+            "targetCommitish": identity.consumer_merge_sha,
+            "author": CONTAINER_RELEASE_ACTOR,
+            "evidenceRunStatus": "completed",
+            "evidenceRunConclusion": observations["evidenceRunConclusion"],
             "status": "completed",
             "conclusion": "success",
+            "buildJobId": observations["buildJobId"],
+            "buildJobName": "Build & push image to Quay.io",
+            "buildJobStatus": "completed",
+            "buildJobConclusion": "success",
+            "publisherJobId": observations["publisherJobId"],
+            "publisherJobName": "Attach signed release evidence",
+            "publisherJobStatus": "completed",
+            "publisherJobConclusion": "success",
         }
+        if observations["evidenceRunConclusion"] not in {
+            "success",
+            "failure",
+            "neutral",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "stale",
+            "startup_failure",
+        }:
+            fail("container evidence run conclusion is invalid")
         if observations != expected:
             fail("container release receipt mismatch")
         return observations
@@ -3482,7 +3546,7 @@ def verify_buildkit_slsa(
     expected_internal = {
         "builderPlatform": "linux/amd64",
         "github_actor": CONTAINER_RELEASE_ACTOR,
-        "github_event_name": "release",
+        "github_event_name": "workflow_dispatch",
         "github_job": CONTAINER_WORKFLOW_JOB,
         "github_ref": f"refs/tags/{release_tag}",
         "github_ref_name": release_tag,
@@ -3744,6 +3808,7 @@ def identity_from_args(args: argparse.Namespace) -> DispatchIdentity:
         container_release_id=args.container_release_id,
         container_release_tag=args.container_release_tag,
         container_release_run_id=args.container_release_run_id,
+        container_publish_run_attempt=args.container_publish_run_attempt,
     )
     identity.validate()
     return identity
@@ -3760,6 +3825,9 @@ def add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--container-release-id", type=int, required=True)
     parser.add_argument("--container-release-tag", required=True)
     parser.add_argument("--container-release-run-id", type=int, required=True)
+    parser.add_argument(
+        "--container-publish-run-attempt", type=int, required=True
+    )
 
 
 def add_evidence_arguments(parser: argparse.ArgumentParser) -> None:

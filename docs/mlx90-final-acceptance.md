@@ -30,7 +30,8 @@ with these required string inputs:
 | `consumer_merge_sha` | Exact merge SHA and container source SHA |
 | `container_release_id` | Numeric GitHub Release ID |
 | `container_release_tag` | Exact v-prefixed semantic release tag |
-| `container_release_run_id` | Successful Container Build & Publish run ID |
+| `container_release_run_id` | Container Build & Publish run ID bound by the signed evidence |
+| `container_publish_run_attempt` | Successful attempt of that run which published the immutable release |
 
 The workflow rejects any other actor, repository, ref, mutable SHA, release
 binding, or evidence URL. It does not accept an arbitrary shell command. The
@@ -84,7 +85,7 @@ The container release must expose exactly one
 - producer source SHA, collection version, and collection digest;
 - consumer pull request, pre-merge base SHA, reviewed head SHA, and two-parent
   merge SHA;
-- container release ID, tag, source SHA, workflow run ID, and run attempt;
+- container release ID, tag, source SHA, workflow run ID, and evidence-producing run attempt;
 - distinct `public`, `certified`, and `bootstrap` images;
 - each OCI manifest digest and exact `linux/amd64` and `linux/arm64` platform
   digest;
@@ -92,7 +93,20 @@ The container release must expose exactly one
 - an explicit `not_revoked` observation and timestamp.
 
 The finalizer re-resolves the producer and container tags, the merged consumer
-pull request, and the successful container workflow run through GitHub. It
+pull request, the evidence-producing workflow attempt, and the independently
+successful publisher attempt through GitHub. The signed evidence attempt must
+not be later than the publisher attempt. The evidence attempt must contain the
+exact successful build job. The exact workflow blob at the consumer merge SHA
+must declare that the attach job needs both the build and SARIF jobs. The
+attach job must retain the implicit success condition, and none of those three
+jobs may use job-level `continue-on-error`.
+publisher attempt must contain the successful attach job and must itself be
+completed successfully; this also supports an attach-only retry where GitHub
+retains the already-successful SARIF job in an earlier attempt. Both attempts
+are bound to the same run ID, App actor, repository, `workflow_dispatch` event,
+workflow path, release tag, and source SHA. The release fetched by numeric ID
+and by tag must be the same exact release, have the exact source SHA, be
+authored by the release App, and be published, non-prerelease, and immutable. It
 then verifies the collection archive's signature and checks its CycloneDX SBOM
 and provenance against the producer SHA, version, and digest. For the container
 it verifies OCI index contents, including exactly one BuildKit attestation

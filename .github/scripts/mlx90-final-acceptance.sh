@@ -560,6 +560,53 @@ resolve_tag_commit() {
   esac
 }
 
+verify_container_workflow_dag() {
+  local workflow="$1"
+  [ -f "$workflow" ] && [ ! -L "$workflow" ] \
+    || fail_closed "container workflow is not a regular file"
+  [ "$(wc -c <"$workflow" | tr -d '[:space:]')" -le 1048576 ] \
+    || fail_closed "container workflow exceeds its size limit"
+  LC_ALL=C awk '
+    $0 == "jobs:" { jobs += 1 }
+    $0 == "  build:" {
+      build += 1
+      guarded_job = 1
+      next
+    }
+    $0 == "  upload-trivy-sarif:" {
+      sarif += 1
+      guarded_job = 1
+      next
+    }
+    $0 == "  attach-release-evidence:" {
+      attach += 1
+      in_attach = 1
+      guarded_job = 1
+      next
+    }
+    /^  [A-Za-z_][A-Za-z0-9_-]*:$/ {
+      in_attach = 0
+      guarded_job = 0
+    }
+    in_attach && /^    needs:/ {
+      needs += 1
+      if ($0 == "    needs: [build, upload-trivy-sarif]") {
+        exact_needs += 1
+      }
+    }
+    in_attach && /^    if:/ { attach_if += 1 }
+    guarded_job && /^    continue-on-error:/ { continue_on_error += 1 }
+    END {
+      if (jobs != 1 || build != 1 || sarif != 1 || attach != 1 ||
+          needs != 1 || exact_needs != 1 || attach_if != 0 ||
+          continue_on_error != 0) {
+        exit 1
+      }
+    }
+  ' "$workflow" \
+    || fail_closed "container workflow publisher DAG is not exact"
+}
+
 identity_args() {
   IDENTITY_ARGS=(
     --correlation-id "$INPUT_CORRELATION_ID"
@@ -572,6 +619,7 @@ identity_args() {
     --container-release-id "$INPUT_CONTAINER_RELEASE_ID"
     --container-release-tag "$INPUT_CONTAINER_RELEASE_TAG"
     --container-release-run-id "$INPUT_CONTAINER_RELEASE_RUN_ID"
+    --container-publish-run-attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"
   )
 }
 
@@ -617,7 +665,8 @@ verify_mode() {
     INPUT_CONSUMER_MERGE_SHA \
     INPUT_CONTAINER_RELEASE_ID \
     INPUT_CONTAINER_RELEASE_TAG \
-    INPUT_CONTAINER_RELEASE_RUN_ID
+    INPUT_CONTAINER_RELEASE_RUN_ID \
+    INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT
   do
     require_value "$required"
   done
@@ -632,7 +681,8 @@ verify_mode() {
   for required in \
     INPUT_CONSUMER_PR \
     INPUT_CONTAINER_RELEASE_ID \
-    INPUT_CONTAINER_RELEASE_RUN_ID
+    INPUT_CONTAINER_RELEASE_RUN_ID \
+    INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT
   do
     [[ "${!required}" =~ ^[1-9][0-9]*$ ]] \
       || fail_closed "${required} must be a canonical positive integer"
@@ -855,7 +905,13 @@ PY
   producer_central_ci_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local consumer_pr consumer_merge consumer_base_sha
-  local container_release container_run tag_commit
+  local container_release container_release_by_tag
+  local container_run container_evidence_run tag_commit
+  local container_evidence_jobs container_publish_jobs
+  local container_build_job container_publisher_job
+  local container_evidence_run_attempt
+  local container_workflow_blob container_workflow_blob_sha
+  local container_workflow_entry container_workflow_path
   local consumer_identity_checked_at container_release_checked_at
   local container_revocation_checked_at container_cosign_checked_at
   local container_release_assets
@@ -877,39 +933,43 @@ PY
       and .merge_commit_sha == $merge
     ' <<<"$consumer_pr" >/dev/null
   container_release="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
     --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
       .id == $id
       and .draft == false
       and .prerelease == false
       and .tag_name == $tag
+      and .target_commitish == $sha
+      and .immutable == true
+      and .author.login == $actor
     ' <<<"$container_release" >/dev/null
+  container_release_by_tag="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
+    "repos/${CONSUMER_REPOSITORY}/releases/tags/${INPUT_CONTAINER_RELEASE_TAG}")"
+  jq -e \
+    --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
+      .id == $id
+      and .draft == false
+      and .prerelease == false
+      and .tag_name == $tag
+      and .target_commitish == $sha
+      and .immutable == true
+      and .author.login == $actor
+    ' <<<"$container_release_by_tag" >/dev/null
   tag_commit="$(resolve_tag_commit \
     "$CONSUMER_REPOSITORY" "$INPUT_CONTAINER_RELEASE_TAG")"
   [ "$tag_commit" = "$INPUT_CONSUMER_MERGE_SHA" ] \
     || fail_closed "container release tag is not bound to consumer merge SHA"
   container_release_assets="$(list_release_assets \
     "$CONSUMER_REPOSITORY" "$INPUT_CONTAINER_RELEASE_ID")"
-
-  container_run="$(gh api \
-    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}")"
-  jq -e \
-    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
-    --arg repository "$CONSUMER_REPOSITORY" \
-    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
-    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
-      .id == $run_id
-      and .repository.full_name == $repository
-      and .event == "release"
-      and .path == ".github/workflows/container-build-publish.yml"
-      and .head_sha == $sha
-      and .head_branch == $tag
-      and .status == "completed"
-      and .conclusion == "success"
-    ' <<<"$container_run" >/dev/null
-  container_release_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local container_evidence_url container_bundle_url
   container_evidence_url="$(jq -er '[
@@ -965,10 +1025,136 @@ PY
       and .parents[0].sha == $base
       and .parents[1].sha == $head
     ' <<<"$consumer_merge" >/dev/null
-  [ "$(jq -er '.release.workflowRunAttempt' \
-      "$INPUT_ROOT/mlx90-container-evidence.json")" \
-      = "$(jq -er '.run_attempt' <<<"$container_run")" ] \
-    || fail_closed "container workflow run attempt mismatch"
+  container_workflow_path=".github/workflows/container-build-publish.yml"
+  container_workflow_entry="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
+    "repos/${CONSUMER_REPOSITORY}/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1" \
+    | jq -ec --arg path "$container_workflow_path" '
+        if .truncated != false then
+          error("container source tree response is truncated")
+        else
+          [.tree[] | select(.path == $path)]
+          | if length != 1
+              or .[0].mode != "100644"
+              or .[0].type != "blob"
+              or (.[0].sha | test("^[0-9a-f]{40}$")) != true then
+              error("container workflow must be one regular Git blob")
+            else
+              .[0]
+            end
+        end
+      ')"
+  container_workflow_blob_sha="$(jq -er '.sha' \
+    <<<"$container_workflow_entry")"
+  container_workflow_blob="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
+    "repos/${CONSUMER_REPOSITORY}/git/blobs/${container_workflow_blob_sha}")"
+  jq -e '
+    .encoding == "base64"
+    and (.size | type == "number" and floor == . and . > 0 and . <= 1048576)
+    and (.content | type == "string" and length > 0)
+  ' <<<"$container_workflow_blob" >/dev/null \
+    || fail_closed "container workflow blob response is invalid"
+  jq -er '.content' <<<"$container_workflow_blob" \
+    | base64 --decode >"$INPUT_ROOT/container-build-publish.yml"
+  [ "$(wc -c <"$INPUT_ROOT/container-build-publish.yml" \
+      | tr -d '[:space:]')" = "$(jq -er '.size' \
+      <<<"$container_workflow_blob")" ] \
+    || fail_closed "container workflow blob size mismatch"
+  verify_container_workflow_dag "$INPUT_ROOT/container-build-publish.yml"
+  container_evidence_run_attempt="$(jq -er '.release.workflowRunAttempt' \
+    "$INPUT_ROOT/mlx90-container-evidence.json")"
+  [[ "$container_evidence_run_attempt" =~ ^[1-9][0-9]*$ ]] \
+    || fail_closed "container evidence workflow attempt is not canonical"
+  [ "$container_evidence_run_attempt" -le \
+      "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" ] \
+    || fail_closed "container evidence attempt is later than publisher attempt"
+
+  container_evidence_run="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
+    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}")"
+  jq -e \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --argjson run_attempt "$container_evidence_run_attempt" \
+    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
+      .id == $run_id
+      and .run_attempt == $run_attempt
+      and .repository.full_name == $repository
+      and .head_repository.full_name == $repository
+      and .actor.login == $actor
+      and .event == "workflow_dispatch"
+      and .path == ".github/workflows/container-build-publish.yml"
+      and .head_sha == $sha
+      and .head_branch == $tag
+      and .status == "completed"
+      and (.conclusion as $conclusion | ([
+          "success", "failure", "neutral", "cancelled", "skipped",
+          "timed_out", "action_required", "stale", "startup_failure"
+        ] | index($conclusion)) != null)
+    ' <<<"$container_evidence_run" >/dev/null \
+    || fail_closed "container evidence run attempt identity is invalid"
+  container_evidence_jobs="$(
+    gh api --paginate \
+      -H 'X-GitHub-Api-Version: 2026-03-10' \
+      "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}/jobs?per_page=100" \
+      | jq -sc '[.[].jobs[]]'
+  )"
+  container_build_job="$(jq -ec \
+    --arg name "Build & push image to Quay.io" '
+      [.[] | select(.name == $name)]
+      | if length != 1 then
+          error("container evidence attempt must contain exactly one build job")
+        elif .[0].status != "completed" or .[0].conclusion != "success" then
+          error("container evidence build job did not complete successfully")
+        else
+          .[0]
+        end
+    ' <<<"$container_evidence_jobs")"
+
+  container_run="$(gh api \
+    -H 'X-GitHub-Api-Version: 2026-03-10' \
+    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}")"
+  jq -e \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --argjson run_attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" \
+    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
+      .id == $run_id
+      and .run_attempt == $run_attempt
+      and .repository.full_name == $repository
+      and .head_repository.full_name == $repository
+      and .actor.login == $actor
+      and .event == "workflow_dispatch"
+      and .path == ".github/workflows/container-build-publish.yml"
+      and .head_sha == $sha
+      and .head_branch == $tag
+      and .status == "completed"
+      and .conclusion == "success"
+    ' <<<"$container_run" >/dev/null \
+    || fail_closed "container publisher run attempt is not exact and successful"
+  container_publish_jobs="$(
+    gh api --paginate \
+      -H 'X-GitHub-Api-Version: 2026-03-10' \
+      "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}/jobs?per_page=100" \
+      | jq -sc '[.[].jobs[]]'
+  )"
+  container_publisher_job="$(jq -ec \
+    --arg name "Attach signed release evidence" '
+      [.[] | select(.name == $name)]
+      | if length != 1 then
+          error("container publisher attempt must contain exactly one publisher job")
+        elif .[0].status != "completed" or .[0].conclusion != "success" then
+          error("container publisher job did not complete successfully")
+        else
+          .[0]
+        end
+    ' <<<"$container_publish_jobs")"
+  container_release_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   consumer_identity_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   EVIDENCE_ARGS=(
@@ -1018,7 +1204,7 @@ PY
   container_revocation_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local producer_evidence_digest producer_bundle_digest collection_bundle_digest
-  local container_bundle_digest container_run_attempt producer_release_url
+  local container_bundle_digest producer_release_url
   producer_evidence_digest="sha256:$(sha256sum "$producer_evidence" \
     | awk '{print $1}')"
   producer_bundle_digest="sha256:$(sha256sum "$producer_bundle" \
@@ -1027,7 +1213,6 @@ PY
     "$INPUT_ROOT/producer-signature.json" | awk '{print $1}')"
   container_bundle_digest="sha256:$(sha256sum \
     "$INPUT_ROOT/mlx90-container-evidence.json.sigstore.json" | awk '{print $1}')"
-  container_run_attempt="$(jq -er '.run_attempt' <<<"$container_run")"
   producer_release_url="$(jq -er '.html_url' <<<"$producer_release")"
 
   write_receipt producer-evidence "$producer_evidence_checked_at" "$(jq -cn \
@@ -1166,15 +1351,41 @@ PY
     --argjson draft "$(jq -er '.draft' <<<"$container_release")" \
     --argjson prerelease "$(jq -er '.prerelease' <<<"$container_release")" \
     --arg source_sha "$tag_commit" \
-    --argjson workflow_run_id "$(jq -er '.id' <<<"$container_run")" \
-    --argjson workflow_run_attempt "$container_run_attempt" \
+    --argjson workflow_run_id "$(jq -er '.id' <<<"$container_evidence_run")" \
+    --argjson workflow_run_attempt "$container_evidence_run_attempt" \
+    --argjson publish_run_attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" \
     --arg run_repository "$(jq -er '.repository.full_name' <<<"$container_run")" \
+    --arg head_repository "$(jq -er '.head_repository.full_name' \
+      <<<"$container_run")" \
     --arg event "$(jq -er '.event' <<<"$container_run")" \
     --arg workflow_path "$(jq -er '.path' <<<"$container_run")" \
+    --arg workflow_blob_sha "$container_workflow_blob_sha" \
     --arg head_sha "$(jq -er '.head_sha' <<<"$container_run")" \
     --arg head_branch "$(jq -er '.head_branch' <<<"$container_run")" \
+    --arg actor "$(jq -er '.actor.login' <<<"$container_run")" \
+    --argjson immutable "$(jq -er '.immutable' <<<"$container_release")" \
+    --arg target_commitish "$(jq -er '.target_commitish' \
+      <<<"$container_release")" \
+    --arg author "$(jq -er '.author.login' <<<"$container_release")" \
+    --arg evidence_run_status "$(jq -er '.status' \
+      <<<"$container_evidence_run")" \
+    --arg evidence_run_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_evidence_run")" \
     --arg status "$(jq -er '.status' <<<"$container_run")" \
-    --arg conclusion "$(jq -er '.conclusion' <<<"$container_run")" '{
+    --arg conclusion "$(jq -er '.conclusion' <<<"$container_run")" \
+    --argjson build_job_id "$(jq -er '.id' <<<"$container_build_job")" \
+    --arg build_job_name "$(jq -er '.name' <<<"$container_build_job")" \
+    --arg build_job_status "$(jq -er '.status' <<<"$container_build_job")" \
+    --arg build_job_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_build_job")" \
+    --argjson publisher_job_id "$(jq -er '.id' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_name "$(jq -er '.name' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_status "$(jq -er '.status' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_publisher_job")" '{
       releaseId: $release_id,
       releaseTag: $release_tag,
       releaseUrl: $release_url,
@@ -1183,13 +1394,31 @@ PY
       sourceSha: $source_sha,
       workflowRunId: $workflow_run_id,
       workflowRunAttempt: $workflow_run_attempt,
+      publishRunAttempt: $publish_run_attempt,
       runRepository: $run_repository,
+      headRepository: $head_repository,
       event: $event,
       workflowPath: $workflow_path,
+      workflowBlobSha: $workflow_blob_sha,
+      publisherNeeds: ["build", "upload-trivy-sarif"],
       headSha: $head_sha,
       headBranch: $head_branch,
+      actor: $actor,
+      immutable: $immutable,
+      targetCommitish: $target_commitish,
+      author: $author,
+      evidenceRunStatus: $evidence_run_status,
+      evidenceRunConclusion: $evidence_run_conclusion,
       status: $status,
-      conclusion: $conclusion
+      conclusion: $conclusion,
+      buildJobId: $build_job_id,
+      buildJobName: $build_job_name,
+      buildJobStatus: $build_job_status,
+      buildJobConclusion: $build_job_conclusion,
+      publisherJobId: $publisher_job_id,
+      publisherJobName: $publisher_job_name,
+      publisherJobStatus: $publisher_job_status,
+      publisherJobConclusion: $publisher_job_conclusion
     }')"
   write_receipt container-revocation-initial \
     "$container_revocation_checked_at" "$(jq -cn \

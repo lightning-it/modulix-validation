@@ -79,6 +79,7 @@ class FinalizerTests(unittest.TestCase):
             container_release_id=987,
             container_release_tag="v1.25.0",
             container_release_run_id=123456,
+            container_publish_run_attempt=1,
         )
         self.container = self.container_fixture()
         write_json(self.container_path, self.container)
@@ -260,6 +261,8 @@ class FinalizerTests(unittest.TestCase):
             identity.container_release_tag,
             "--container-release-run-id",
             str(identity.container_release_run_id),
+            "--container-publish-run-attempt",
+            str(identity.container_publish_run_attempt),
         ]
         evidence_arguments = [
             "--producer-evidence",
@@ -519,13 +522,33 @@ class FinalizerTests(unittest.TestCase):
                 "sourceSha": self.identity.consumer_merge_sha,
                 "workflowRunId": self.identity.container_release_run_id,
                 "workflowRunAttempt": release["workflowRunAttempt"],
+                "publishRunAttempt": (
+                    self.identity.container_publish_run_attempt
+                ),
                 "runRepository": MODULE.CONSUMER_REPOSITORY,
-                "event": "release",
+                "headRepository": MODULE.CONSUMER_REPOSITORY,
+                "event": "workflow_dispatch",
                 "workflowPath": MODULE.CONTAINER_WORKFLOW,
+                "workflowBlobSha": "4" * 40,
+                "publisherNeeds": ["build", "upload-trivy-sarif"],
                 "headSha": self.identity.consumer_merge_sha,
                 "headBranch": self.identity.container_release_tag,
+                "actor": MODULE.CONTAINER_RELEASE_ACTOR,
+                "immutable": True,
+                "targetCommitish": self.identity.consumer_merge_sha,
+                "author": MODULE.CONTAINER_RELEASE_ACTOR,
+                "evidenceRunStatus": "completed",
+                "evidenceRunConclusion": "success",
                 "status": "completed",
                 "conclusion": "success",
+                "buildJobId": 456001,
+                "buildJobName": "Build & push image to Quay.io",
+                "buildJobStatus": "completed",
+                "buildJobConclusion": "success",
+                "publisherJobId": 456003,
+                "publisherJobName": "Attach signed release evidence",
+                "publisherJobStatus": "completed",
+                "publisherJobConclusion": "success",
             },
             "container-revocation-initial": {
                 "releaseId": self.identity.container_release_id,
@@ -781,6 +804,30 @@ class FinalizerTests(unittest.TestCase):
                 mutable_image, self.identity, producer
             )
 
+        retried_identity = replace(
+            self.identity, container_publish_run_attempt=2
+        )
+        MODULE.validate_container_evidence(
+            copy.deepcopy(self.container), retried_identity, producer
+        )
+
+        later_evidence = copy.deepcopy(self.container)
+        later_evidence["release"]["workflowRunAttempt"] = 2
+        with self.assertRaisesRegex(
+            ValueError, "later than publisher attempt"
+        ):
+            MODULE.validate_container_evidence(
+                later_evidence, self.identity, producer
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "container_publish_run_attempt must be a positive integer",
+        ):
+            replace(
+                self.identity, container_publish_run_attempt=0
+            ).validate()
+
     def test_core_receipt_set_builds_both_final_documents(self):
         producer, container = self.validated()
         receipt_root, bundle_path = self.write_receipt_set(producer, container)
@@ -882,6 +929,13 @@ class FinalizerTests(unittest.TestCase):
                     "runId", 456788
                 ),
                 "foreign",
+            ),
+            (
+                "container-release",
+                lambda value: value["observations"].__setitem__(
+                    "publishRunAttempt", 2
+                ),
+                "container release receipt mismatch",
             ),
             (
                 "public-oci-index",
@@ -1441,7 +1495,7 @@ class FinalizerTests(unittest.TestCase):
         internal = {
             "builderPlatform": "",
             "github_actor": MODULE.CONTAINER_RELEASE_ACTOR,
-            "github_event_name": "release",
+            "github_event_name": "workflow_dispatch",
             "github_job": MODULE.CONTAINER_WORKFLOW_JOB,
             "github_ref": f"refs/tags/{release_tag}",
             "github_ref_name": release_tag,
@@ -1837,6 +1891,8 @@ class FinalizerTests(unittest.TestCase):
             self.identity.container_release_tag,
             "--container-release-run-id",
             str(self.identity.container_release_run_id),
+            "--container-publish-run-attempt",
+            str(self.identity.container_publish_run_attempt),
         ]
         completed = subprocess.run(command, capture_output=True, text=True)
         self.assertNotEqual(0, completed.returncode)
@@ -2633,6 +2689,8 @@ class FinalizerTests(unittest.TestCase):
             self.identity.container_release_tag,
             "--container-release-run-id",
             str(self.identity.container_release_run_id),
+            "--container-publish-run-attempt",
+            str(self.identity.container_publish_run_attempt),
             "--producer-evidence",
             str(self.producer_path),
             "--container-evidence",
@@ -2679,6 +2737,8 @@ class FinalizerTests(unittest.TestCase):
             self.identity.container_release_tag,
             "--container-release-run-id",
             str(self.identity.container_release_run_id),
+            "--container-publish-run-attempt",
+            str(self.identity.container_publish_run_attempt),
             "--producer-evidence",
             str(self.producer_path),
             "--container-evidence",
@@ -3452,6 +3512,23 @@ class FinalizerTests(unittest.TestCase):
             container, mutator=wrong_workflow
         )
         with self.assertRaisesRegex(ValueError, "github_workflow_sha"):
+            MODULE.verify_buildkit_attestations(
+                container,
+                "public",
+                index_path,
+                attestation_root,
+            )
+
+        def legacy_release_event(platform, statements):
+            if platform == "linux/amd64":
+                statements[MODULE.SLSA_PREDICATE]["predicate"][
+                    "buildDefinition"
+                ]["internalParameters"]["github_event_name"] = "release"
+
+        index_path, attestation_root = self.write_buildkit_fixture(
+            container, mutator=legacy_release_event
+        )
+        with self.assertRaisesRegex(ValueError, "github_event_name"):
             MODULE.verify_buildkit_attestations(
                 container,
                 "public",

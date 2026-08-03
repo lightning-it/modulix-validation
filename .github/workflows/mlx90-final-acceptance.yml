@@ -42,7 +42,11 @@ on:
         required: true
         type: string
       container_release_run_id:
-        description: Exact successful Container Build & Publish run ID.
+        description: Exact Container Build & Publish run ID.
+        required: true
+        type: string
+      container_publish_run_attempt:
+        description: Exact successful publisher attempt for that run ID.
         required: true
         type: string
 
@@ -148,6 +152,7 @@ jobs:
           INPUT_CONTAINER_RELEASE_ID: ${{ inputs.container_release_id }}
           INPUT_CONTAINER_RELEASE_TAG: ${{ inputs.container_release_tag }}
           INPUT_CONTAINER_RELEASE_RUN_ID: ${{ inputs.container_release_run_id }}
+          INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT: ${{ inputs.container_publish_run_attempt }}
         run: bash .github/scripts/mlx90-final-acceptance.sh verify
 
       - name: Upload signed final evidence for same-run persistence
