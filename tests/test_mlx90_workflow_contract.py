@@ -458,7 +458,7 @@ esac
     def test_container_evidence_and_publisher_attempts_are_independent(self):
         required = (
             '--container-publish-run-attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"',
-            'X-GitHub-Api-Version: 2026-03-10',
+            'GITHUB_REST_API_VERSION="2026-03-10"',
             '.target_commitish == $sha',
             '.immutable == true',
             '.author.login == $actor',
@@ -496,10 +496,45 @@ esac
             'container_evidence_run_attempt="$(jq -er', signature
         )
         publisher_run = self.script.index(
-            'container_run="$(gh api \\', evidence_attempt
+            'container_run="$(github_api \\', evidence_attempt
         )
         self.assertLess(signature, evidence_attempt)
         self.assertLess(evidence_attempt, publisher_run)
+
+    def test_every_rest_release_request_uses_the_versioned_api_wrapper(self):
+        self.assertIn(
+            'readonly GITHUB_REST_API_VERSION="2026-03-10"', self.script
+        )
+        wrapper = self.script[
+            self.script.index("github_api() {") : self.script.index(
+                "\n}\n", self.script.index("github_api() {")
+            )
+        ]
+        self.assertIn("  gh api \\", wrapper)
+        self.assertIn(
+            '--header "X-GitHub-Api-Version: ${GITHUB_REST_API_VERSION}"',
+            wrapper,
+        )
+        self.assertEqual(1, len(re.findall(r"\bgh api\b", self.script)))
+
+        logical_script = re.sub(r"\\\n[ \t]*", " ", self.script)
+        release_requests = [
+            line
+            for line in logical_script.splitlines()
+            if re.search(r"repos/\$\{[^}]+\}/releases(?:/|\"|$)", line)
+        ]
+        self.assertEqual(16, len(release_requests))
+        for request in release_requests:
+            with self.subTest(request=request):
+                self.assertIn("github_api", request)
+                self.assertNotIn("gh api", request)
+
+        upload = self.script[
+            self.script.index("upload_release_asset_by_id() {") : self.script.index(
+                "\n}\n", self.script.index("upload_release_asset_by_id() {")
+            )
+        ]
+        self.assertIn("  github_api \\", upload)
 
     def test_container_workflow_dag_supports_attach_only_retries(self):
         valid = """---
@@ -676,7 +711,7 @@ jobs:
         ]
         for required in (
             'release_assets="$(list_release_assets',
-            "gh api --paginate",
+            "github_api --paginate",
             "repos/${repository}/releases/${release_id}/assets?per_page=100",
             "repos/${repository}/releases/assets/${asset_id}",
             'published_asset_metadata="$(canonical_release_asset_metadata',
@@ -808,7 +843,7 @@ jobs:
             'producer central validation job did not complete successfully',
             "final live revocation check found revocation evidence",
             "list_release_assets()",
-            "gh api --paginate",
+            "github_api --paginate",
             'final_producer_assets="$(list_release_assets',
             'final_container_assets="$(list_release_assets',
             "durable acceptance receipt bundle digest mismatch",
@@ -821,8 +856,12 @@ jobs:
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.script)
-        final_producer_fetch = self.script.index('final_producer_release="$(gh api')
-        final_container_fetch = self.script.index('final_container_release="$(gh api')
+        final_producer_fetch = self.script.index(
+            'final_producer_release="$(github_api'
+        )
+        final_container_fetch = self.script.index(
+            'final_container_release="$(github_api'
+        )
         final_receipt = self.script.index("write_receipt final-revocation")
         report = self.script.index('python3 "$FINALIZER" write-report')
         finalize = self.script.index('python3 "$FINALIZER" finalize')

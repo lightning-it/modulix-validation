@@ -16,6 +16,7 @@ readonly EVIDENCE_ROOT="${RUNNER_TEMP:?}/mlx90-final-evidence"
 readonly INPUT_ROOT="${RUNNER_TEMP:?}/mlx90-final-inputs"
 readonly RECEIPT_ROOT="${RUNNER_TEMP:?}/mlx90-verification-receipts"
 readonly ISSUER="https://token.actions.githubusercontent.com"
+readonly GITHUB_REST_API_VERSION="2026-03-10"
 readonly SEMVER_MAX_LENGTH=255
 declare -a EVIDENCE_ARGS=()
 declare -a IDENTITY_ARGS=()
@@ -28,6 +29,12 @@ fail_closed() {
 require_value() {
   local name="$1"
   [ -n "${!name:-}" ] || fail_closed "${name} is required"
+}
+
+github_api() {
+  gh api \
+    --header "X-GitHub-Api-Version: ${GITHUB_REST_API_VERSION}" \
+    "$@"
 }
 
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric
@@ -85,7 +92,7 @@ list_release_assets() {
     || fail_closed "release asset repository is invalid"
   [[ "$release_id" =~ ^[1-9][0-9]*$ ]] \
     || fail_closed "release ID is invalid"
-  gh api --paginate \
+  github_api --paginate \
     "repos/${repository}/releases/${release_id}/assets?per_page=100" \
     | jq -sc 'add // []'
 }
@@ -224,7 +231,7 @@ download_release_asset_by_id() {
     || fail_closed "release asset size is invalid or exceeds 10 MiB"
   [ ! -e "$output" ] && [ ! -L "$output" ] \
     || fail_closed "release asset download output already exists"
-  gh api \
+  github_api \
     --header 'Accept: application/octet-stream' \
     "repos/${repository}/releases/assets/${asset_id}" \
     >"$output"
@@ -255,7 +262,7 @@ upload_release_asset_by_id() {
   [ "$upload_url_template" = "$expected_upload_url" ] \
     || fail_closed "release upload URL does not bind the numeric release ID"
   upload_url="${upload_url_template%%\{*}?name=${asset_name}"
-  gh api \
+  github_api \
     --method POST \
     --header 'Accept: application/vnd.github+json' \
     --header 'Content-Type: application/octet-stream' \
@@ -315,7 +322,7 @@ download_release_asset() {
   [ -n "$tag" ] && [ -n "$asset" ] && [ "$asset" != "$remainder" ] \
     && [[ "$tag" != */* ]] && [[ "$asset" != */* ]] \
     || fail_closed "release asset URL is not canonical"
-  release="$(gh api "repos/${repository}/releases/tags/${tag}")"
+  release="$(github_api "repos/${repository}/releases/tags/${tag}")"
   release_id="$(jq -er '.id' <<<"$release")"
   release_assets="$(list_release_assets "$repository" "$release_id")"
   asset_metadata="$(jq -ec --arg url "$url" '[
@@ -548,13 +555,13 @@ resolve_tag_commit() {
   local repository="$1"
   local tag="$2"
   local reference object_type object_sha
-  reference="$(gh api "repos/${repository}/git/ref/tags/${tag}")"
+  reference="$(github_api "repos/${repository}/git/ref/tags/${tag}")"
   object_type="$(jq -er '.object.type' <<<"$reference")"
   object_sha="$(jq -er '.object.sha' <<<"$reference")"
   case "$object_type" in
     commit) printf '%s\n' "$object_sha" ;;
     tag)
-      gh api "repos/${repository}/git/tags/${object_sha}" --jq '.object.sha'
+      github_api "repos/${repository}/git/tags/${object_sha}" --jq '.object.sha'
       ;;
     *) fail_closed "release tag does not resolve to a commit" ;;
   esac
@@ -748,7 +755,7 @@ PY
     "$PRODUCER_REPOSITORY" "$producer_tag")"
   [ "$producer_tag_commit" = "$producer_sha" ] \
     || fail_closed "producer release tag is not bound to producer source SHA"
-  producer_release="$(gh api \
+  producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
   jq -e --arg tag "$producer_tag" \
     '.tag_name == $tag and .draft == false and .prerelease == false' \
@@ -864,7 +871,7 @@ PY
     || fail_closed "producer provenance workflow run ID is not canonical"
   [[ "$producer_ci_run_attempt" =~ ^[1-9][0-9]*$ ]] \
     || fail_closed "producer provenance workflow attempt is not canonical"
-  producer_ci_run="$(gh api \
+  producer_ci_run="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}")"
   jq -e \
     --argjson run_id "$producer_ci_run_id" \
@@ -887,7 +894,7 @@ PY
     ' <<<"$producer_ci_run" >/dev/null \
     || fail_closed "producer provenance run is not the exact successful main CI attempt"
   producer_ci_jobs="$(
-    gh api --paginate \
+    github_api --paginate \
       "repos/${PRODUCER_REPOSITORY}/actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
@@ -917,7 +924,7 @@ PY
   local container_release_assets
   local container_consumed_urls container_asset_bindings
   local container_initial_asset_snapshot container_initial_asset_snapshot_digest
-  consumer_pr="$(gh api \
+  consumer_pr="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/pulls/${INPUT_CONSUMER_PR}")"
   jq -e \
     --argjson pull_request "$INPUT_CONSUMER_PR" \
@@ -932,8 +939,7 @@ PY
       and .head.sha == $head
       and .merge_commit_sha == $merge
     ' <<<"$consumer_pr" >/dev/null
-  container_release="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
@@ -948,8 +954,7 @@ PY
       and .immutable == true
       and .author.login == $actor
     ' <<<"$container_release" >/dev/null
-  container_release_by_tag="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_release_by_tag="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/tags/${INPUT_CONTAINER_RELEASE_TAG}")"
   jq -e \
     --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
@@ -1012,7 +1017,7 @@ PY
     --certificate-github-workflow-sha "$INPUT_CONSUMER_MERGE_SHA" \
     "$INPUT_ROOT/mlx90-container-evidence.json"
   container_cosign_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-  consumer_merge="$(gh api \
+  consumer_merge="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_MERGE_SHA}")"
   consumer_base_sha="$(jq -er '.consumer.baseSha' \
     "$INPUT_ROOT/mlx90-container-evidence.json")"
@@ -1026,8 +1031,7 @@ PY
       and .parents[1].sha == $head
     ' <<<"$consumer_merge" >/dev/null
   container_workflow_path=".github/workflows/container-build-publish.yml"
-  container_workflow_entry="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_workflow_entry="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1" \
     | jq -ec --arg path "$container_workflow_path" '
         if .truncated != false then
@@ -1046,8 +1050,7 @@ PY
       ')"
   container_workflow_blob_sha="$(jq -er '.sha' \
     <<<"$container_workflow_entry")"
-  container_workflow_blob="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_workflow_blob="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/git/blobs/${container_workflow_blob_sha}")"
   jq -e '
     .encoding == "base64"
@@ -1070,8 +1073,7 @@ PY
       "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" ] \
     || fail_closed "container evidence attempt is later than publisher attempt"
 
-  container_evidence_run="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_evidence_run="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}")"
   jq -e \
     --arg actor "lightning-it-release-automation[bot]" \
@@ -1097,8 +1099,7 @@ PY
     ' <<<"$container_evidence_run" >/dev/null \
     || fail_closed "container evidence run attempt identity is invalid"
   container_evidence_jobs="$(
-    gh api --paginate \
-      -H 'X-GitHub-Api-Version: 2026-03-10' \
+    github_api --paginate \
       "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
@@ -1114,8 +1115,7 @@ PY
         end
     ' <<<"$container_evidence_jobs")"
 
-  container_run="$(gh api \
-    -H 'X-GitHub-Api-Version: 2026-03-10' \
+  container_run="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}")"
   jq -e \
     --arg actor "lightning-it-release-automation[bot]" \
@@ -1138,8 +1138,7 @@ PY
     ' <<<"$container_run" >/dev/null \
     || fail_closed "container publisher run attempt is not exact and successful"
   container_publish_jobs="$(
-    gh api --paginate \
-      -H 'X-GitHub-Api-Version: 2026-03-10' \
+    github_api --paginate \
       "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
@@ -1782,9 +1781,9 @@ PY
   stored_container_initial_asset_snapshot_digest="$(jq -er \
     '.observations.assetSnapshotDigest' \
     "$RECEIPT_ROOT/container-revocation-initial.json")"
-  final_producer_release="$(gh api \
+  final_producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
-  final_container_release="$(gh api \
+  final_container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$producer_release_id" \
@@ -1830,9 +1829,9 @@ PY
   redownload_snapshot_and_compare \
     "$final_container_asset_snapshot" "$container_asset_bindings" \
     "$INPUT_ROOT/final-container-assets"
-  final_producer_release="$(gh api \
+  final_producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
-  final_container_release="$(gh api \
+  final_container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$producer_release_id" \
@@ -2074,7 +2073,7 @@ persist_mode() {
   done
   expected_asset_names="$(printf '%s\n' "${evidence_files[@]}" \
     | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
-  if release_json="$(gh api \
+  if release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/tags/${EVIDENCE_TAG}" 2>/dev/null)"
   then
     jq -e \
@@ -2102,7 +2101,7 @@ persist_mode() {
         draft: true,
         prerelease: false,
         make_latest: "false"
-      }' | gh api \
+      }' | github_api \
         --method POST \
         "repos/${FINALIZER_REPOSITORY}/releases" \
         --input -)"
@@ -2141,7 +2140,7 @@ persist_mode() {
           "$EVIDENCE_ROOT/$filename"
       fi
     done
-    release_json="$(gh api \
+    release_json="$(github_api \
       "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
     jq -e \
       --argjson id "$release_id" \
@@ -2181,13 +2180,13 @@ persist_mode() {
       --certificate-github-workflow-sha "$GITHUB_SHA" \
       "$verified_draft_dir/SHA256SUMS"
     release_json="$(jq -cn '{draft: false, make_latest: "false"}' \
-      | gh api \
+      | github_api \
         --method PATCH \
         "repos/${FINALIZER_REPOSITORY}/releases/${release_id}" \
         --input -)"
   fi
 
-  release_json="$(gh api \
+  release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
   jq -e \
     --argjson id "$release_id" \
@@ -2221,7 +2220,7 @@ persist_mode() {
   [ "$(find "$release_dir" -maxdepth 1 -type f -printf '%f\n' | sort)" \
       = "$expected_files" ] \
     || fail_closed "persisted evidence release asset set differs"
-  release_json="$(gh api \
+  release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
   jq -e --argjson id "$release_id" \
     '.id == $id and .draft == false and .prerelease == false and .immutable == true' \
@@ -2369,7 +2368,7 @@ callback_mode() {
   [ "$FINAL_ACCEPTANCE_URL" = "$expected_url" ] \
     || fail_closed "final acceptance URL does not derive from its digest"
   actual_repositories="$(
-    gh api --paginate \
+    github_api --paginate \
       "installation/repositories?per_page=100" \
       | jq -sc '[.[].repositories[].full_name] | sort | unique'
   )"
@@ -2405,7 +2404,7 @@ callback_mode() {
       "final_acceptance_url"
     ]
   ' <<<"$dispatch" >/dev/null
-  gh api \
+  github_api \
     --method POST \
     "repos/${CONSUMER_REPOSITORY}/actions/workflows/security-release-promote-tags.yml/dispatches" \
     --input - <<<"$dispatch"
