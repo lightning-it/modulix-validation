@@ -102,7 +102,11 @@ def reject_yaml_graph_features(source: str) -> None:
             raise ValueError("workflow YAML anchors and aliases are forbidden")
         if isinstance(token, TagToken):
             raise ValueError("workflow YAML explicit tags are forbidden")
-        if isinstance(token, ScalarToken) and token.value == "<<":
+        if (
+            isinstance(token, ScalarToken)
+            and token.style is None
+            and token.value == "<<"
+        ):
             raise ValueError("workflow YAML merge keys are forbidden")
 
 

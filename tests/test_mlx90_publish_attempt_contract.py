@@ -248,6 +248,10 @@ github_api "$@"
                 '  "attach-release-evidence":\n'
                 '    "needs": ["build", "upload-trivy-sarif"]\n'
             ),
+            'name: "<<"\n' + valid,
+            "name: '<<'\n" + valid,
+            'name: "\\u003c\\u003c"\n' + valid,
+            '"<<": harmless\n' + valid,
         )
         for workflow in accepted_workflows:
             with self.subTest(workflow=workflow):
@@ -426,6 +430,7 @@ github_api "$@"
             "AnchorToken",
             "AliasToken",
             "TagToken",
+            "token.style is None",
             'token.value == "<<"',
             'REQUIRED_JOBS = (',
             '"build"',
