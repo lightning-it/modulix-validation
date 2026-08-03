@@ -875,7 +875,7 @@ gh() {
             "supplementary/scripts/verify-forgejo-manifest-security.py"
         )
         verifier_sha256 = (
-            "98f1430988e4e29721819212cb8a63cfe87d8abc3688562145788ad4cd07bf8c"
+            "8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675"
         )
         command = (
             f"script={verifier_path}; "
