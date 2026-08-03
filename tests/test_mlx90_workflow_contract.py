@@ -22,6 +22,49 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         self.workflow = yaml.safe_load(self.workflow_text)
         self.script = SCRIPT_PATH.read_text(encoding="utf-8")
 
+    def _run_github_api(self, arguments, stdin=b""):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\n# Validate the complete SemVer")]
+                + r'''
+gh() {
+  printf '%s\0' "$@" >"${GITHUB_API_TEST_ARGUMENTS:?}"
+  cat >"${GITHUB_API_TEST_STDIN:?}"
+}
+github_api "$@"
+''',
+                encoding="utf-8",
+            )
+            captured_arguments = root / "arguments.bin"
+            captured_stdin = root / "stdin.bin"
+            completed = subprocess.run(
+                ["bash", str(driver), *arguments],
+                cwd=ROOT,
+                env={
+                    **os.environ,
+                    "GITHUB_API_TEST_ARGUMENTS": str(captured_arguments),
+                    "GITHUB_API_TEST_STDIN": str(captured_stdin),
+                    "RUNNER_TEMP": str(root),
+                },
+                input=stdin,
+                capture_output=True,
+                check=False,
+            )
+            forwarded = []
+            if captured_arguments.exists():
+                forwarded = captured_arguments.read_bytes().split(b"\0")
+                if forwarded[-1] == b"":
+                    forwarded.pop()
+            return {
+                "completed": completed,
+                "arguments": forwarded,
+                "stdin": (
+                    captured_stdin.read_bytes() if captured_stdin.exists() else None
+                ),
+            }
+
     def _run_quay_blob_download(
         self,
         challenge=None,
@@ -535,6 +578,71 @@ esac
             )
         ]
         self.assertIn("  github_api \\", upload)
+
+        wrapper_start = self.script.index("github_api() {")
+        wrapper_end = self.script.index("\n}\n", wrapper_start) + 3
+        outside_wrapper = self.script[:wrapper_start] + self.script[wrapper_end:]
+        override = re.compile(r"x-github-api-version", re.IGNORECASE)
+        self.assertNotRegex(outside_wrapper, override)
+        mutated = outside_wrapper.replace(
+            'container_release="$(github_api \\',
+            'container_release="$(github_api \\\n'
+            '    --header=x-github-api-version:2099-01-01 \\',
+            1,
+        )
+        self.assertNotEqual(outside_wrapper, mutated)
+        with self.assertRaises(AssertionError):
+            self.assertNotRegex(mutated, override)
+
+    def test_github_api_preserves_allowed_arguments_headers_and_stdin(self):
+        arguments = [
+            "--paginate",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "--header",
+            "Content-Type: application/json",
+            "--header=If-None-Match: synthetic-etag",
+            "-HUser-Agent: mlx90-finalizer",
+            "--jq",
+            ".immutable",
+            "--input",
+            "-",
+            "repos/lightning-it/modulix-validation/releases/42",
+        ]
+        stdin = b'{"probe":"exact"}\n\x00binary-tail\n'
+        result = self._run_github_api(arguments, stdin)
+        self.assertEqual(0, result["completed"].returncode)
+        self.assertEqual(
+            [
+                b"api",
+                b"--header",
+                b"X-GitHub-Api-Version: 2026-03-10",
+                *(argument.encode("utf-8") for argument in arguments),
+            ],
+            result["arguments"],
+        )
+        self.assertEqual(stdin, result["stdin"])
+
+    def test_github_api_rejects_every_version_header_override_form(self):
+        endpoint = "repos/lightning-it/modulix-validation/releases/42"
+        overrides = (
+            ["-H", "X-GitHub-Api-Version: 2022-11-28", endpoint],
+            ["--header", "x-github-api-version: 2022-11-28", endpoint],
+            ["--header=X-GITHUB-API-VERSION: 2022-11-28", endpoint],
+            ["-Hx-GiThUb-ApI-vErSiOn:2022-11-28", endpoint],
+            ["-H=X-GitHub-Api-Version:2022-11-28", endpoint],
+            ["--header", " \tX-GitHub-Api-Version \t: 2022-11-28", endpoint],
+        )
+        for arguments in overrides:
+            with self.subTest(arguments=arguments):
+                result = self._run_github_api(arguments, b"must-not-be-forwarded")
+                self.assertNotEqual(0, result["completed"].returncode)
+                self.assertIsNone(result["stdin"])
+                self.assertEqual([], result["arguments"])
+                self.assertIn(
+                    b"GitHub API version header override is forbidden",
+                    result["completed"].stderr,
+                )
 
     def test_container_workflow_dag_supports_attach_only_retries(self):
         valid = """---
