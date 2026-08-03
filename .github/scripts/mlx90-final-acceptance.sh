@@ -12,6 +12,7 @@ readonly PROFILES="acceptance/mlx90/profiles.json"
 readonly POLICY_VALIDATOR=".mlx90-policy/security-release/v1/validate.py"
 readonly FINALIZER="scripts/finalize-mlx90-delivery.py"
 readonly DELIVERY_VALIDATOR="scripts/validate-mlx90-delivery.py"
+readonly CONTAINER_WORKFLOW_DAG_VALIDATOR=".github/scripts/mlx90-verify-container-workflow-dag.py"
 readonly EVIDENCE_ROOT="${RUNNER_TEMP:?}/mlx90-final-evidence"
 readonly INPUT_ROOT="${RUNNER_TEMP:?}/mlx90-final-inputs"
 readonly RECEIPT_ROOT="${RUNNER_TEMP:?}/mlx90-verification-receipts"
@@ -581,44 +582,11 @@ verify_container_workflow_dag() {
     || fail_closed "container workflow is not a regular file"
   [ "$(wc -c <"$workflow" | tr -d '[:space:]')" -le 1048576 ] \
     || fail_closed "container workflow exceeds its size limit"
-  LC_ALL=C awk '
-    $0 == "jobs:" { jobs += 1 }
-    $0 == "  build:" {
-      build += 1
-      guarded_job = 1
-      next
-    }
-    $0 == "  upload-trivy-sarif:" {
-      sarif += 1
-      guarded_job = 1
-      next
-    }
-    $0 == "  attach-release-evidence:" {
-      attach += 1
-      in_attach = 1
-      guarded_job = 1
-      next
-    }
-    /^  [A-Za-z_][A-Za-z0-9_-]*:$/ {
-      in_attach = 0
-      guarded_job = 0
-    }
-    in_attach && /^    needs:/ {
-      needs += 1
-      if ($0 == "    needs: [build, upload-trivy-sarif]") {
-        exact_needs += 1
-      }
-    }
-    in_attach && /^    if:/ { attach_if += 1 }
-    guarded_job && /^    continue-on-error:/ { continue_on_error += 1 }
-    END {
-      if (jobs != 1 || build != 1 || sarif != 1 || attach != 1 ||
-          needs != 1 || exact_needs != 1 || attach_if != 0 ||
-          continue_on_error != 0) {
-        exit 1
-      }
-    }
-  ' "$workflow" \
+  [ -f "$CONTAINER_WORKFLOW_DAG_VALIDATOR" ] \
+    && [ ! -L "$CONTAINER_WORKFLOW_DAG_VALIDATOR" ] \
+    || fail_closed "container workflow DAG validator is not a regular file"
+  python3 -I -B "$CONTAINER_WORKFLOW_DAG_VALIDATOR" "$workflow" \
+    >/dev/null 2>&1 \
     || fail_closed "container workflow publisher DAG is not exact"
 }
 

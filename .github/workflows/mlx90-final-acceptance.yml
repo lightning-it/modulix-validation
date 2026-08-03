@@ -88,6 +88,20 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up pinned final-acceptance Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install hash-locked final-acceptance parser
+        run: |
+          set -euo pipefail
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement requirements-validation.lock
+
       - name: Mint exact read-only MLX-90 evidence token
         id: evidence-app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

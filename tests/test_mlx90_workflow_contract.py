@@ -13,6 +13,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "mlx90-final-acceptance.yml"
 SCRIPT_PATH = ROOT / ".github" / "scripts" / "mlx90-final-acceptance.sh"
+WORKFLOW_DAG_VALIDATOR_PATH = (
+    ROOT / ".github" / "scripts" / "mlx90-verify-container-workflow-dag.py"
+)
 PROFILE_PATH = ROOT / "acceptance" / "mlx90" / "profiles.json"
 
 
@@ -21,6 +24,9 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         self.workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.workflow = yaml.safe_load(self.workflow_text)
         self.script = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.workflow_dag_validator = WORKFLOW_DAG_VALIDATOR_PATH.read_text(
+            encoding="utf-8"
+        )
 
     def _run_github_api(self, arguments, stdin=b""):
         with tempfile.TemporaryDirectory() as temporary:
@@ -556,7 +562,6 @@ esac
             '/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}',
             '/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1',
             '/git/blobs/${container_workflow_blob_sha}',
-            'needs: [build, upload-trivy-sarif]',
             '"Build & push image to Quay.io"',
             '"Attach signed release evidence"',
             'and .actor.login == $actor',
@@ -709,6 +714,30 @@ jobs:
         accepted = self._run_container_workflow_dag(valid)
         self.assertEqual(0, accepted.returncode, accepted.stderr)
 
+        quoted = """---
+"jobs":
+  "build":
+    "runs-on": ubuntu-latest
+  "upload-trivy-sarif":
+    "needs": build
+  "attach-release-evidence":
+    "needs": ["build", "upload-trivy-sarif"]
+"""
+        accepted = self._run_container_workflow_dag(quoted)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+        aliased = """---
+jobs:
+  build:
+    runs-on: ubuntu-latest
+  upload-trivy-sarif:
+    needs: &build-job build
+  attach-release-evidence:
+    needs: [*build-job, upload-trivy-sarif]
+"""
+        accepted = self._run_container_workflow_dag(aliased)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+
         invalid = (
             valid.replace(
                 "needs: [build, upload-trivy-sarif]", "needs: [build]"
@@ -726,6 +755,54 @@ jobs:
                 "  build:\n",
                 "  build:\n    continue-on-error: true\n",
             ),
+            valid.replace(
+                "    needs: [build, upload-trivy-sarif]\n",
+                "    needs: [build, upload-trivy-sarif]\n"
+                "    \"if\": always()\n",
+            ),
+            valid.replace(
+                "    needs: [build, upload-trivy-sarif]\n",
+                "    needs: [build, upload-trivy-sarif]\n"
+                "    needs: [build, upload-trivy-sarif]\n",
+            ),
+            valid.replace(
+                "    needs: [build, upload-trivy-sarif]",
+                "    needs: build",
+            ),
+            valid.replace(
+                "    needs: [build, upload-trivy-sarif]",
+                "    needs: [build, true]",
+            ),
+            valid.replace(
+                "  upload-trivy-sarif:\n",
+                "  upload-trivy-sarif:\n    continue-on-error: false\n",
+            ),
+            valid.replace(
+                "  build:\n",
+                '  build:\n    "continue-on-error": false\n',
+            ),
+            """---
+jobs:
+  build: &build-job
+    runs-on: ubuntu-latest
+  upload-trivy-sarif:
+    needs: build
+  publisher-template: &publisher-job
+    needs: [build, upload-trivy-sarif]
+    if: always()
+  attach-release-evidence: *publisher-job
+""",
+            """---
+jobs:
+  build: []
+  upload-trivy-sarif:
+    needs: build
+  attach-release-evidence:
+    needs: [build, upload-trivy-sarif]
+""",
+            """---
+jobs: []
+""",
         )
         for workflow in invalid:
             with self.subTest(workflow=workflow):
@@ -735,6 +812,52 @@ jobs:
                     "container workflow publisher DAG is not exact",
                     rejected.stderr,
                 )
+
+    def test_container_workflow_dag_rejects_alias_merge_key_collisions(self):
+        workflow = """---
+publisher-defaults: &publisher-defaults
+  needs: [build, upload-trivy-sarif]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+  upload-trivy-sarif:
+    needs: build
+  attach-release-evidence:
+    <<: *publisher-defaults
+    needs: [build, upload-trivy-sarif]
+"""
+        rejected = self._run_container_workflow_dag(workflow)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(
+            "container workflow publisher DAG is not exact",
+            rejected.stderr,
+        )
+
+    def test_container_workflow_dag_uses_strict_structural_yaml(self):
+        for required in (
+            "StrictWorkflowLoader",
+            "construct_unique_mapping",
+            'REQUIRED_JOBS = (',
+            '"build"',
+            '"upload-trivy-sarif"',
+            '"attach-release-evidence"',
+            'PUBLISHER_NEEDS = ["build", "upload-trivy-sarif"]',
+            'if "if" in publisher:',
+            'if "continue-on-error" in job:',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.workflow_dag_validator)
+        self.assertIn(
+            'python3 -I -B "$CONTAINER_WORKFLOW_DAG_VALIDATOR" "$workflow"',
+            self.script,
+        )
+        install_step = next(
+            step
+            for step in self.workflow["jobs"]["verify"]["steps"]
+            if step.get("name") == "Install hash-locked final-acceptance parser"
+        )
+        self.assertIn("--require-hashes", install_step["run"])
+        self.assertIn("requirements-validation.lock", install_step["run"])
 
     def test_quay_blob_download_supports_direct_anonymous_access(self):
         result = self._run_quay_blob_download(direct=True)
