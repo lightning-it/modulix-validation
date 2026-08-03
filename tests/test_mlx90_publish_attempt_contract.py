@@ -14,6 +14,11 @@ SCRIPT_PATH = ROOT / ".github" / "scripts" / "mlx90-final-acceptance.sh"
 DAG_VALIDATOR_PATH = (
     ROOT / ".github" / "scripts" / "mlx90-verify-container-workflow-dag.py"
 )
+DAG_ERROR = "container workflow publisher DAG is not exact"
+VALID_DAG = (
+    "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
+    "attach-release-evidence: {needs: [build, upload-trivy-sarif]}}\n"
+)
 
 
 class Mlx90PublishAttemptContractTests(unittest.TestCase):
@@ -52,16 +57,12 @@ github_api "$@"
                 capture_output=True,
                 check=False,
             )
-            forwarded = (
-                captured_arguments.read_bytes().split(b"\0")
-                if captured_arguments.exists()
-                else []
-            )
-            if forwarded and forwarded[-1] == b"":
+            forwarded = []
+            if captured_arguments.exists():
+                forwarded = captured_arguments.read_bytes().split(b"\0")
+            if forwarded[-1:] == [b""]:
                 forwarded.pop()
-            captured_input = (
-                captured_stdin.read_bytes() if captured_stdin.exists() else None
-            )
+            captured_input = captured_stdin.read_bytes() if captured_stdin.exists() else None
             return completed, forwarded, captured_input
 
     def _run_container_workflow_dag(self, workflow_text):
@@ -83,6 +84,16 @@ github_api "$@"
                 text=True,
                 check=False,
             )
+
+    def _assert_dag_results(self, accepted, *workflows):
+        for workflow in workflows:
+            with self.subTest(workflow=workflow):
+                completed = self._run_container_workflow_dag(workflow)
+                if accepted:
+                    self.assertEqual(0, completed.returncode, completed.stderr)
+                else:
+                    self.assertNotEqual(0, completed.returncode)
+                    self.assertIn(DAG_ERROR, completed.stderr)
 
     def test_container_evidence_and_publisher_attempts_are_independent(self):
         for required in (
@@ -170,22 +181,12 @@ github_api "$@"
             self.assertNotRegex(mutated, override)
 
     def test_github_api_preserves_allowed_arguments_headers_and_stdin(self):
-        arguments = [
-            "--paginate",
-            "-iH",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "--header",
-            "Content-Type: application/json",
-            "--header=If-None-Match: synthetic-etag",
-            "-HUser-Agent: mlx90-finalizer",
-            "--jq",
-            ".immutable",
-            "--input",
-            "-",
-            "repos/lightning-it/modulix-validation/releases/42",
-        ]
+        arguments = (
+            "--paginate|-iH|Accept: application/vnd.github+json|-H|"
+            "Accept: application/vnd.github+json|--header|Content-Type: application/json|"
+            "--header=If-None-Match: synthetic-etag|-HUser-Agent: mlx90-finalizer|"
+            "--jq|.immutable|--input|-|repos/lightning-it/modulix-validation/releases/42"
+        ).split("|")
         stdin = b'{"probe":"exact"}\n\x00binary-tail\n'
         completed, forwarded, captured_input = self._run_github_api(
             arguments, stdin
@@ -231,12 +232,8 @@ github_api "$@"
                 )
 
     def test_container_workflow_dag_supports_attach_only_retries(self):
-        valid = (
-            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
-            "attach-release-evidence: {needs: [build, upload-trivy-sarif]}}\n"
-        )
         accepted_workflows = (
-            valid,
+            VALID_DAG,
             '"jobs": {"build": {}, "upload-trivy-sarif": {"needs": build}, '
             '"attach-release-evidence": '
             '{"needs": ["build", "upload-trivy-sarif"]}}\n',
@@ -248,74 +245,53 @@ github_api "$@"
                 '  "attach-release-evidence":\n'
                 '    "needs": ["build", "upload-trivy-sarif"]\n'
             ),
-            'name: "<<"\n' + valid,
-            "name: '<<'\n" + valid,
-            'name: "\\u003c\\u003c"\n' + valid,
-            '"<<": harmless\n' + valid,
+            'name: "<<"\n' + VALID_DAG,
+            "name: '<<'\n" + VALID_DAG,
+            'name: "\\u003c\\u003c"\n' + VALID_DAG,
+            '"<<": harmless\n' + VALID_DAG,
         )
-        for workflow in accepted_workflows:
-            with self.subTest(workflow=workflow):
-                accepted = self._run_container_workflow_dag(workflow)
-                self.assertEqual(0, accepted.returncode, accepted.stderr)
+        self._assert_dag_results(True, *accepted_workflows)
 
+        replace = VALID_DAG.replace
         invalid = (
-            valid.replace(
-                "needs: [build, upload-trivy-sarif]", "needs: [build]"
-            ),
-            valid.replace(
+            replace("needs: [build, upload-trivy-sarif]", "needs: [build]"),
+            replace(
                 "attach-release-evidence:",
                 "attach-release-evidence: {}, attach-release-evidence:",
             ),
-            (
-                "jobs: {build: {}, attach-release-evidence: "
-                "{needs: [build, upload-trivy-sarif]}}\n"
-            ),
-            valid.replace(
+            "jobs: {build: {}, attach-release-evidence: "
+            "{needs: [build, upload-trivy-sarif]}}\n",
+            replace(
                 "needs: [build, upload-trivy-sarif]}",
                 "needs: [build, upload-trivy-sarif], if: always()}",
             ),
-            valid.replace(
-                "build: {}", "build: {continue-on-error: true}"
-            ),
-            valid.replace(
+            replace("build: {}", "build: {continue-on-error: true}"),
+            replace(
                 "needs: [build, upload-trivy-sarif]}",
                 'needs: [build, upload-trivy-sarif], "if": always()}',
             ),
-            valid.replace(
+            replace(
                 "needs: [build, upload-trivy-sarif]}",
                 "needs: [build, upload-trivy-sarif], "
                 "needs: [build, upload-trivy-sarif]}",
             ),
-            valid.replace(
-                "needs: [build, upload-trivy-sarif]", "needs: build"
-            ),
-            valid.replace(
-                "needs: [build, upload-trivy-sarif]", "needs: [build, true]"
-            ),
-            valid.replace(
+            replace("needs: [build, upload-trivy-sarif]", "needs: build"),
+            replace("needs: [build, upload-trivy-sarif]", "needs: [build, true]"),
+            replace(
                 "upload-trivy-sarif: {needs: build}",
                 "upload-trivy-sarif: {needs: build, continue-on-error: false}",
             ),
-            valid.replace(
-                "build: {}", 'build: {"continue-on-error": false}'
-            ),
+            replace("build: {}", 'build: {"continue-on-error": false}'),
             (
                 "jobs: {build: &build-job {}, upload-trivy-sarif: "
                 "{needs: build}, publisher-template: &publisher-job "
                 "{needs: [build, upload-trivy-sarif], if: always()}, "
                 "attach-release-evidence: *publisher-job}\n"
             ),
-            valid.replace("build: {}", "build: []"),
+            replace("build: {}", "build: []"),
             "jobs: []\n",
         )
-        for workflow in invalid:
-            with self.subTest(workflow=workflow):
-                rejected = self._run_container_workflow_dag(workflow)
-                self.assertNotEqual(0, rejected.returncode)
-                self.assertIn(
-                    "container workflow publisher DAG is not exact",
-                    rejected.stderr,
-                )
+        self._assert_dag_results(False, *invalid)
 
     def test_container_workflow_dag_rejects_alias_merge_key_collisions(self):
         workflow = (
@@ -325,101 +301,58 @@ github_api "$@"
             "attach-release-evidence: {<<: *publisher-defaults, "
             "needs: [build, upload-trivy-sarif]}}\n"
         )
-        rejected = self._run_container_workflow_dag(workflow)
-        self.assertNotEqual(0, rejected.returncode)
-        self.assertIn(
-            "container workflow publisher DAG is not exact", rejected.stderr
-        )
+        self._assert_dag_results(False, workflow)
 
     def test_container_workflow_dag_rejects_yaml_graph_expansion_syntax(self):
-        valid_jobs = (
-            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
-            "attach-release-evidence: "
-            "{needs: [build, upload-trivy-sarif]}}\n"
-        )
         graph_inputs = (
-            "unused: &unused {}\n" + valid_jobs,
+            "unused: &unused {}\n" + VALID_DAG,
             (
                 "shared: &shared [build, upload-trivy-sarif]\n"
                 "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
                 "attach-release-evidence: {needs: *shared}}\n"
             ),
-            "defaults: {<<: {continue-on-error: false}}\n" + valid_jobs,
+            "defaults: {<<: {continue-on-error: false}}\n" + VALID_DAG,
             (
                 "level-0: &level-0 [literal, literal, literal, literal]\n"
                 "level-1: &level-1 [*level-0, *level-0, *level-0, *level-0]\n"
                 "level-2: &level-2 [*level-1, *level-1, *level-1, *level-1]\n"
                 "level-3: [*level-2, *level-2, *level-2, *level-2]\n"
-                + valid_jobs
+                + VALID_DAG
             ),
         )
-        for workflow in graph_inputs:
-            with self.subTest(workflow=workflow):
-                rejected = self._run_container_workflow_dag(workflow)
-                self.assertNotEqual(0, rejected.returncode)
-                self.assertIn(
-                    "container workflow publisher DAG is not exact",
-                    rejected.stderr,
-                )
+        self._assert_dag_results(False, *graph_inputs)
 
     def test_container_workflow_dag_rejects_every_explicit_yaml_tag(self):
-        valid_jobs = (
-            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
-            "attach-release-evidence: "
-            "{needs: [build, upload-trivy-sarif]}}\n"
+        tagged_job = (
+            "jobs:\n  build: {}\n  upload-trivy-sarif: {needs: build}\n"
+            "  attach-release-evidence:\n    $TAG defaults: "
+            "{needs: [build, upload-trivy-sarif]}\n"
+        )
+        tagged_inputs = tuple(
+            tagged_job.replace("$TAG", tag)
+            for tag in (
+                "!!merge",
+                "!<tag:yaml.org,2002:merge>",
+                "!core!merge",
+            )
+        ) + (
+            "name: !!str explicitly-tagged\n" + VALID_DAG,
+            "name: !application-specific explicitly-tagged\n" + VALID_DAG,
         )
         tagged_inputs = (
-            (
-                "jobs:\n"
-                "  build: {}\n"
-                "  upload-trivy-sarif: {needs: build}\n"
-                "  attach-release-evidence:\n"
-                "    !!merge defaults: "
-                "{needs: [build, upload-trivy-sarif]}\n"
-            ),
-            (
-                "jobs:\n"
-                "  build: {}\n"
-                "  upload-trivy-sarif: {needs: build}\n"
-                "  attach-release-evidence:\n"
-                "    !<tag:yaml.org,2002:merge> defaults: "
-                "{needs: [build, upload-trivy-sarif]}\n"
-            ),
-            (
-                "%TAG !core! tag:yaml.org,2002:\n"
-                "---\n"
-                "jobs:\n"
-                "  build: {}\n"
-                "  upload-trivy-sarif: {needs: build}\n"
-                "  attach-release-evidence:\n"
-                "    !core!merge defaults: "
-                "{needs: [build, upload-trivy-sarif]}\n"
-            ),
-            "name: !!str explicitly-tagged\n" + valid_jobs,
-            "name: !application-specific explicitly-tagged\n" + valid_jobs,
+            tagged_inputs[0],
+            tagged_inputs[1],
+            "%TAG !core! tag:yaml.org,2002:\n---\n" + tagged_inputs[2],
+            *tagged_inputs[3:],
         )
-        for workflow in tagged_inputs:
-            with self.subTest(workflow=workflow):
-                rejected = self._run_container_workflow_dag(workflow)
-                self.assertNotEqual(0, rejected.returncode)
-                self.assertIn(
-                    "container workflow publisher DAG is not exact",
-                    rejected.stderr,
-                )
+        self._assert_dag_results(False, *tagged_inputs)
 
     def test_container_workflow_dag_rejects_excessive_yaml_tokens(self):
-        workflow = (
-            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
-            "attach-release-evidence: "
-            "{needs: [build, upload-trivy-sarif]}}\n"
-            + "".join(f"ignored-{index}: value\n" for index in range(15_000))
+        workflow = VALID_DAG + "".join(
+            f"ignored-{index}: value\n" for index in range(15_000)
         )
         self.assertLess(len(workflow.encode("utf-8")), 1_048_576)
-        rejected = self._run_container_workflow_dag(workflow)
-        self.assertNotEqual(0, rejected.returncode)
-        self.assertIn(
-            "container workflow publisher DAG is not exact", rejected.stderr
-        )
+        self._assert_dag_results(False, workflow)
 
     def test_container_workflow_dag_uses_strict_structural_yaml(self):
         for required in (

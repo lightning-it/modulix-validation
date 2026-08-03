@@ -88,33 +88,30 @@ The container release must expose exactly one
 - producer source SHA, collection version, and collection digest;
 - consumer pull request, pre-merge base SHA, reviewed head SHA, and two-parent
   merge SHA;
-- container release ID, tag, source SHA, workflow run ID, and evidence-producing run attempt;
+- container release ID, tag, source SHA, workflow run ID, and evidence attempt;
 - distinct `public`, `certified`, and `bootstrap` images;
 - each OCI manifest digest and exact `linux/amd64` and `linux/arm64` platform
   digest;
 - immutable signature, SBOM, and provenance references for every variant; and
 - an explicit `not_revoked` observation and timestamp.
 
-The finalizer re-resolves the producer and container tags, the merged consumer
-pull request, the evidence-producing workflow attempt, and the independently
-successful publisher attempt through GitHub. The signed evidence attempt must
-not be later than the publisher attempt. The evidence attempt must contain the
-exact successful build job. The exact workflow blob at the consumer merge SHA
-must declare that the attach job needs both the build and SARIF jobs. The
-attach job must retain the implicit success condition, and none of those three
-jobs may use job-level `continue-on-error`.
-The publisher attempt must contain the successful attach job and must itself be
-completed successfully; this also supports an attach-only retry where GitHub
-retains the already-successful SARIF job in an earlier attempt. Both attempts
-are bound to the same run ID, App actor, App triggering actor, repository,
-`workflow_dispatch` event, workflow path, release tag, and source SHA. The
-final receipt records the triggering actor of each attempt. The release
-fetched by numeric ID and by tag must be the same exact release, have the exact
-source SHA, be
-authored by the release App, and be published, non-prerelease, and immutable.
-Every REST re-resolution request pins `X-GitHub-Api-Version: 2026-03-10`, as
-documented by GitHub for [REST API versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10)
-and the versioned [Release endpoints](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10).
+The finalizer re-resolves both tags, the merged consumer PR, the
+evidence-producing attempt, and the successful publisher attempt through
+GitHub. Both attempts must bind the same run ID, App actor and triggering
+actor, repository, `workflow_dispatch` event, workflow path, tag, and source
+SHA; their triggering actors are recorded. The evidence attempt cannot follow
+the publisher attempt and must contain the successful build job. The publisher
+attempt must be successful and contain the attach job, permitting an
+attach-only retry after an earlier successful SARIF job. The exact workflow
+blob at the consumer merge SHA is structurally checked: attach needs build and
+SARIF, retains its implicit success condition, and none of those jobs uses
+job-level `continue-on-error`.
+
+Numeric ID and tag must resolve to the same published, non-prerelease,
+immutable release, authored by the App at the exact source SHA. Every REST
+re-resolution pins `X-GitHub-Api-Version: 2026-03-10`; see GitHub's [REST API
+versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10)
+and [Release endpoints](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10).
 The finalizer then verifies the collection archive's signature and checks its
 CycloneDX SBOM
 and provenance against the producer SHA, version, and digest. For the container

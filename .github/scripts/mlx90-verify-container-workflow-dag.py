@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the release-publisher jobs in the fetched container workflow."""
+"""Validate workflow DAG."""
 
 from __future__ import annotations
 
@@ -28,12 +28,10 @@ PUBLISHER_NEEDS = ["build", "upload-trivy-sarif"]
 
 
 class StrictWorkflowLoader(yaml.SafeLoader):
-    """SafeLoader with GitHub-compatible booleans and unique string keys."""
+    pass
 
 
-# PyYAML defaults to YAML 1.1, where unquoted ``on`` and ``off`` are booleans.
-# GitHub Actions treats them as strings and recognizes only true/false as
-# booleans. Copy the resolver table so this loader does not mutate SafeLoader.
+# Match GitHub booleans; do not mutate SafeLoader.
 StrictWorkflowLoader.yaml_implicit_resolvers = copy.deepcopy(
     yaml.SafeLoader.yaml_implicit_resolvers
 )
@@ -50,34 +48,19 @@ StrictWorkflowLoader.add_implicit_resolver(
 )
 
 
-def construct_unique_mapping(
-    loader: StrictWorkflowLoader,
-    node: MappingNode,
-    deep: bool = False,
-) -> dict[str, Any]:
-    """Construct a mapping while rejecting duplicate and non-string keys."""
-
+def construct_unique_mapping(loader, node, deep=False) -> dict[str, Any]:
     if not isinstance(node, MappingNode):
         raise ConstructorError(None, None, "expected a mapping", node.start_mark)
-
-    # Resolve YAML merge keys before checking uniqueness. This deliberately
-    # rejects both literal duplicates and aliases that merge colliding keys.
     loader.flatten_mapping(node)
     mapping: dict[str, Any] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
-        if not isinstance(key, str):
+        if not isinstance(key, str) or key in mapping:
+            requirement = "strings" if not isinstance(key, str) else "unique"
             raise ConstructorError(
                 "while constructing a mapping",
                 node.start_mark,
-                "workflow mapping keys must be strings",
-                key_node.start_mark,
-            )
-        if key in mapping:
-            raise ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                "workflow mapping keys must be unique",
+                f"workflow mapping keys must be {requirement}",
                 key_node.start_mark,
             )
         mapping[key] = loader.construct_object(value_node, deep=deep)
@@ -91,36 +74,29 @@ StrictWorkflowLoader.add_constructor(
 
 
 def reject_yaml_graph_features(source: str) -> None:
-    """Reject graph expansion syntax before constructing any YAML objects."""
-
     token_count = 0
     for token in yaml.scan(source, Loader=StrictWorkflowLoader):
         token_count += 1
         if token_count > MAX_YAML_TOKENS:
-            raise ValueError("workflow YAML token count exceeds the accepted bound")
-        if isinstance(token, (AnchorToken, AliasToken)):
-            raise ValueError("workflow YAML anchors and aliases are forbidden")
-        if isinstance(token, TagToken):
-            raise ValueError("workflow YAML explicit tags are forbidden")
+            raise ValueError("too many YAML tokens")
         if (
-            isinstance(token, ScalarToken)
+            isinstance(token, (AnchorToken, AliasToken, TagToken))
+            or isinstance(token, ScalarToken)
             and token.style is None
             and token.value == "<<"
         ):
-            raise ValueError("workflow YAML merge keys are forbidden")
+            raise ValueError("forbidden YAML graph")
 
 
 def read_bounded_regular_file(path: Path) -> str:
-    """Read one regular file without following a final-component symlink."""
-
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
-            raise ValueError("workflow is not a regular file")
+            raise ValueError("not a regular file")
         if metadata.st_size <= 0 or metadata.st_size > MAX_WORKFLOW_BYTES:
-            raise ValueError("workflow size is outside the accepted bound")
+            raise ValueError("invalid size")
         content = bytearray()
         while len(content) <= MAX_WORKFLOW_BYTES:
             chunk = os.read(
@@ -131,15 +107,13 @@ def read_bounded_regular_file(path: Path) -> str:
                 break
             content.extend(chunk)
         if len(content) != metadata.st_size or len(content) > MAX_WORKFLOW_BYTES:
-            raise ValueError("workflow changed while being read")
+            raise ValueError("workflow changed")
         return bytes(content).decode("utf-8")
     finally:
         os.close(descriptor)
 
 
 def validate_workflow(document: Any) -> None:
-    """Require the exact publisher dependency and fail-closed job semantics."""
-
     if not isinstance(document, dict):
         raise ValueError("workflow root must be a mapping")
     jobs = document.get("jobs")
@@ -155,12 +129,7 @@ def validate_workflow(document: Any) -> None:
 
     publisher = required["attach-release-evidence"]
     needs = publisher.get("needs")
-    if (
-        not isinstance(needs, list)
-        or len(needs) != len(PUBLISHER_NEEDS)
-        or any(not isinstance(dependency, str) for dependency in needs)
-        or needs != PUBLISHER_NEEDS
-    ):
+    if needs != PUBLISHER_NEEDS:
         raise ValueError("publisher needs must be the exact ordered job list")
     if "if" in publisher:
         raise ValueError("publisher must retain default success semantics")
