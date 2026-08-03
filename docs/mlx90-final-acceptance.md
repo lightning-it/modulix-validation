@@ -100,14 +100,18 @@ exact successful build job. The exact workflow blob at the consumer merge SHA
 must declare that the attach job needs both the build and SARIF jobs. The
 attach job must retain the implicit success condition, and none of those three
 jobs may use job-level `continue-on-error`.
-publisher attempt must contain the successful attach job and must itself be
+The publisher attempt must contain the successful attach job and must itself be
 completed successfully; this also supports an attach-only retry where GitHub
 retains the already-successful SARIF job in an earlier attempt. Both attempts
 are bound to the same run ID, App actor, repository, `workflow_dispatch` event,
 workflow path, release tag, and source SHA. The release fetched by numeric ID
 and by tag must be the same exact release, have the exact source SHA, be
-authored by the release App, and be published, non-prerelease, and immutable. It
-then verifies the collection archive's signature and checks its CycloneDX SBOM
+authored by the release App, and be published, non-prerelease, and immutable.
+Every REST re-resolution request pins `X-GitHub-Api-Version: 2026-03-10`, as
+documented by GitHub for [REST API versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10)
+and the versioned [Release endpoints](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10).
+The finalizer then verifies the collection archive's signature and checks its
+CycloneDX SBOM
 and provenance against the producer SHA, version, and digest. For the container
 it verifies OCI index contents, including exactly one BuildKit attestation
 manifest for each exact platform manifest, and verifies the index signature
