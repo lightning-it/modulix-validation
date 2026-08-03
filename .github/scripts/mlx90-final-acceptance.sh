@@ -12,10 +12,12 @@ readonly PROFILES="acceptance/mlx90/profiles.json"
 readonly POLICY_VALIDATOR=".mlx90-policy/security-release/v1/validate.py"
 readonly FINALIZER="scripts/finalize-mlx90-delivery.py"
 readonly DELIVERY_VALIDATOR="scripts/validate-mlx90-delivery.py"
+readonly CONTAINER_WORKFLOW_DAG_VALIDATOR=".github/scripts/mlx90-verify-container-workflow-dag.py"
 readonly EVIDENCE_ROOT="${RUNNER_TEMP:?}/mlx90-final-evidence"
 readonly INPUT_ROOT="${RUNNER_TEMP:?}/mlx90-final-inputs"
 readonly RECEIPT_ROOT="${RUNNER_TEMP:?}/mlx90-verification-receipts"
 readonly ISSUER="https://token.actions.githubusercontent.com"
+readonly GITHUB_REST_API_VERSION="2026-03-10"
 readonly SEMVER_MAX_LENGTH=255
 declare -a EVIDENCE_ARGS=()
 declare -a IDENTITY_ARGS=()
@@ -28,6 +30,20 @@ fail_closed() {
 require_value() {
   local name="$1"
   [ -n "${!name:-}" ] || fail_closed "${name} is required"
+}
+
+github_api() {
+  local argument
+  for argument in "$@"; do
+    case "$argument" in
+      *[Xx]-[Gg][Ii][Tt][Hh][Uu][Bb]-[Aa][Pp][Ii]-[Vv][Ee][Rr][Ss][Ii][Oo][Nn]*)
+        fail_closed "GitHub API version header override is forbidden"
+        ;;
+    esac
+  done
+  gh api \
+    --header "X-GitHub-Api-Version: ${GITHUB_REST_API_VERSION}" \
+    "$@"
 }
 
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric
@@ -85,7 +101,7 @@ list_release_assets() {
     || fail_closed "release asset repository is invalid"
   [[ "$release_id" =~ ^[1-9][0-9]*$ ]] \
     || fail_closed "release ID is invalid"
-  gh api --paginate \
+  github_api --paginate \
     "repos/${repository}/releases/${release_id}/assets?per_page=100" \
     | jq -sc 'add // []'
 }
@@ -224,7 +240,7 @@ download_release_asset_by_id() {
     || fail_closed "release asset size is invalid or exceeds 10 MiB"
   [ ! -e "$output" ] && [ ! -L "$output" ] \
     || fail_closed "release asset download output already exists"
-  gh api \
+  github_api \
     --header 'Accept: application/octet-stream' \
     "repos/${repository}/releases/assets/${asset_id}" \
     >"$output"
@@ -255,7 +271,7 @@ upload_release_asset_by_id() {
   [ "$upload_url_template" = "$expected_upload_url" ] \
     || fail_closed "release upload URL does not bind the numeric release ID"
   upload_url="${upload_url_template%%\{*}?name=${asset_name}"
-  gh api \
+  github_api \
     --method POST \
     --header 'Accept: application/vnd.github+json' \
     --header 'Content-Type: application/octet-stream' \
@@ -315,7 +331,7 @@ download_release_asset() {
   [ -n "$tag" ] && [ -n "$asset" ] && [ "$asset" != "$remainder" ] \
     && [[ "$tag" != */* ]] && [[ "$asset" != */* ]] \
     || fail_closed "release asset URL is not canonical"
-  release="$(gh api "repos/${repository}/releases/tags/${tag}")"
+  release="$(github_api "repos/${repository}/releases/tags/${tag}")"
   release_id="$(jq -er '.id' <<<"$release")"
   release_assets="$(list_release_assets "$repository" "$release_id")"
   asset_metadata="$(jq -ec --arg url "$url" '[
@@ -548,16 +564,77 @@ resolve_tag_commit() {
   local repository="$1"
   local tag="$2"
   local reference object_type object_sha
-  reference="$(gh api "repos/${repository}/git/ref/tags/${tag}")"
+  reference="$(github_api "repos/${repository}/git/ref/tags/${tag}")"
   object_type="$(jq -er '.object.type' <<<"$reference")"
   object_sha="$(jq -er '.object.sha' <<<"$reference")"
   case "$object_type" in
     commit) printf '%s\n' "$object_sha" ;;
     tag)
-      gh api "repos/${repository}/git/tags/${object_sha}" --jq '.object.sha'
+      github_api "repos/${repository}/git/tags/${object_sha}" --jq '.object.sha'
       ;;
     *) fail_closed "release tag does not resolve to a commit" ;;
   esac
+}
+
+verify_container_workflow_dag() {
+  local workflow="$1"
+  [ -f "$workflow" ] && [ ! -L "$workflow" ] \
+    || fail_closed "container workflow is not a regular file"
+  [ "$(wc -c <"$workflow" | tr -d '[:space:]')" -le 1048576 ] \
+    || fail_closed "container workflow exceeds its size limit"
+  [ -f "$CONTAINER_WORKFLOW_DAG_VALIDATOR" ] \
+    && [ ! -L "$CONTAINER_WORKFLOW_DAG_VALIDATOR" ] \
+    || fail_closed "container workflow DAG validator is not a regular file"
+  python3 -I -B "$CONTAINER_WORKFLOW_DAG_VALIDATOR" "$workflow" \
+    >/dev/null 2>&1 \
+    || fail_closed "container workflow publisher DAG is not exact"
+}
+
+verify_container_run_identity() {
+  local attempt="$1"
+  local success_required="$2"
+  jq -e \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --argjson attempt "$attempt" \
+    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" \
+    --argjson success_required "$success_required" '
+      .id == $run_id
+      and .run_attempt == $attempt
+      and .repository.full_name == $repository
+      and .head_repository.full_name == $repository
+      and .actor.login == $actor
+      and .triggering_actor.login == $actor
+      and .event == "workflow_dispatch"
+      and .path == ".github/workflows/container-build-publish.yml"
+      and .head_sha == $sha
+      and .head_branch == $tag
+      and .status == "completed"
+      and (if $success_required then .conclusion == "success" else
+        (.conclusion as $conclusion | ([
+          "success", "failure", "neutral", "cancelled", "skipped",
+          "timed_out", "action_required", "stale", "startup_failure"
+        ] | index($conclusion)) != null)
+      end)
+    ' >/dev/null
+}
+
+select_successful_job() {
+  local name="$1"
+  local multiplicity_error="$2"
+  local conclusion_error="$3"
+  jq -ec --arg name "$name" \
+    --arg multiplicity_error "$multiplicity_error" \
+    --arg conclusion_error "$conclusion_error" '
+      [.[] | select(.name == $name)]
+      | if length != 1 then error($multiplicity_error)
+        elif .[0].status != "completed" or .[0].conclusion != "success"
+        then error($conclusion_error)
+        else .[0]
+        end
+    '
 }
 
 identity_args() {
@@ -572,6 +649,7 @@ identity_args() {
     --container-release-id "$INPUT_CONTAINER_RELEASE_ID"
     --container-release-tag "$INPUT_CONTAINER_RELEASE_TAG"
     --container-release-run-id "$INPUT_CONTAINER_RELEASE_RUN_ID"
+    --container-publish-run-attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"
   )
 }
 
@@ -602,6 +680,7 @@ verify_mode() {
   for required in \
     GH_TOKEN \
     GITHUB_ACTOR \
+    GITHUB_TRIGGERING_ACTOR \
     GITHUB_OUTPUT \
     GITHUB_REF \
     GITHUB_REPOSITORY \
@@ -617,7 +696,8 @@ verify_mode() {
     INPUT_CONSUMER_MERGE_SHA \
     INPUT_CONTAINER_RELEASE_ID \
     INPUT_CONTAINER_RELEASE_TAG \
-    INPUT_CONTAINER_RELEASE_RUN_ID
+    INPUT_CONTAINER_RELEASE_RUN_ID \
+    INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT
   do
     require_value "$required"
   done
@@ -627,12 +707,15 @@ verify_mode() {
     || fail_closed "final acceptance must run from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may dispatch final acceptance"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger final acceptance"
   [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
     || fail_closed "finalizer workflow SHA is invalid"
   for required in \
     INPUT_CONSUMER_PR \
     INPUT_CONTAINER_RELEASE_ID \
-    INPUT_CONTAINER_RELEASE_RUN_ID
+    INPUT_CONTAINER_RELEASE_RUN_ID \
+    INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT
   do
     [[ "${!required}" =~ ^[1-9][0-9]*$ ]] \
       || fail_closed "${required} must be a canonical positive integer"
@@ -698,7 +781,7 @@ PY
     "$PRODUCER_REPOSITORY" "$producer_tag")"
   [ "$producer_tag_commit" = "$producer_sha" ] \
     || fail_closed "producer release tag is not bound to producer source SHA"
-  producer_release="$(gh api \
+  producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
   jq -e --arg tag "$producer_tag" \
     '.tag_name == $tag and .draft == false and .prerelease == false' \
@@ -814,7 +897,7 @@ PY
     || fail_closed "producer provenance workflow run ID is not canonical"
   [[ "$producer_ci_run_attempt" =~ ^[1-9][0-9]*$ ]] \
     || fail_closed "producer provenance workflow attempt is not canonical"
-  producer_ci_run="$(gh api \
+  producer_ci_run="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}")"
   jq -e \
     --argjson run_id "$producer_ci_run_id" \
@@ -837,7 +920,7 @@ PY
     ' <<<"$producer_ci_run" >/dev/null \
     || fail_closed "producer provenance run is not the exact successful main CI attempt"
   producer_ci_jobs="$(
-    gh api --paginate \
+    github_api --paginate \
       "repos/${PRODUCER_REPOSITORY}/actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
@@ -855,13 +938,19 @@ PY
   producer_central_ci_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local consumer_pr consumer_merge consumer_base_sha
-  local container_release container_run tag_commit
+  local container_release container_release_by_tag
+  local container_run container_evidence_run tag_commit
+  local container_evidence_jobs container_publish_jobs
+  local container_build_job container_publisher_job
+  local container_evidence_run_attempt
+  local container_workflow_blob container_workflow_blob_sha
+  local container_workflow_entry container_workflow_path
   local consumer_identity_checked_at container_release_checked_at
   local container_revocation_checked_at container_cosign_checked_at
   local container_release_assets
   local container_consumed_urls container_asset_bindings
   local container_initial_asset_snapshot container_initial_asset_snapshot_digest
-  consumer_pr="$(gh api \
+  consumer_pr="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/pulls/${INPUT_CONSUMER_PR}")"
   jq -e \
     --argjson pull_request "$INPUT_CONSUMER_PR" \
@@ -876,40 +965,42 @@ PY
       and .head.sha == $head
       and .merge_commit_sha == $merge
     ' <<<"$consumer_pr" >/dev/null
-  container_release="$(gh api \
+  container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
     --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
       .id == $id
       and .draft == false
       and .prerelease == false
       and .tag_name == $tag
+      and .target_commitish == $sha
+      and .immutable == true
+      and .author.login == $actor
     ' <<<"$container_release" >/dev/null
+  container_release_by_tag="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/releases/tags/${INPUT_CONTAINER_RELEASE_TAG}")"
+  jq -e \
+    --argjson id "$INPUT_CONTAINER_RELEASE_ID" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
+      .id == $id
+      and .draft == false
+      and .prerelease == false
+      and .tag_name == $tag
+      and .target_commitish == $sha
+      and .immutable == true
+      and .author.login == $actor
+    ' <<<"$container_release_by_tag" >/dev/null
   tag_commit="$(resolve_tag_commit \
     "$CONSUMER_REPOSITORY" "$INPUT_CONTAINER_RELEASE_TAG")"
   [ "$tag_commit" = "$INPUT_CONSUMER_MERGE_SHA" ] \
     || fail_closed "container release tag is not bound to consumer merge SHA"
   container_release_assets="$(list_release_assets \
     "$CONSUMER_REPOSITORY" "$INPUT_CONTAINER_RELEASE_ID")"
-
-  container_run="$(gh api \
-    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}")"
-  jq -e \
-    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
-    --arg repository "$CONSUMER_REPOSITORY" \
-    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
-    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
-      .id == $run_id
-      and .repository.full_name == $repository
-      and .event == "release"
-      and .path == ".github/workflows/container-build-publish.yml"
-      and .head_sha == $sha
-      and .head_branch == $tag
-      and .status == "completed"
-      and .conclusion == "success"
-    ' <<<"$container_run" >/dev/null
-  container_release_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local container_evidence_url container_bundle_url
   container_evidence_url="$(jq -er '[
@@ -952,7 +1043,7 @@ PY
     --certificate-github-workflow-sha "$INPUT_CONSUMER_MERGE_SHA" \
     "$INPUT_ROOT/mlx90-container-evidence.json"
   container_cosign_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-  consumer_merge="$(gh api \
+  consumer_merge="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_MERGE_SHA}")"
   consumer_base_sha="$(jq -er '.consumer.baseSha' \
     "$INPUT_ROOT/mlx90-container-evidence.json")"
@@ -965,10 +1056,81 @@ PY
       and .parents[0].sha == $base
       and .parents[1].sha == $head
     ' <<<"$consumer_merge" >/dev/null
-  [ "$(jq -er '.release.workflowRunAttempt' \
-      "$INPUT_ROOT/mlx90-container-evidence.json")" \
-      = "$(jq -er '.run_attempt' <<<"$container_run")" ] \
-    || fail_closed "container workflow run attempt mismatch"
+  container_workflow_path=".github/workflows/container-build-publish.yml"
+  container_workflow_entry="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1" \
+    | jq -ec --arg path "$container_workflow_path" '
+        if .truncated != false then
+          error("container source tree response is truncated")
+        else
+          [.tree[] | select(.path == $path)]
+          | if length != 1
+              or .[0].mode != "100644"
+              or .[0].type != "blob"
+              or (.[0].sha | test("^[0-9a-f]{40}$")) != true then
+              error("container workflow must be one regular Git blob")
+            else
+              .[0]
+            end
+        end
+      ')"
+  container_workflow_blob_sha="$(jq -er '.sha' \
+    <<<"$container_workflow_entry")"
+  container_workflow_blob="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/git/blobs/${container_workflow_blob_sha}")"
+  jq -e '
+    .encoding == "base64"
+    and (.size | type == "number" and floor == . and . > 0 and . <= 1048576)
+    and (.content | type == "string" and length > 0)
+  ' <<<"$container_workflow_blob" >/dev/null \
+    || fail_closed "container workflow blob response is invalid"
+  jq -er '.content' <<<"$container_workflow_blob" \
+    | base64 --decode >"$INPUT_ROOT/container-build-publish.yml"
+  [ "$(wc -c <"$INPUT_ROOT/container-build-publish.yml" \
+      | tr -d '[:space:]')" = "$(jq -er '.size' \
+      <<<"$container_workflow_blob")" ] \
+    || fail_closed "container workflow blob size mismatch"
+  verify_container_workflow_dag "$INPUT_ROOT/container-build-publish.yml"
+  container_evidence_run_attempt="$(jq -er '.release.workflowRunAttempt' \
+    "$INPUT_ROOT/mlx90-container-evidence.json")"
+  [[ "$container_evidence_run_attempt" =~ ^[1-9][0-9]*$ ]] \
+    || fail_closed "container evidence workflow attempt is not canonical"
+  [ "$container_evidence_run_attempt" -le \
+      "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" ] \
+    || fail_closed "container evidence attempt is later than publisher attempt"
+
+  container_evidence_run="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}")"
+  verify_container_run_identity "$container_evidence_run_attempt" false \
+    <<<"$container_evidence_run" \
+    || fail_closed "container evidence run attempt identity is invalid"
+  container_evidence_jobs="$(
+    github_api --paginate \
+      "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}/jobs?per_page=100" \
+      | jq -sc '[.[].jobs[]]'
+  )"
+  container_build_job="$(select_successful_job \
+    "Build & push image to Quay.io" \
+    "container evidence attempt must contain exactly one build job" \
+    "container evidence build job did not complete successfully" \
+    <<<"$container_evidence_jobs")"
+
+  container_run="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}")"
+  verify_container_run_identity "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" true \
+    <<<"$container_run" \
+    || fail_closed "container publisher run attempt is not exact and successful"
+  container_publish_jobs="$(
+    github_api --paginate \
+      "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}/jobs?per_page=100" \
+      | jq -sc '[.[].jobs[]]'
+  )"
+  container_publisher_job="$(select_successful_job \
+    "Attach signed release evidence" \
+    "container publisher attempt must contain exactly one publisher job" \
+    "container publisher job did not complete successfully" \
+    <<<"$container_publish_jobs")"
+  container_release_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   consumer_identity_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   EVIDENCE_ARGS=(
@@ -1018,7 +1180,7 @@ PY
   container_revocation_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local producer_evidence_digest producer_bundle_digest collection_bundle_digest
-  local container_bundle_digest container_run_attempt producer_release_url
+  local container_bundle_digest producer_release_url
   producer_evidence_digest="sha256:$(sha256sum "$producer_evidence" \
     | awk '{print $1}')"
   producer_bundle_digest="sha256:$(sha256sum "$producer_bundle" \
@@ -1027,7 +1189,6 @@ PY
     "$INPUT_ROOT/producer-signature.json" | awk '{print $1}')"
   container_bundle_digest="sha256:$(sha256sum \
     "$INPUT_ROOT/mlx90-container-evidence.json.sigstore.json" | awk '{print $1}')"
-  container_run_attempt="$(jq -er '.run_attempt' <<<"$container_run")"
   producer_release_url="$(jq -er '.html_url' <<<"$producer_release")"
 
   write_receipt producer-evidence "$producer_evidence_checked_at" "$(jq -cn \
@@ -1166,15 +1327,45 @@ PY
     --argjson draft "$(jq -er '.draft' <<<"$container_release")" \
     --argjson prerelease "$(jq -er '.prerelease' <<<"$container_release")" \
     --arg source_sha "$tag_commit" \
-    --argjson workflow_run_id "$(jq -er '.id' <<<"$container_run")" \
-    --argjson workflow_run_attempt "$container_run_attempt" \
+    --argjson workflow_run_id "$(jq -er '.id' <<<"$container_evidence_run")" \
+    --argjson workflow_run_attempt "$container_evidence_run_attempt" \
+    --argjson publish_run_attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" \
     --arg run_repository "$(jq -er '.repository.full_name' <<<"$container_run")" \
+    --arg head_repository "$(jq -er '.head_repository.full_name' \
+      <<<"$container_run")" \
     --arg event "$(jq -er '.event' <<<"$container_run")" \
     --arg workflow_path "$(jq -er '.path' <<<"$container_run")" \
+    --arg workflow_blob_sha "$container_workflow_blob_sha" \
     --arg head_sha "$(jq -er '.head_sha' <<<"$container_run")" \
     --arg head_branch "$(jq -er '.head_branch' <<<"$container_run")" \
+    --arg actor "$(jq -er '.actor.login' <<<"$container_run")" \
+    --arg evidence_triggering_actor "$(jq -er \
+      '.triggering_actor.login' <<<"$container_evidence_run")" \
+    --arg publish_triggering_actor "$(jq -er \
+      '.triggering_actor.login' <<<"$container_run")" \
+    --argjson immutable "$(jq -er '.immutable' <<<"$container_release")" \
+    --arg target_commitish "$(jq -er '.target_commitish' \
+      <<<"$container_release")" \
+    --arg author "$(jq -er '.author.login' <<<"$container_release")" \
+    --arg evidence_run_status "$(jq -er '.status' \
+      <<<"$container_evidence_run")" \
+    --arg evidence_run_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_evidence_run")" \
     --arg status "$(jq -er '.status' <<<"$container_run")" \
-    --arg conclusion "$(jq -er '.conclusion' <<<"$container_run")" '{
+    --arg conclusion "$(jq -er '.conclusion' <<<"$container_run")" \
+    --argjson build_job_id "$(jq -er '.id' <<<"$container_build_job")" \
+    --arg build_job_name "$(jq -er '.name' <<<"$container_build_job")" \
+    --arg build_job_status "$(jq -er '.status' <<<"$container_build_job")" \
+    --arg build_job_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_build_job")" \
+    --argjson publisher_job_id "$(jq -er '.id' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_name "$(jq -er '.name' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_status "$(jq -er '.status' \
+      <<<"$container_publisher_job")" \
+    --arg publisher_job_conclusion "$(jq -er '.conclusion' \
+      <<<"$container_publisher_job")" '{
       releaseId: $release_id,
       releaseTag: $release_tag,
       releaseUrl: $release_url,
@@ -1183,13 +1374,33 @@ PY
       sourceSha: $source_sha,
       workflowRunId: $workflow_run_id,
       workflowRunAttempt: $workflow_run_attempt,
+      publishRunAttempt: $publish_run_attempt,
       runRepository: $run_repository,
+      headRepository: $head_repository,
       event: $event,
       workflowPath: $workflow_path,
+      workflowBlobSha: $workflow_blob_sha,
+      publisherNeeds: ["build", "upload-trivy-sarif"],
       headSha: $head_sha,
       headBranch: $head_branch,
+      actor: $actor,
+      evidenceTriggeringActor: $evidence_triggering_actor,
+      publishTriggeringActor: $publish_triggering_actor,
+      immutable: $immutable,
+      targetCommitish: $target_commitish,
+      author: $author,
+      evidenceRunStatus: $evidence_run_status,
+      evidenceRunConclusion: $evidence_run_conclusion,
       status: $status,
-      conclusion: $conclusion
+      conclusion: $conclusion,
+      buildJobId: $build_job_id,
+      buildJobName: $build_job_name,
+      buildJobStatus: $build_job_status,
+      buildJobConclusion: $build_job_conclusion,
+      publisherJobId: $publisher_job_id,
+      publisherJobName: $publisher_job_name,
+      publisherJobStatus: $publisher_job_status,
+      publisherJobConclusion: $publisher_job_conclusion
     }')"
   write_receipt container-revocation-initial \
     "$container_revocation_checked_at" "$(jq -cn \
@@ -1553,9 +1764,9 @@ PY
   stored_container_initial_asset_snapshot_digest="$(jq -er \
     '.observations.assetSnapshotDigest' \
     "$RECEIPT_ROOT/container-revocation-initial.json")"
-  final_producer_release="$(gh api \
+  final_producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
-  final_container_release="$(gh api \
+  final_container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$producer_release_id" \
@@ -1601,9 +1812,9 @@ PY
   redownload_snapshot_and_compare \
     "$final_container_asset_snapshot" "$container_asset_bindings" \
     "$INPUT_ROOT/final-container-assets"
-  final_producer_release="$(gh api \
+  final_producer_release="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/releases/tags/${producer_tag}")"
-  final_container_release="$(gh api \
+  final_container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
     --argjson id "$producer_release_id" \
@@ -1761,6 +1972,7 @@ persist_mode() {
   require_value GH_TOKEN
   require_value EVIDENCE_TAG
   require_value GITHUB_ACTOR
+  require_value GITHUB_TRIGGERING_ACTOR
   require_value GITHUB_REF
   require_value GITHUB_REPOSITORY
   require_value GITHUB_RUN_ATTEMPT
@@ -1773,6 +1985,8 @@ persist_mode() {
     || fail_closed "final evidence may persist only from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may persist final evidence"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger persistence"
   [[ "$EVIDENCE_TAG" =~ ^v0\.0\.0-mlx90\.[0-9a-f]{16}$ ]] \
     || fail_closed "derived evidence tag is invalid"
   [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
@@ -1845,7 +2059,7 @@ persist_mode() {
   done
   expected_asset_names="$(printf '%s\n' "${evidence_files[@]}" \
     | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
-  if release_json="$(gh api \
+  if release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/tags/${EVIDENCE_TAG}" 2>/dev/null)"
   then
     jq -e \
@@ -1873,7 +2087,7 @@ persist_mode() {
         draft: true,
         prerelease: false,
         make_latest: "false"
-      }' | gh api \
+      }' | github_api \
         --method POST \
         "repos/${FINALIZER_REPOSITORY}/releases" \
         --input -)"
@@ -1912,7 +2126,7 @@ persist_mode() {
           "$EVIDENCE_ROOT/$filename"
       fi
     done
-    release_json="$(gh api \
+    release_json="$(github_api \
       "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
     jq -e \
       --argjson id "$release_id" \
@@ -1952,13 +2166,13 @@ persist_mode() {
       --certificate-github-workflow-sha "$GITHUB_SHA" \
       "$verified_draft_dir/SHA256SUMS"
     release_json="$(jq -cn '{draft: false, make_latest: "false"}' \
-      | gh api \
+      | github_api \
         --method PATCH \
         "repos/${FINALIZER_REPOSITORY}/releases/${release_id}" \
         --input -)"
   fi
 
-  release_json="$(gh api \
+  release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
   jq -e \
     --argjson id "$release_id" \
@@ -1992,7 +2206,7 @@ persist_mode() {
   [ "$(find "$release_dir" -maxdepth 1 -type f -printf '%f\n' | sort)" \
       = "$expected_files" ] \
     || fail_closed "persisted evidence release asset set differs"
-  release_json="$(gh api \
+  release_json="$(github_api \
     "repos/${FINALIZER_REPOSITORY}/releases/${release_id}")"
   jq -e --argjson id "$release_id" \
     '.id == $id and .draft == false and .prerelease == false and .immutable == true' \
@@ -2106,6 +2320,7 @@ callback_mode() {
     FINAL_ACCEPTANCE_URL \
     GH_TOKEN \
     GITHUB_ACTOR \
+    GITHUB_TRIGGERING_ACTOR \
     GITHUB_REF \
     GITHUB_REPOSITORY
   do
@@ -2117,6 +2332,8 @@ callback_mode() {
     || fail_closed "post-delivery callback must run from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may dispatch promotion"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger promotion"
   [ "$APP_SLUG" = "lightning-it-release-automation" ] \
     || fail_closed "post-delivery callback App slug is invalid"
   [ "$APP_INSTALLATION_ID" = "148019054" ] \
@@ -2140,7 +2357,7 @@ callback_mode() {
   [ "$FINAL_ACCEPTANCE_URL" = "$expected_url" ] \
     || fail_closed "final acceptance URL does not derive from its digest"
   actual_repositories="$(
-    gh api --paginate \
+    github_api --paginate \
       "installation/repositories?per_page=100" \
       | jq -sc '[.[].repositories[].full_name] | sort | unique'
   )"
@@ -2176,7 +2393,7 @@ callback_mode() {
       "final_acceptance_url"
     ]
   ' <<<"$dispatch" >/dev/null
-  gh api \
+  github_api \
     --method POST \
     "repos/${CONSUMER_REPOSITORY}/actions/workflows/security-release-promote-tags.yml/dispatches" \
     --input - <<<"$dispatch"

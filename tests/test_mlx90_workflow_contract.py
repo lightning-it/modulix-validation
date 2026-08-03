@@ -183,12 +183,56 @@ esac
                 "container_release_id",
                 "container_release_tag",
                 "container_release_run_id",
+                "container_publish_run_attempt",
             },
             set(trigger["workflow_dispatch"]["inputs"]),
         )
         for value in trigger["workflow_dispatch"]["inputs"].values():
             self.assertIs(value["required"], True)
             self.assertEqual("string", value["type"])
+        acceptance_step = next(
+            step
+            for step in self.workflow["jobs"]["verify"]["steps"]
+            if step.get("id") == "acceptance"
+        )
+        self.assertEqual(
+            "${{ inputs.container_publish_run_attempt }}",
+            acceptance_step["env"]["INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"],
+        )
+
+    def test_original_and_rerun_actors_are_bound_to_the_release_app(self):
+        expected_actor = "lightning-it-release-automation[bot]"
+        expected_env = {
+            "DISPATCH_ACTOR": "${{ github.actor }}",
+            "DISPATCH_TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+        }
+        for job_name in ("verify", "persist", "post-delivery"):
+            first_step = self.workflow["jobs"][job_name]["steps"][0]
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    expected_env,
+                    {name: first_step["env"][name] for name in expected_env},
+                )
+                for variable in expected_env:
+                    self.assertIn(
+                        f'test "${variable}" = "{expected_actor}"',
+                        first_step["run"],
+                    )
+        for fragment, count in (
+            ("and .triggering_actor.login == $actor", 1),
+            ("and .actor.login == $actor", 1),
+            (
+                '[ "$GITHUB_TRIGGERING_ACTOR" = '
+                '"lightning-it-release-automation[bot]" ]',
+                3,
+            ),
+        ):
+            self.assertEqual(count, self.script.count(fragment))
+        for field, variable in (
+            ("evidenceTriggeringActor", "evidence_triggering_actor"),
+            ("publishTriggeringActor", "publish_triggering_actor"),
+        ):
+            self.assertIn(f"{field}: ${variable}", self.script)
 
     def test_job_permissions_are_minimal_and_explicit(self):
         self.assertEqual({}, self.workflow["permissions"])
@@ -560,7 +604,7 @@ esac
         ]
         for required in (
             'release_assets="$(list_release_assets',
-            "gh api --paginate",
+            "github_api --paginate",
             "repos/${repository}/releases/${release_id}/assets?per_page=100",
             "repos/${repository}/releases/assets/${asset_id}",
             'published_asset_metadata="$(canonical_release_asset_metadata',
@@ -692,7 +736,7 @@ esac
             'producer central validation job did not complete successfully',
             "final live revocation check found revocation evidence",
             "list_release_assets()",
-            "gh api --paginate",
+            "github_api --paginate",
             'final_producer_assets="$(list_release_assets',
             'final_container_assets="$(list_release_assets',
             "durable acceptance receipt bundle digest mismatch",
@@ -705,8 +749,12 @@ esac
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.script)
-        final_producer_fetch = self.script.index('final_producer_release="$(gh api')
-        final_container_fetch = self.script.index('final_container_release="$(gh api')
+        final_producer_fetch = self.script.index(
+            'final_producer_release="$(github_api'
+        )
+        final_container_fetch = self.script.index(
+            'final_container_release="$(github_api'
+        )
         final_receipt = self.script.index("write_receipt final-revocation")
         report = self.script.index('python3 "$FINALIZER" write-report')
         finalize = self.script.index('python3 "$FINALIZER" finalize')
@@ -768,6 +816,9 @@ gh() {
                 ),
                 "GH_TOKEN": "synthetic-test-only",
                 "GITHUB_ACTOR": "lightning-it-release-automation[bot]",
+                "GITHUB_TRIGGERING_ACTOR": (
+                    "lightning-it-release-automation[bot]"
+                ),
                 "GITHUB_REF": "refs/heads/main",
                 "GITHUB_REPOSITORY": "lightning-it/modulix-validation",
                 "BASH_ENV": str(bash_env),

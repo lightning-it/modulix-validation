@@ -42,7 +42,11 @@ on:
         required: true
         type: string
       container_release_run_id:
-        description: Exact successful Container Build & Publish run ID.
+        description: Exact Container Build & Publish run ID.
+        required: true
+        type: string
+      container_publish_run_attempt:
+        description: Exact successful publisher attempt for that run ID.
         required: true
         type: string
 
@@ -69,11 +73,13 @@ jobs:
       - name: Reject every non-App dispatch before secret access
         env:
           DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
           test "$DISPATCH_REF" = "refs/heads/main"
           test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
 
@@ -81,6 +87,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      - name: Set up pinned final-acceptance Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install hash-locked final-acceptance parser
+        run: |
+          set -euo pipefail
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement requirements-validation.lock
 
       - name: Mint exact read-only MLX-90 evidence token
         id: evidence-app
@@ -148,6 +168,7 @@ jobs:
           INPUT_CONTAINER_RELEASE_ID: ${{ inputs.container_release_id }}
           INPUT_CONTAINER_RELEASE_TAG: ${{ inputs.container_release_tag }}
           INPUT_CONTAINER_RELEASE_RUN_ID: ${{ inputs.container_release_run_id }}
+          INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT: ${{ inputs.container_publish_run_attempt }}
         run: bash .github/scripts/mlx90-final-acceptance.sh verify
 
       - name: Upload signed final evidence for same-run persistence
@@ -178,6 +199,19 @@ jobs:
       actions: read
       contents: write
     steps:
+      - name: Reject non-App persistence reruns before token-backed actions
+        env:
+          DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_REF" = "refs/heads/main"
+          test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
+
       - name: Checkout exact persistence guard
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -212,11 +246,13 @@ jobs:
       - name: Reject non-App callback before secret access
         env:
           DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
           test "$DISPATCH_REF" = "refs/heads/main"
           test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
 
