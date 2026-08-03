@@ -44,10 +44,11 @@ printf '%s\\n' "$@"
                 ["bash", str(WRAPPER), "true"],
                 cwd=temporary_root,
                 env=environment,
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
+            self.assertEqual(0, result.returncode, result.stderr)
             return result.stdout.splitlines()
 
     def test_host_uid_run_tmpfs_matches_container_identity(self):
