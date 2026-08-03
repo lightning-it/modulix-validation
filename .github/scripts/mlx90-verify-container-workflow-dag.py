@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
-from yaml.tokens import AliasToken, AnchorToken, ScalarToken
+from yaml.tokens import AliasToken, AnchorToken, ScalarToken, TagToken
 
 
 MAX_WORKFLOW_BYTES = 1_048_576
@@ -100,6 +100,8 @@ def reject_yaml_graph_features(source: str) -> None:
             raise ValueError("workflow YAML token count exceeds the accepted bound")
         if isinstance(token, (AnchorToken, AliasToken)):
             raise ValueError("workflow YAML anchors and aliases are forbidden")
+        if isinstance(token, TagToken):
+            raise ValueError("workflow YAML explicit tags are forbidden")
         if isinstance(token, ScalarToken) and token.value == "<<":
             raise ValueError("workflow YAML merge keys are forbidden")
 

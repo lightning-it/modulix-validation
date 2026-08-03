@@ -358,6 +358,51 @@ github_api "$@"
                     rejected.stderr,
                 )
 
+    def test_container_workflow_dag_rejects_every_explicit_yaml_tag(self):
+        valid_jobs = (
+            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
+            "attach-release-evidence: "
+            "{needs: [build, upload-trivy-sarif]}}\n"
+        )
+        tagged_inputs = (
+            (
+                "jobs:\n"
+                "  build: {}\n"
+                "  upload-trivy-sarif: {needs: build}\n"
+                "  attach-release-evidence:\n"
+                "    !!merge defaults: "
+                "{needs: [build, upload-trivy-sarif]}\n"
+            ),
+            (
+                "jobs:\n"
+                "  build: {}\n"
+                "  upload-trivy-sarif: {needs: build}\n"
+                "  attach-release-evidence:\n"
+                "    !<tag:yaml.org,2002:merge> defaults: "
+                "{needs: [build, upload-trivy-sarif]}\n"
+            ),
+            (
+                "%TAG !core! tag:yaml.org,2002:\n"
+                "---\n"
+                "jobs:\n"
+                "  build: {}\n"
+                "  upload-trivy-sarif: {needs: build}\n"
+                "  attach-release-evidence:\n"
+                "    !core!merge defaults: "
+                "{needs: [build, upload-trivy-sarif]}\n"
+            ),
+            "name: !!str explicitly-tagged\n" + valid_jobs,
+            "name: !application-specific explicitly-tagged\n" + valid_jobs,
+        )
+        for workflow in tagged_inputs:
+            with self.subTest(workflow=workflow):
+                rejected = self._run_container_workflow_dag(workflow)
+                self.assertNotEqual(0, rejected.returncode)
+                self.assertIn(
+                    "container workflow publisher DAG is not exact",
+                    rejected.stderr,
+                )
+
     def test_container_workflow_dag_rejects_excessive_yaml_tokens(self):
         workflow = (
             "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
@@ -380,6 +425,7 @@ github_api "$@"
             "MAX_YAML_TOKENS",
             "AnchorToken",
             "AliasToken",
+            "TagToken",
             'token.value == "<<"',
             'REQUIRED_JOBS = (',
             '"build"',
