@@ -240,9 +240,14 @@ github_api "$@"
             '"jobs": {"build": {}, "upload-trivy-sarif": {"needs": build}, '
             '"attach-release-evidence": '
             '{"needs": ["build", "upload-trivy-sarif"]}}\n',
-            "jobs: {build: {}, upload-trivy-sarif: {needs: &build-job build}, "
-            "attach-release-evidence: "
-            "{needs: [*build-job, upload-trivy-sarif]}}\n",
+            (
+                "name: '& and * inside a quoted scalar are not YAML graph syntax'\n"
+                "jobs:\n"
+                '  "build": {}\n'
+                '  "upload-trivy-sarif": {"needs": "build"}\n'
+                '  "attach-release-evidence":\n'
+                '    "needs": ["build", "upload-trivy-sarif"]\n'
+            ),
         )
         for workflow in accepted_workflows:
             with self.subTest(workflow=workflow):
@@ -322,10 +327,60 @@ github_api "$@"
             "container workflow publisher DAG is not exact", rejected.stderr
         )
 
+    def test_container_workflow_dag_rejects_yaml_graph_expansion_syntax(self):
+        valid_jobs = (
+            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
+            "attach-release-evidence: "
+            "{needs: [build, upload-trivy-sarif]}}\n"
+        )
+        graph_inputs = (
+            "unused: &unused {}\n" + valid_jobs,
+            (
+                "shared: &shared [build, upload-trivy-sarif]\n"
+                "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
+                "attach-release-evidence: {needs: *shared}}\n"
+            ),
+            "defaults: {<<: {continue-on-error: false}}\n" + valid_jobs,
+            (
+                "level-0: &level-0 [literal, literal, literal, literal]\n"
+                "level-1: &level-1 [*level-0, *level-0, *level-0, *level-0]\n"
+                "level-2: &level-2 [*level-1, *level-1, *level-1, *level-1]\n"
+                "level-3: [*level-2, *level-2, *level-2, *level-2]\n"
+                + valid_jobs
+            ),
+        )
+        for workflow in graph_inputs:
+            with self.subTest(workflow=workflow):
+                rejected = self._run_container_workflow_dag(workflow)
+                self.assertNotEqual(0, rejected.returncode)
+                self.assertIn(
+                    "container workflow publisher DAG is not exact",
+                    rejected.stderr,
+                )
+
+    def test_container_workflow_dag_rejects_excessive_yaml_tokens(self):
+        workflow = (
+            "jobs: {build: {}, upload-trivy-sarif: {needs: build}, "
+            "attach-release-evidence: "
+            "{needs: [build, upload-trivy-sarif]}}\n"
+            + "".join(f"ignored-{index}: value\n" for index in range(15_000))
+        )
+        self.assertLess(len(workflow.encode("utf-8")), 1_048_576)
+        rejected = self._run_container_workflow_dag(workflow)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(
+            "container workflow publisher DAG is not exact", rejected.stderr
+        )
+
     def test_container_workflow_dag_uses_strict_structural_yaml(self):
         for required in (
             "StrictWorkflowLoader",
             "construct_unique_mapping",
+            "reject_yaml_graph_features",
+            "MAX_YAML_TOKENS",
+            "AnchorToken",
+            "AliasToken",
+            'token.value == "<<"',
             'REQUIRED_JOBS = (',
             '"build"',
             '"upload-trivy-sarif"',

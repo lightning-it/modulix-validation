@@ -14,9 +14,11 @@ from typing import Any
 import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
+from yaml.tokens import AliasToken, AnchorToken, ScalarToken
 
 
 MAX_WORKFLOW_BYTES = 1_048_576
+MAX_YAML_TOKENS = 50_000
 REQUIRED_JOBS = (
     "build",
     "upload-trivy-sarif",
@@ -88,6 +90,20 @@ StrictWorkflowLoader.add_constructor(
 )
 
 
+def reject_yaml_graph_features(source: str) -> None:
+    """Reject graph expansion syntax before constructing any YAML objects."""
+
+    token_count = 0
+    for token in yaml.scan(source, Loader=StrictWorkflowLoader):
+        token_count += 1
+        if token_count > MAX_YAML_TOKENS:
+            raise ValueError("workflow YAML token count exceeds the accepted bound")
+        if isinstance(token, (AnchorToken, AliasToken)):
+            raise ValueError("workflow YAML anchors and aliases are forbidden")
+        if isinstance(token, ScalarToken) and token.value == "<<":
+            raise ValueError("workflow YAML merge keys are forbidden")
+
+
 def read_bounded_regular_file(path: Path) -> str:
     """Read one regular file without following a final-component symlink."""
 
@@ -153,6 +169,7 @@ def main(arguments: list[str]) -> int:
         return 2
     try:
         source = read_bounded_regular_file(Path(arguments[1]))
+        reject_yaml_graph_features(source)
         document = yaml.load(source, Loader=StrictWorkflowLoader)
         validate_workflow(document)
     except (OSError, UnicodeError, ValueError, yaml.YAMLError):
