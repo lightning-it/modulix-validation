@@ -1,0 +1,79 @@
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WRAPPER = ROOT / "scripts" / "wunder-devtools-ee.sh"
+
+
+class WunderDevtoolsTmpfsTests(unittest.TestCase):
+    def wrapper_args(self, engine: str, *, rootless: bool) -> list[str]:
+        try:
+            temporary = tempfile.TemporaryDirectory(
+                dir=Path(os.environ["HOME"])
+            )
+        except OSError:
+            temporary = tempfile.TemporaryDirectory()
+        with temporary as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            fake_engine = temporary_root / engine
+            fake_engine.write_text(
+                """#!/bin/sh
+if [ "${1:-}" = "info" ]; then
+  printf '%s\\n' "${FAKE_ROOTLESS:-false}"
+  exit 0
+fi
+printf '%s\\n' "$@"
+""",
+                encoding="utf-8",
+            )
+            fake_engine.chmod(0o700)
+            environment = {
+                "HOME": str(temporary_root),
+                "PATH": f"{temporary_root}:{os.environ['PATH']}",
+                "WUNDER_CONTAINER_ENGINE": engine,
+                "WUNDER_DEVTOOLS_DOCKER_SOCKET": "disabled",
+                "WUNDER_DEVTOOLS_RUN_AS_HOST_UID": "1",
+                "FAKE_ROOTLESS": "true" if rootless else "false",
+            }
+            result = subprocess.run(
+                ["bash", str(WRAPPER), "true"],
+                cwd=temporary_root,
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.splitlines()
+
+    def test_host_uid_run_tmpfs_matches_container_identity(self):
+        cases = (
+            ("docker", False, os.getuid(), os.getgid()),
+            ("podman", False, os.getuid(), os.getgid()),
+            ("podman", True, 0, 0),
+        )
+        for engine, rootless, expected_uid, expected_gid in cases:
+            with self.subTest(engine=engine, rootless=rootless):
+                arguments = self.wrapper_args(engine, rootless=rootless)
+                self.assertEqual(
+                    f"{expected_uid}:{expected_gid}",
+                    arguments[arguments.index("--user") + 1],
+                )
+                run_mount = next(
+                    argument
+                    for argument in arguments
+                    if argument.startswith("/run:")
+                )
+                self.assertEqual(
+                    "/run:rw,nosuid,nodev,size=256m,"
+                    f"uid={expected_uid},gid={expected_gid},mode=0755",
+                    run_mount,
+                )
+                self.assertNotIn("mode=1777", run_mount)
+
+
+if __name__ == "__main__":
+    unittest.main()
