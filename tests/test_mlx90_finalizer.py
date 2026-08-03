@@ -709,7 +709,7 @@ class FinalizerTests(unittest.TestCase):
                 "supplementary/scripts/verify-forgejo-manifest-security.py; "
                 'test -f "$script"; test ! -L "$script"; '
                 'test "$(sha256sum "$script" | cut -d\' \' -f1)" = '
-                '"98f1430988e4e29721819212cb8a63cfe87d8abc3688562145788ad4cd07bf8c"; '
+                '"8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675"; '
                 'exec python3 "$script"',
             ],
             forgejo_profile["containerCommand"],
