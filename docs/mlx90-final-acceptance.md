@@ -6,12 +6,13 @@ claim only after independently verifying the signed producer evidence, the
 signed container evidence, the live GitHub identities, every required OCI
 digest, and an immutable acceptance profile specific to the security fix.
 
-The workflow is a foundation, not evidence that a release has passed. The
-repository currently allowlists only the historical
-`lit.supplementary/mlx90-fixture` profile with `releaseEligible: false` and a
-non-success command. Consequently, the workflow cannot currently produce a
-`delivered` result. A real security fix needs authoritative producer evidence
-and a separately reviewed profile change before dispatch.
+The workflow and profile allowlist are foundations, not evidence that a release
+has passed. The historical `lit.supplementary/mlx90-fixture` profile remains
+`releaseEligible: false` with a non-success command. The separately reviewed
+`lit.supplementary/forgejo-manifest-secret-permissions-v1` profile is the only
+release-eligible profile. It cannot produce a `delivered` result without the
+matching authoritative producer evidence, immutable container evidence, and
+all live finalizer checks.
 
 ## Dispatch contract
 
@@ -359,6 +360,29 @@ contracts are live, the dispatch actor is the release automation App, and the
 protected environment reviewers can validate the exact workflow SHA. Do not
 dispatch the foundation against the historical fixture and do not interpret a
 blocked preflight as delivery evidence.
+
+The Forgejo profile is fixed to a container-local command that first requires
+the separately reviewed verifier digest
+`sha256:8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675`
+and only then executes it:
+
+```bash
+script=/usr/share/ansible/collections/ansible_collections/lit/supplementary/scripts/verify-forgejo-manifest-security.py
+test -f "$script"
+test ! -L "$script"
+test "$(sha256sum "$script" | cut -d' ' -f1)" = "8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675"
+exec python3 "$script"
+```
+
+The verifier is shipped by the exact collection artifact under test, but the
+candidate cannot substitute its own verifier: any content change fails the
+independently pinned SHA-256 check before Python executes. The reviewed verifier
+must then fail unless the Forgejo Pod-manifest template task is uniquely
+identifiable, runs with `no_log: true`, and writes the secret-bearing manifest
+as `root:root` with mode `0600`. The profile does not fetch code, accept a
+free-form command, or read a credential. Its successful exit is one required
+observation; it is never a substitute for signed producer/container evidence
+or the final revocation check.
 
 ## Local verification
 

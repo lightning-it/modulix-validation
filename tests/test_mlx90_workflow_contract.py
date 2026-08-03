@@ -844,16 +844,70 @@ gh() {
             self.assertIn("installation is invalid", rejected.stderr)
             self.assertFalse(capture.exists())
 
-    def test_only_historical_fixture_profile_exists_and_cannot_release(self):
+    def test_profiles_fix_exact_forgejo_command_and_keep_fixture_nonreleaseable(self):
         profile_document = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(1, profile_document["schemaVersion"])
         self.assertEqual(
-            {"lit.supplementary/mlx90-fixture"},
+            {
+                "lit.supplementary/forgejo-manifest-secret-permissions-v1",
+                "lit.supplementary/mlx90-fixture",
+            },
             set(profile_document["profiles"]),
         )
         fixture = profile_document["profiles"]["lit.supplementary/mlx90-fixture"]
         self.assertIs(fixture["releaseEligible"], False)
         self.assertEqual(["/bin/false"], fixture["containerCommand"])
+
+        forgejo = profile_document["profiles"][
+            "lit.supplementary/forgejo-manifest-secret-permissions-v1"
+        ]
+        self.assertEqual(
+            {
+                "containerCommand",
+                "description",
+                "releaseEligible",
+            },
+            set(forgejo),
+        )
+        self.assertIs(forgejo["releaseEligible"], True)
+        verifier_path = (
+            "/usr/share/ansible/collections/ansible_collections/lit/"
+            "supplementary/scripts/verify-forgejo-manifest-security.py"
+        )
+        verifier_sha256 = (
+            "8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675"
+        )
+        command = (
+            f"script={verifier_path}; "
+            'test -f "$script"; test ! -L "$script"; '
+            'test "$(sha256sum "$script" | cut -d\' \' -f1)" = '
+            f'"{verifier_sha256}"; '
+            'exec python3 "$script"'
+        )
+        self.assertEqual(
+            [
+                "/bin/bash",
+                "-ceu",
+                command,
+            ],
+            forgejo["containerCommand"],
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            no_op = Path(temporary) / "verify-forgejo-manifest-security.py"
+            no_op.write_text("raise SystemExit(0)\n", encoding="utf-8")
+            rejected = subprocess.run(
+                [
+                    "/bin/bash",
+                    "-ceu",
+                    command.replace(verifier_path, str(no_op)),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(0, rejected.returncode)
 
 
 if __name__ == "__main__":

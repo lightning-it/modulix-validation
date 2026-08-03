@@ -697,6 +697,23 @@ class FinalizerTests(unittest.TestCase):
         repository_profiles = MODULE.load_profiles(
             ROOT / "acceptance" / "mlx90" / "profiles.json"
         )
+        forgejo_profile = MODULE.eligible_profile(
+            repository_profiles,
+            "lit.supplementary/forgejo-manifest-secret-permissions-v1",
+        )
+        self.assertEqual(
+            [
+                "/bin/bash",
+                "-ceu",
+                "script=/usr/share/ansible/collections/ansible_collections/lit/"
+                "supplementary/scripts/verify-forgejo-manifest-security.py; "
+                'test -f "$script"; test ! -L "$script"; '
+                'test "$(sha256sum "$script" | cut -d\' \' -f1)" = '
+                '"8095f617bb27f26043715d3b4466c75ea061f2277276e592809d256d8b456675"; '
+                'exec python3 "$script"',
+            ],
+            forgejo_profile["containerCommand"],
+        )
         with self.assertRaisesRegex(ValueError, "non-releaseable"):
             MODULE.eligible_profile(
                 repository_profiles, "lit.supplementary/mlx90-fixture"
