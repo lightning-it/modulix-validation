@@ -597,6 +597,8 @@ esac
     def test_github_api_preserves_allowed_arguments_headers_and_stdin(self):
         arguments = [
             "--paginate",
+            "-iH",
+            "Accept: application/vnd.github+json",
             "-H",
             "Accept: application/vnd.github+json",
             "--header",
@@ -632,6 +634,10 @@ esac
             ["-Hx-GiThUb-ApI-vErSiOn:2022-11-28", endpoint],
             ["-H=X-GitHub-Api-Version:2022-11-28", endpoint],
             ["--header", " \tX-GitHub-Api-Version \t: 2022-11-28", endpoint],
+            ["-iH", "X-GitHub-Api-Version: 2022-11-28", endpoint],
+            ["-iH=X-GitHub-Api-Version:2022-11-28", endpoint],
+            ["-iHX-GitHub-Api-Version:2022-11-28", endpoint],
+            ["-iiHX-gItHuB-aPi-VeRsIoN:2022-11-28", endpoint],
         )
         for arguments in overrides:
             with self.subTest(arguments=arguments):

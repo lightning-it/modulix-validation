@@ -32,33 +32,10 @@ require_value() {
 }
 
 github_api() {
-  local argument header_name header_value
-  local index
-  local -a arguments=("$@")
-  for ((index = 0; index < ${#arguments[@]}; index++)); do
-    argument="${arguments[$index]}"
-    header_value=""
+  local argument
+  for argument in "$@"; do
     case "$argument" in
-      -H|--header)
-        [ "$((index + 1))" -lt "${#arguments[@]}" ] \
-          || fail_closed "GitHub API header option is missing a value"
-        index=$((index + 1))
-        header_value="${arguments[$index]}"
-        ;;
-      --header=*)
-        header_value="${argument#--header=}"
-        ;;
-      -H?*)
-        header_value="${argument#-H}"
-        header_value="${header_value#=}"
-        ;;
-      *) continue ;;
-    esac
-    header_name="${header_value%%:*}"
-    header_name="${header_name#"${header_name%%[![:space:]]*}"}"
-    header_name="${header_name%"${header_name##*[![:space:]]}"}"
-    case "$header_name" in
-      [Xx]-[Gg][Ii][Tt][Hh][Uu][Bb]-[Aa][Pp][Ii]-[Vv][Ee][Rr][Ss][Ii][Oo][Nn])
+      *[Xx]-[Gg][Ii][Tt][Hh][Uu][Bb]-[Aa][Pp][Ii]-[Vv][Ee][Rr][Ss][Ii][Oo][Nn]*)
         fail_closed "GitHub API version header override is forbidden"
         ;;
     esac
