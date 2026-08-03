@@ -202,48 +202,37 @@ esac
 
     def test_original_and_rerun_actors_are_bound_to_the_release_app(self):
         expected_actor = "lightning-it-release-automation[bot]"
+        expected_env = {
+            "DISPATCH_ACTOR": "${{ github.actor }}",
+            "DISPATCH_TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+        }
         for job_name in ("verify", "persist", "post-delivery"):
             first_step = self.workflow["jobs"][job_name]["steps"][0]
             with self.subTest(job=job_name):
                 self.assertEqual(
-                    "${{ github.actor }}",
-                    first_step["env"]["DISPATCH_ACTOR"],
+                    expected_env,
+                    {name: first_step["env"][name] for name in expected_env},
                 )
-                self.assertEqual(
-                    "${{ github.triggering_actor }}",
-                    first_step["env"]["DISPATCH_TRIGGERING_ACTOR"],
-                )
-                self.assertIn(
-                    f'test "$DISPATCH_ACTOR" = "{expected_actor}"',
-                    first_step["run"],
-                )
-                self.assertIn(
-                    f'test "$DISPATCH_TRIGGERING_ACTOR" = "{expected_actor}"',
-                    first_step["run"],
-                )
-        self.assertEqual(
-            2,
-            self.script.count("and .triggering_actor.login == $actor"),
-        )
-        self.assertEqual(
-            2,
-            self.script.count("and .actor.login == $actor"),
-        )
-        self.assertEqual(
-            3,
-            self.script.count(
+                for variable in expected_env:
+                    self.assertIn(
+                        f'test "${variable}" = "{expected_actor}"',
+                        first_step["run"],
+                    )
+        for fragment, count in (
+            ("and .triggering_actor.login == $actor", 1),
+            ("and .actor.login == $actor", 1),
+            (
                 '[ "$GITHUB_TRIGGERING_ACTOR" = '
-                '"lightning-it-release-automation[bot]" ]'
+                '"lightning-it-release-automation[bot]" ]',
+                3,
             ),
-        )
-        self.assertIn(
-            "evidenceTriggeringActor: $evidence_triggering_actor",
-            self.script,
-        )
-        self.assertIn(
-            "publishTriggeringActor: $publish_triggering_actor",
-            self.script,
-        )
+        ):
+            self.assertEqual(count, self.script.count(fragment))
+        for field, variable in (
+            ("evidenceTriggeringActor", "evidence_triggering_actor"),
+            ("publishTriggeringActor", "publish_triggering_actor"),
+        ):
+            self.assertIn(f"{field}: ${variable}", self.script)
 
     def test_job_permissions_are_minimal_and_explicit(self):
         self.assertEqual({}, self.workflow["permissions"])

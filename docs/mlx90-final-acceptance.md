@@ -33,10 +33,9 @@ with these required string inputs:
 | `container_release_run_id` | Container Build & Publish run ID bound by the signed evidence |
 | `container_publish_run_attempt` | Successful attempt of that run which published the immutable release |
 
-The workflow rejects any other original actor or rerun-triggering actor,
-repository, ref, mutable SHA, release binding, or evidence URL. It does not
-accept an arbitrary shell command. The only executed acceptance command comes
-from the reviewed
+The workflow rejects any other actor, repository, ref, mutable SHA, release
+binding, or evidence URL. It does not accept an arbitrary shell command. The
+only executed acceptance command comes from the reviewed
 `acceptance/mlx90/profiles.json` allowlist.
 
 The App needs `Actions: write` to call the workflow-dispatch endpoint and
@@ -68,9 +67,7 @@ to use only its repository-scoped `GITHUB_TOKEN`. Job permissions are:
 The `verify` job runs in the existing protected
 `ansible-collection-runtime-protected` environment. The `persist` job receives
 only the signed same-run artifact and cannot create a result unless all prior
-verification succeeded. Every job that can reach a secret or token-backed
-action first requires both the original actor and the rerun-triggering actor to
-be the release automation App.
+verification succeeded.
 
 ## Required evidence
 
@@ -88,32 +85,16 @@ The container release must expose exactly one
 - producer source SHA, collection version, and collection digest;
 - consumer pull request, pre-merge base SHA, reviewed head SHA, and two-parent
   merge SHA;
-- container release ID, tag, source SHA, workflow run ID, and evidence attempt;
+- container release ID, tag, source SHA, workflow run ID, and run attempt;
 - distinct `public`, `certified`, and `bootstrap` images;
 - each OCI manifest digest and exact `linux/amd64` and `linux/arm64` platform
   digest;
 - immutable signature, SBOM, and provenance references for every variant; and
 - an explicit `not_revoked` observation and timestamp.
 
-The finalizer re-resolves both tags, the merged consumer PR, the
-evidence-producing attempt, and the successful publisher attempt through
-GitHub. Both attempts must bind the same run ID, App actor and triggering
-actor, repository, `workflow_dispatch` event, workflow path, tag, and source
-SHA; their triggering actors are recorded. The evidence attempt cannot follow
-the publisher attempt and must contain the successful build job. The publisher
-attempt must be successful and contain the attach job, permitting an
-attach-only retry after an earlier successful SARIF job. The exact workflow
-blob at the consumer merge SHA is structurally checked: attach needs build and
-SARIF, retains its implicit success condition, and none of those jobs uses
-job-level `continue-on-error`.
-
-Numeric ID and tag must resolve to the same published, non-prerelease,
-immutable release, authored by the App at the exact source SHA. Every REST
-re-resolution pins `X-GitHub-Api-Version: 2026-03-10`; see GitHub's [REST API
-versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10)
-and [Release endpoints](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10).
-The finalizer then verifies the collection archive's signature and checks its
-CycloneDX SBOM
+The finalizer re-resolves the producer and container tags, the merged consumer
+pull request, and the successful container workflow run through GitHub. It
+then verifies the collection archive's signature and checks its CycloneDX SBOM
 and provenance against the producer SHA, version, and digest. For the container
 it verifies OCI index contents, including exactly one BuildKit attestation
 manifest for each exact platform manifest, and verifies the index signature
@@ -133,6 +114,15 @@ check, so the finalizer verifies those three live aliases separately against
 the accepted, signed index digest. It does not require or inspect `latest`
 before delivery; the consumer moves that mutable tag only after authenticating
 the durable `delivered` callback.
+
+MLX-90 additionally binds the original and rerun-triggering App actors before
+any secret or token use. The evidence and publisher attempts must share the
+exact run identity; only an earlier successful build and a later successful
+attach-only retry are accepted. The merge-SHA workflow blob must bind the
+`build`, `upload-trivy-sarif`, and `attach-release-evidence` IDs to their exact,
+unique live job names and fail-closed DAG semantics. Numeric ID and tag must
+resolve to the same immutable App-authored release at that SHA. REST reads pin
+[`X-GitHub-Api-Version: 2026-03-10`](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10).
 
 The current container workflow does not publish separate Cosign signatures for
 these SPDX and SLSA layers. `cosign verify-attestation` would therefore not

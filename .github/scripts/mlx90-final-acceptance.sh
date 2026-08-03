@@ -590,6 +590,53 @@ verify_container_workflow_dag() {
     || fail_closed "container workflow publisher DAG is not exact"
 }
 
+verify_container_run_identity() {
+  local attempt="$1"
+  local success_required="$2"
+  jq -e \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --argjson attempt "$attempt" \
+    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" \
+    --argjson success_required "$success_required" '
+      .id == $run_id
+      and .run_attempt == $attempt
+      and .repository.full_name == $repository
+      and .head_repository.full_name == $repository
+      and .actor.login == $actor
+      and .triggering_actor.login == $actor
+      and .event == "workflow_dispatch"
+      and .path == ".github/workflows/container-build-publish.yml"
+      and .head_sha == $sha
+      and .head_branch == $tag
+      and .status == "completed"
+      and (if $success_required then .conclusion == "success" else
+        (.conclusion as $conclusion | ([
+          "success", "failure", "neutral", "cancelled", "skipped",
+          "timed_out", "action_required", "stale", "startup_failure"
+        ] | index($conclusion)) != null)
+      end)
+    ' >/dev/null
+}
+
+select_successful_job() {
+  local name="$1"
+  local multiplicity_error="$2"
+  local conclusion_error="$3"
+  jq -ec --arg name "$name" \
+    --arg multiplicity_error "$multiplicity_error" \
+    --arg conclusion_error "$conclusion_error" '
+      [.[] | select(.name == $name)]
+      | if length != 1 then error($multiplicity_error)
+        elif .[0].status != "completed" or .[0].conclusion != "success"
+        then error($conclusion_error)
+        else .[0]
+        end
+    '
+}
+
 identity_args() {
   IDENTITY_ARGS=(
     --correlation-id "$INPUT_CORRELATION_ID"
@@ -1054,86 +1101,35 @@ PY
 
   container_evidence_run="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}")"
-  jq -e \
-    --arg actor "lightning-it-release-automation[bot]" \
-    --argjson run_attempt "$container_evidence_run_attempt" \
-    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
-    --arg repository "$CONSUMER_REPOSITORY" \
-    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
-    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
-      .id == $run_id
-      and .run_attempt == $run_attempt
-      and .repository.full_name == $repository
-      and .head_repository.full_name == $repository
-      and .actor.login == $actor
-      and .triggering_actor.login == $actor
-      and .event == "workflow_dispatch"
-      and .path == ".github/workflows/container-build-publish.yml"
-      and .head_sha == $sha
-      and .head_branch == $tag
-      and .status == "completed"
-      and (.conclusion as $conclusion | ([
-          "success", "failure", "neutral", "cancelled", "skipped",
-          "timed_out", "action_required", "stale", "startup_failure"
-        ] | index($conclusion)) != null)
-    ' <<<"$container_evidence_run" >/dev/null \
+  verify_container_run_identity "$container_evidence_run_attempt" false \
+    <<<"$container_evidence_run" \
     || fail_closed "container evidence run attempt identity is invalid"
   container_evidence_jobs="$(
     github_api --paginate \
       "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${container_evidence_run_attempt}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
-  container_build_job="$(jq -ec \
-    --arg name "Build & push image to Quay.io" '
-      [.[] | select(.name == $name)]
-      | if length != 1 then
-          error("container evidence attempt must contain exactly one build job")
-        elif .[0].status != "completed" or .[0].conclusion != "success" then
-          error("container evidence build job did not complete successfully")
-        else
-          .[0]
-        end
-    ' <<<"$container_evidence_jobs")"
+  container_build_job="$(select_successful_job \
+    "Build & push image to Quay.io" \
+    "container evidence attempt must contain exactly one build job" \
+    "container evidence build job did not complete successfully" \
+    <<<"$container_evidence_jobs")"
 
   container_run="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}")"
-  jq -e \
-    --arg actor "lightning-it-release-automation[bot]" \
-    --argjson run_attempt "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" \
-    --argjson run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
-    --arg repository "$CONSUMER_REPOSITORY" \
-    --arg sha "$INPUT_CONSUMER_MERGE_SHA" \
-    --arg tag "$INPUT_CONTAINER_RELEASE_TAG" '
-      .id == $run_id
-      and .run_attempt == $run_attempt
-      and .repository.full_name == $repository
-      and .head_repository.full_name == $repository
-      and .actor.login == $actor
-      and .triggering_actor.login == $actor
-      and .event == "workflow_dispatch"
-      and .path == ".github/workflows/container-build-publish.yml"
-      and .head_sha == $sha
-      and .head_branch == $tag
-      and .status == "completed"
-      and .conclusion == "success"
-    ' <<<"$container_run" >/dev/null \
+  verify_container_run_identity "$INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT" true \
+    <<<"$container_run" \
     || fail_closed "container publisher run attempt is not exact and successful"
   container_publish_jobs="$(
     github_api --paginate \
       "repos/${CONSUMER_REPOSITORY}/actions/runs/${INPUT_CONTAINER_RELEASE_RUN_ID}/attempts/${INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT}/jobs?per_page=100" \
       | jq -sc '[.[].jobs[]]'
   )"
-  container_publisher_job="$(jq -ec \
-    --arg name "Attach signed release evidence" '
-      [.[] | select(.name == $name)]
-      | if length != 1 then
-          error("container publisher attempt must contain exactly one publisher job")
-        elif .[0].status != "completed" or .[0].conclusion != "success" then
-          error("container publisher job did not complete successfully")
-        else
-          .[0]
-        end
-    ' <<<"$container_publish_jobs")"
+  container_publisher_job="$(select_successful_job \
+    "Attach signed release evidence" \
+    "container publisher attempt must contain exactly one publisher job" \
+    "container publisher job did not complete successfully" \
+    <<<"$container_publish_jobs")"
   container_release_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   consumer_identity_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
