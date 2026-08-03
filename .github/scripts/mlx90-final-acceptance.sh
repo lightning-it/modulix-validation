@@ -665,6 +665,7 @@ verify_mode() {
   for required in \
     GH_TOKEN \
     GITHUB_ACTOR \
+    GITHUB_TRIGGERING_ACTOR \
     GITHUB_OUTPUT \
     GITHUB_REF \
     GITHUB_REPOSITORY \
@@ -691,6 +692,8 @@ verify_mode() {
     || fail_closed "final acceptance must run from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may dispatch final acceptance"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger final acceptance"
   [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
     || fail_closed "finalizer workflow SHA is invalid"
   for required in \
@@ -1095,6 +1098,7 @@ PY
       and .repository.full_name == $repository
       and .head_repository.full_name == $repository
       and .actor.login == $actor
+      and .triggering_actor.login == $actor
       and .event == "workflow_dispatch"
       and .path == ".github/workflows/container-build-publish.yml"
       and .head_sha == $sha
@@ -1137,6 +1141,7 @@ PY
       and .repository.full_name == $repository
       and .head_repository.full_name == $repository
       and .actor.login == $actor
+      and .triggering_actor.login == $actor
       and .event == "workflow_dispatch"
       and .path == ".github/workflows/container-build-publish.yml"
       and .head_sha == $sha
@@ -1370,6 +1375,10 @@ PY
     --arg head_sha "$(jq -er '.head_sha' <<<"$container_run")" \
     --arg head_branch "$(jq -er '.head_branch' <<<"$container_run")" \
     --arg actor "$(jq -er '.actor.login' <<<"$container_run")" \
+    --arg evidence_triggering_actor "$(jq -er \
+      '.triggering_actor.login' <<<"$container_evidence_run")" \
+    --arg publish_triggering_actor "$(jq -er \
+      '.triggering_actor.login' <<<"$container_run")" \
     --argjson immutable "$(jq -er '.immutable' <<<"$container_release")" \
     --arg target_commitish "$(jq -er '.target_commitish' \
       <<<"$container_release")" \
@@ -1411,6 +1420,8 @@ PY
       headSha: $head_sha,
       headBranch: $head_branch,
       actor: $actor,
+      evidenceTriggeringActor: $evidence_triggering_actor,
+      publishTriggeringActor: $publish_triggering_actor,
       immutable: $immutable,
       targetCommitish: $target_commitish,
       author: $author,
@@ -1997,6 +2008,7 @@ persist_mode() {
   require_value GH_TOKEN
   require_value EVIDENCE_TAG
   require_value GITHUB_ACTOR
+  require_value GITHUB_TRIGGERING_ACTOR
   require_value GITHUB_REF
   require_value GITHUB_REPOSITORY
   require_value GITHUB_RUN_ATTEMPT
@@ -2009,6 +2021,8 @@ persist_mode() {
     || fail_closed "final evidence may persist only from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may persist final evidence"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger persistence"
   [[ "$EVIDENCE_TAG" =~ ^v0\.0\.0-mlx90\.[0-9a-f]{16}$ ]] \
     || fail_closed "derived evidence tag is invalid"
   [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
@@ -2342,6 +2356,7 @@ callback_mode() {
     FINAL_ACCEPTANCE_URL \
     GH_TOKEN \
     GITHUB_ACTOR \
+    GITHUB_TRIGGERING_ACTOR \
     GITHUB_REF \
     GITHUB_REPOSITORY
   do
@@ -2353,6 +2368,8 @@ callback_mode() {
     || fail_closed "post-delivery callback must run from protected main"
   [ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may dispatch promotion"
+  [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
+    || fail_closed "only the release automation App may trigger promotion"
   [ "$APP_SLUG" = "lightning-it-release-automation" ] \
     || fail_closed "post-delivery callback App slug is invalid"
   [ "$APP_INSTALLATION_ID" = "148019054" ] \

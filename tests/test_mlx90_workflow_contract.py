@@ -263,6 +263,51 @@ esac
             acceptance_step["env"]["INPUT_CONTAINER_PUBLISH_RUN_ATTEMPT"],
         )
 
+    def test_original_and_rerun_actors_are_bound_to_the_release_app(self):
+        expected_actor = "lightning-it-release-automation[bot]"
+        for job_name in ("verify", "persist", "post-delivery"):
+            first_step = self.workflow["jobs"][job_name]["steps"][0]
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    "${{ github.actor }}",
+                    first_step["env"]["DISPATCH_ACTOR"],
+                )
+                self.assertEqual(
+                    "${{ github.triggering_actor }}",
+                    first_step["env"]["DISPATCH_TRIGGERING_ACTOR"],
+                )
+                self.assertIn(
+                    f'test "$DISPATCH_ACTOR" = "{expected_actor}"',
+                    first_step["run"],
+                )
+                self.assertIn(
+                    f'test "$DISPATCH_TRIGGERING_ACTOR" = "{expected_actor}"',
+                    first_step["run"],
+                )
+        self.assertEqual(
+            2,
+            self.script.count("and .triggering_actor.login == $actor"),
+        )
+        self.assertEqual(
+            2,
+            self.script.count("and .actor.login == $actor"),
+        )
+        self.assertEqual(
+            3,
+            self.script.count(
+                '[ "$GITHUB_TRIGGERING_ACTOR" = '
+                '"lightning-it-release-automation[bot]" ]'
+            ),
+        )
+        self.assertIn(
+            "evidenceTriggeringActor: $evidence_triggering_actor",
+            self.script,
+        )
+        self.assertIn(
+            "publishTriggeringActor: $publish_triggering_actor",
+            self.script,
+        )
+
     def test_job_permissions_are_minimal_and_explicit(self):
         self.assertEqual({}, self.workflow["permissions"])
         self.assertEqual(
@@ -515,6 +560,7 @@ esac
             '"Build & push image to Quay.io"',
             '"Attach signed release evidence"',
             'and .actor.login == $actor',
+            'and .triggering_actor.login == $actor',
             'and .status == "completed"',
             'and .conclusion == "success"',
             "publishRunAttempt: $publish_run_attempt",
@@ -1037,6 +1083,9 @@ gh() {
                 ),
                 "GH_TOKEN": "synthetic-test-only",
                 "GITHUB_ACTOR": "lightning-it-release-automation[bot]",
+                "GITHUB_TRIGGERING_ACTOR": (
+                    "lightning-it-release-automation[bot]"
+                ),
                 "GITHUB_REF": "refs/heads/main",
                 "GITHUB_REPOSITORY": "lightning-it/modulix-validation",
                 "BASH_ENV": str(bash_env),

@@ -534,6 +534,8 @@ class FinalizerTests(unittest.TestCase):
                 "headSha": self.identity.consumer_merge_sha,
                 "headBranch": self.identity.container_release_tag,
                 "actor": MODULE.CONTAINER_RELEASE_ACTOR,
+                "evidenceTriggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
+                "publishTriggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
                 "immutable": True,
                 "targetCommitish": self.identity.consumer_merge_sha,
                 "author": MODULE.CONTAINER_RELEASE_ACTOR,
@@ -934,6 +936,20 @@ class FinalizerTests(unittest.TestCase):
                 "container-release",
                 lambda value: value["observations"].__setitem__(
                     "publishRunAttempt", 2
+                ),
+                "container release receipt mismatch",
+            ),
+            (
+                "container-release",
+                lambda value: value["observations"].__setitem__(
+                    "evidenceTriggeringActor", "human-reviewer"
+                ),
+                "container release receipt mismatch",
+            ),
+            (
+                "container-release",
+                lambda value: value["observations"].__setitem__(
+                    "publishTriggeringActor", "human-reviewer"
                 ),
                 "container release receipt mismatch",
             ),

@@ -33,9 +33,10 @@ with these required string inputs:
 | `container_release_run_id` | Container Build & Publish run ID bound by the signed evidence |
 | `container_publish_run_attempt` | Successful attempt of that run which published the immutable release |
 
-The workflow rejects any other actor, repository, ref, mutable SHA, release
-binding, or evidence URL. It does not accept an arbitrary shell command. The
-only executed acceptance command comes from the reviewed
+The workflow rejects any other original actor or rerun-triggering actor,
+repository, ref, mutable SHA, release binding, or evidence URL. It does not
+accept an arbitrary shell command. The only executed acceptance command comes
+from the reviewed
 `acceptance/mlx90/profiles.json` allowlist.
 
 The App needs `Actions: write` to call the workflow-dispatch endpoint and
@@ -67,7 +68,9 @@ to use only its repository-scoped `GITHUB_TOKEN`. Job permissions are:
 The `verify` job runs in the existing protected
 `ansible-collection-runtime-protected` environment. The `persist` job receives
 only the signed same-run artifact and cannot create a result unless all prior
-verification succeeded.
+verification succeeded. Every job that can reach a secret or token-backed
+action first requires both the original actor and the rerun-triggering actor to
+be the release automation App.
 
 ## Required evidence
 
@@ -103,9 +106,11 @@ jobs may use job-level `continue-on-error`.
 The publisher attempt must contain the successful attach job and must itself be
 completed successfully; this also supports an attach-only retry where GitHub
 retains the already-successful SARIF job in an earlier attempt. Both attempts
-are bound to the same run ID, App actor, repository, `workflow_dispatch` event,
-workflow path, release tag, and source SHA. The release fetched by numeric ID
-and by tag must be the same exact release, have the exact source SHA, be
+are bound to the same run ID, App actor, App triggering actor, repository,
+`workflow_dispatch` event, workflow path, release tag, and source SHA. The
+final receipt records the triggering actor of each attempt. The release
+fetched by numeric ID and by tag must be the same exact release, have the exact
+source SHA, be
 authored by the release App, and be published, non-prerelease, and immutable.
 Every REST re-resolution request pins `X-GitHub-Api-Version: 2026-03-10`, as
 documented by GitHub for [REST API versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10)

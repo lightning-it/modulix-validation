@@ -73,11 +73,13 @@ jobs:
       - name: Reject every non-App dispatch before secret access
         env:
           DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
           test "$DISPATCH_REF" = "refs/heads/main"
           test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
 
@@ -183,6 +185,19 @@ jobs:
       actions: read
       contents: write
     steps:
+      - name: Reject non-App persistence reruns before token-backed actions
+        env:
+          DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_REF" = "refs/heads/main"
+          test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
+
       - name: Checkout exact persistence guard
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -217,11 +232,13 @@ jobs:
       - name: Reject non-App callback before secret access
         env:
           DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]"
           test "$DISPATCH_REF" = "refs/heads/main"
           test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
 
