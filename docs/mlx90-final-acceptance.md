@@ -30,7 +30,8 @@ with these required string inputs:
 | `consumer_merge_sha` | Exact merge SHA and container source SHA |
 | `container_release_id` | Numeric GitHub Release ID |
 | `container_release_tag` | Exact v-prefixed semantic release tag |
-| `container_release_run_id` | Successful Container Build & Publish run ID |
+| `container_release_run_id` | Container Build & Publish run ID bound by the signed evidence |
+| `container_publish_run_attempt` | Successful attempt of that run which published the immutable release |
 
 The workflow rejects any other actor, repository, ref, mutable SHA, release
 binding, or evidence URL. It does not accept an arbitrary shell command. The
@@ -113,6 +114,15 @@ check, so the finalizer verifies those three live aliases separately against
 the accepted, signed index digest. It does not require or inspect `latest`
 before delivery; the consumer moves that mutable tag only after authenticating
 the durable `delivered` callback.
+
+MLX-90 additionally binds the original and rerun-triggering App actors before
+any secret or token use. The evidence and publisher attempts must share the
+exact run identity; only an earlier successful build and a later successful
+attach-only retry are accepted. The merge-SHA workflow blob must bind the
+`build`, `upload-trivy-sarif`, and `attach-release-evidence` IDs to their exact,
+unique live job names and fail-closed DAG semantics. Numeric ID and tag must
+resolve to the same immutable App-authored release at that SHA. REST reads pin
+[`X-GitHub-Api-Version: 2026-03-10`](https://docs.github.com/en/rest/about-the-rest-api/api-versions?apiVersion=2026-03-10).
 
 The current container workflow does not publish separate Cosign signatures for
 these SPDX and SLSA layers. `cosign verify-attestation` would therefore not
