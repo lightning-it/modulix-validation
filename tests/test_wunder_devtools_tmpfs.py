@@ -13,10 +13,11 @@ WRAPPER = ROOT / "scripts" / "wunder-devtools-ee.sh"
 class WunderDevtoolsTmpfsTests(unittest.TestCase):
     def wrapper_args(self, engine: str, *, rootless: bool) -> list[str]:
         home = os.environ.get("HOME")
+        temporary_parent = Path(home) if home else ROOT
         try:
-            temporary = tempfile.TemporaryDirectory(dir=home)
+            temporary = tempfile.TemporaryDirectory(dir=temporary_parent)
         except OSError:
-            temporary = tempfile.TemporaryDirectory()
+            temporary = tempfile.TemporaryDirectory(dir=ROOT)
         with temporary as temporary_directory:
             temporary_root = Path(temporary_directory)
             fake_engine = temporary_root / engine
