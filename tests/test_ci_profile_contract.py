@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import subprocess
 import unittest
@@ -158,7 +157,6 @@ class CiProfileContractTests(unittest.TestCase):
         )
         validation = workflow["jobs"]["transition-noop"]["steps"][0]["run"]
         base_env = {
-            **os.environ,
             "SOURCE_REPOSITORY": "lightning-it/ansible-collection-supplementary",
             "SOURCE_SHA": "f" * 40,
             "ARTIFACT_SHA256": "a" * 64,
@@ -170,7 +168,7 @@ class CiProfileContractTests(unittest.TestCase):
         ):
             with self.subTest(version=version, artifact_name=artifact_name):
                 completed = subprocess.run(
-                    ["bash", "-c", validation],
+                    ["/bin/bash", "-c", validation],
                     check=False,
                     capture_output=True,
                     env={
@@ -189,7 +187,7 @@ class CiProfileContractTests(unittest.TestCase):
         ):
             with self.subTest(artifact_name=artifact_name):
                 completed = subprocess.run(
-                    ["bash", "-c", validation],
+                    ["/bin/bash", "-c", validation],
                     check=False,
                     capture_output=True,
                     env={
