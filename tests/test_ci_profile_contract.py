@@ -1,5 +1,7 @@
 import json
+import os
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -147,6 +149,57 @@ class CiProfileContractTests(unittest.TestCase):
             publish_lines,
         )
         self.assertNotIn("collection-quality-profile.yml", workflow)
+
+    def test_collection_release_transition_validates_artifact_names_in_bash(self):
+        workflow = yaml.safe_load(
+            (
+                ROOT / ".github/workflows/collection-release-transition.yml"
+            ).read_text(encoding="utf-8")
+        )
+        validation = workflow["jobs"]["transition-noop"]["steps"][0]["run"]
+        base_env = {
+            **os.environ,
+            "SOURCE_REPOSITORY": "lightning-it/ansible-collection-supplementary",
+            "SOURCE_SHA": "f" * 40,
+            "ARTIFACT_SHA256": "a" * 64,
+        }
+
+        for version, artifact_name in (
+            ("3.2.2", "lit-supplementary-3.2.2.tar.gz"),
+            ("3.2.2-rc.1", "lit-supplementary-3.2.2-rc.1.tar.gz"),
+        ):
+            with self.subTest(version=version, artifact_name=artifact_name):
+                completed = subprocess.run(
+                    ["bash", "-c", validation],
+                    check=False,
+                    capture_output=True,
+                    env={
+                        **base_env,
+                        "VERSION": version,
+                        "ARTIFACT_NAME": artifact_name,
+                    },
+                    text=True,
+                )
+                self.assertEqual(0, completed.returncode, completed.stderr)
+
+        for artifact_name in (
+            "lit-supplementary-3.2.1.tar.gz",
+            "lit-supplementary-extra-3.2.2.tar.gz",
+            "../lit-supplementary-3.2.2.tar.gz",
+        ):
+            with self.subTest(artifact_name=artifact_name):
+                completed = subprocess.run(
+                    ["bash", "-c", validation],
+                    check=False,
+                    capture_output=True,
+                    env={
+                        **base_env,
+                        "VERSION": "3.2.2",
+                        "ARTIFACT_NAME": artifact_name,
+                    },
+                    text=True,
+                )
+                self.assertNotEqual(0, completed.returncode)
 
 
 if __name__ == "__main__":
