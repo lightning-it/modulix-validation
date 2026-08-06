@@ -1028,6 +1028,13 @@ class FinalizerTests(unittest.TestCase):
                 "release promotion merge topology",
             ),
             (
+                "consumer-identity",
+                lambda value: value["observations"]["mergeParents"].__setitem__(
+                    0, "e" * 40
+                ),
+                "release source merge parents do not match promotion",
+            ),
+            (
                 "container-release",
                 lambda value: value["finalizer"].__setitem__(
                     "runId", 456788

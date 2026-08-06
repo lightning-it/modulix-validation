@@ -2446,6 +2446,8 @@ def validate_receipt_observations(
             release_promotion_head_sha,
         ]:
             fail("consumer release promotion merge topology is invalid")
+        if merge_parents != release_promotion_merge_parents:
+            fail("consumer release source merge parents do not match promotion")
         if release_promotion_merge_sha != release_source_sha:
             fail("consumer release promotion merge SHA is invalid")
         expected = {
