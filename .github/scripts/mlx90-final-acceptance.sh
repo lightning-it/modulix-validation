@@ -46,6 +46,47 @@ github_api() {
     "$@"
 }
 
+resolve_pull_request_merge_sha() {
+  local repository="$1"
+  local pull_request="$2"
+  local pull_request_number merged_at merge_events
+  [[ "$repository" =~ ^lightning-it/[A-Za-z0-9._-]+$ ]] \
+    || fail_closed "pull-request repository is invalid"
+  pull_request_number="$(jq -er '
+    .number
+    | select(type == "number" and floor == . and . > 0)
+  ' <<<"$pull_request")" \
+    || fail_closed "pull-request number is invalid"
+  merged_at="$(jq -er '
+    .merged_at
+    | select(type == "string" and test(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+      ))
+  ' <<<"$pull_request")" \
+    || fail_closed "pull-request merge timestamp is invalid"
+  merge_events="$(
+    github_api --paginate \
+      "repos/${repository}/issues/${pull_request_number}/events?per_page=100" \
+      | jq -sc '[.[][]]'
+  )"
+  jq -er --arg merged_at "$merged_at" '
+    [.[] | select(.event == "merged")] as $merged
+    | if ($merged | length) != 1 then
+        error("pull request must have exactly one merged event")
+      elif $merged[0].created_at != $merged_at then
+        error("pull-request merge event timestamp does not match")
+      elif ($merged[0].actor.login | type) != "string"
+        or $merged[0].actor.login == "" then
+        error("pull-request merge event actor is invalid")
+      elif ($merged[0].commit_id | type) != "string"
+        or ($merged[0].commit_id | test("^[0-9a-f]{40}$") | not) then
+        error("pull-request merge event commit is invalid")
+      else
+        $merged[0].commit_id
+      end
+  ' <<<"$merge_events"
+}
+
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric
 # identifier as a shell integer. Numeric build identifiers may have leading
 # zeroes; numeric core and prerelease identifiers may not.
@@ -943,6 +984,7 @@ PY
   local consumer_main_rules consumer_main_rules_observations
   local consumer_main_rules_digest
   local consumer_release_prs consumer_release_pr
+  local consumer_release_pr_merge_sha
   local container_release container_release_by_tag
   local container_run container_evidence_run tag_commit
   local container_evidence_jobs container_publish_jobs
@@ -967,11 +1009,11 @@ PY
       and .base.ref == "main"
       and .head.repo.full_name == $repository
       and .head.sha == $head
-      and (.merge_commit_sha | type == "string")
-      and (.merge_commit_sha | test("^[0-9a-f]{40}$"))
     ' <<<"$consumer_pr" >/dev/null \
     || fail_closed "consumer pull-request identity is invalid"
-  consumer_pr_merge_sha="$(jq -er '.merge_commit_sha' <<<"$consumer_pr")"
+  consumer_pr_merge_sha="$(resolve_pull_request_merge_sha \
+    "$CONSUMER_REPOSITORY" "$consumer_pr")" \
+    || fail_closed "consumer pull-request merge event is invalid"
   consumer_pr_ancestry="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/compare/${consumer_pr_merge_sha}...${INPUT_CONSUMER_MERGE_SHA}")"
   jq -e \
@@ -1151,8 +1193,7 @@ PY
     "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_MERGE_SHA}/pulls")"
   consumer_release_pr="$(jq -ec \
     --arg actor "lightning-it-release-automation[bot]" \
-    --arg repository "$CONSUMER_REPOSITORY" \
-    --arg source "$INPUT_CONSUMER_MERGE_SHA" '
+    --arg repository "$CONSUMER_REPOSITORY" '
       [
         .[]
         | select(
@@ -1160,7 +1201,6 @@ PY
             and .merged_at != null
             and .base.ref == "main"
             and .head.repo.full_name == $repository
-            and .merge_commit_sha == $source
             and .user.login == $actor
           )
       ]
@@ -1168,6 +1208,11 @@ PY
         else error("exactly one release promotion pull request is required")
         end
     ' <<<"$consumer_release_prs")" \
+    || fail_closed "consumer release source is not an exact main promotion"
+  consumer_release_pr_merge_sha="$(resolve_pull_request_merge_sha \
+    "$CONSUMER_REPOSITORY" "$consumer_release_pr")" \
+    || fail_closed "consumer release promotion merge event is invalid"
+  [ "$consumer_release_pr_merge_sha" = "$INPUT_CONSUMER_MERGE_SHA" ] \
     || fail_closed "consumer release source is not an exact main promotion"
   consumer_pr_merge="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/commits/${consumer_pr_merge_sha}")"
@@ -1492,8 +1537,7 @@ PY
       <<<"$consumer_release_pr")" \
     --arg release_promotion_author "$(jq -er '.user.login' \
       <<<"$consumer_release_pr")" \
-    --arg release_promotion_merge_sha "$(jq -er '.merge_commit_sha' \
-      <<<"$consumer_release_pr")" \
+    --arg release_promotion_merge_sha "$consumer_release_pr_merge_sha" \
     --argjson release_promotion_merge_parents "$(jq -ec '[.parents[].sha]' \
       <<<"$consumer_merge")" '{
       pullRequest: $pull_request,

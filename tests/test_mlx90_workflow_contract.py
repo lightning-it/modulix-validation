@@ -22,6 +22,38 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         self.workflow = yaml.safe_load(self.workflow_text)
         self.script = SCRIPT_PATH.read_text(encoding="utf-8")
 
+    def _run_merge_event_resolution(self, pull_request, events):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[
+                    : self.script.index(
+                        "\n# Validate the complete SemVer 2.0.0 grammar"
+                    )
+                ]
+                + """
+github_api() {
+  printf '%s\n' "${MERGE_EVENTS:?}"
+}
+resolve_pull_request_merge_sha \
+  lightning-it/container-ee-wunder-ansible-ubi9 "${PULL_REQUEST:?}"
+""",
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                ["bash", str(driver)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(root),
+                    "PULL_REQUEST": json.dumps(pull_request),
+                    "MERGE_EVENTS": json.dumps(events),
+                },
+            )
+
     def _run_quay_blob_download(
         self,
         challenge=None,
@@ -367,6 +399,53 @@ esac
             self.workflow_text,
         )
 
+    def test_pull_request_merge_identity_uses_one_exact_merge_event(self):
+        merged_at = "2026-08-06T01:01:12Z"
+        merge_sha = "a" * 40
+        pull_request = {"number": 517, "merged_at": merged_at}
+        merge_event = {
+            "event": "merged",
+            "created_at": merged_at,
+            "commit_id": merge_sha,
+            "actor": {"login": "release-reviewer"},
+        }
+
+        accepted = self._run_merge_event_resolution(
+            pull_request, [merge_event]
+        )
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+        self.assertEqual(merge_sha, accepted.stdout.strip())
+
+        rejected = (
+            (
+                "missing",
+                [],
+                "exactly one merged event",
+            ),
+            (
+                "duplicate",
+                [merge_event, {**merge_event, "commit_id": "b" * 40}],
+                "exactly one merged event",
+            ),
+            (
+                "timestamp-mismatch",
+                [{**merge_event, "created_at": "2026-08-06T01:01:13Z"}],
+                "timestamp does not match",
+            ),
+            (
+                "invalid-commit",
+                [{**merge_event, "commit_id": "c" * 39}],
+                "merge event commit is invalid",
+            ),
+        )
+        for name, events, message in rejected:
+            with self.subTest(name=name):
+                result = self._run_merge_event_resolution(
+                    pull_request, events
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+
     def test_script_fails_closed_before_claiming_delivery(self):
         for required in (
             '[ "$GITHUB_REF" = "refs/heads/main" ]',
@@ -387,6 +466,10 @@ esac
             '.type == "non_fast_forward"',
             "consumer main branch rules are not fail-closed",
             "commits/${INPUT_CONSUMER_MERGE_SHA}/pulls",
+            "issues/${pull_request_number}/events?per_page=100",
+            "pull request must have exactly one merged event",
+            "pull-request merge event timestamp does not match",
+            "pull-request merge event commit is invalid",
             "consumer release source is not an exact main promotion",
             "consumer release promotion merge topology is invalid",
             "consumer release source is not on the protected main lineage",
@@ -425,6 +508,7 @@ esac
         self.assertIn("oauth2-bearer", self.script)
         self.assertIn('"$layer_digest" "$layer_size"', self.script)
         self.assertNotIn("Authorization:", self.script)
+        self.assertNotIn(".merge_commit_sha", self.script)
         self.assertNotIn(".merge_commit_sha == $merge", self.script)
         self.assertNotIn("--location-trusted", self.script)
         self.assertIn("immutable reference digest mismatch", self.script)
