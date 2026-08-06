@@ -937,7 +937,12 @@ PY
     ' <<<"$producer_ci_jobs")"
   producer_central_ci_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-  local consumer_pr consumer_merge consumer_base_sha
+  local consumer_pr consumer_pr_merge consumer_pr_merge_sha
+  local consumer_pr_ancestry consumer_merge consumer_base_sha
+  local consumer_main_branch consumer_main_sha consumer_main_ancestry
+  local consumer_main_rules consumer_main_rules_observations
+  local consumer_main_rules_digest
+  local consumer_release_prs consumer_release_pr
   local container_release container_release_by_tag
   local container_run container_evidence_run tag_commit
   local container_evidence_jobs container_publish_jobs
@@ -955,7 +960,6 @@ PY
   jq -e \
     --argjson pull_request "$INPUT_CONSUMER_PR" \
     --arg head "$INPUT_CONSUMER_HEAD_SHA" \
-    --arg merge "$INPUT_CONSUMER_MERGE_SHA" \
     --arg repository "$CONSUMER_REPOSITORY" '
       .number == $pull_request
       and .state == "closed"
@@ -963,8 +967,106 @@ PY
       and .base.ref == "main"
       and .head.repo.full_name == $repository
       and .head.sha == $head
-      and .merge_commit_sha == $merge
-    ' <<<"$consumer_pr" >/dev/null
+      and (.merge_commit_sha | type == "string")
+      and (.merge_commit_sha | test("^[0-9a-f]{40}$"))
+    ' <<<"$consumer_pr" >/dev/null \
+    || fail_closed "consumer pull-request identity is invalid"
+  consumer_pr_merge_sha="$(jq -er '.merge_commit_sha' <<<"$consumer_pr")"
+  consumer_pr_ancestry="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/compare/${consumer_pr_merge_sha}...${INPUT_CONSUMER_MERGE_SHA}")"
+  jq -e \
+    --arg pull_request_merge "$consumer_pr_merge_sha" \
+    --arg release_source "$INPUT_CONSUMER_MERGE_SHA" '
+      .base_commit.sha == $pull_request_merge
+      and .merge_base_commit.sha == $pull_request_merge
+      and .behind_by == 0
+      and (
+        if $pull_request_merge == $release_source then
+          .status == "identical" and .ahead_by == 0
+        else
+          .status == "ahead" and .ahead_by > 0
+        end
+      )
+    ' <<<"$consumer_pr_ancestry" >/dev/null \
+    || fail_closed \
+      "consumer pull-request merge is not an ancestor of the release source"
+  consumer_main_branch="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/branches/main")"
+  jq -e '
+    .name == "main"
+    and .protected == true
+    and (.commit.sha | type == "string")
+    and (.commit.sha | test("^[0-9a-f]{40}$"))
+  ' <<<"$consumer_main_branch" >/dev/null \
+    || fail_closed "consumer main branch is not protected"
+  consumer_main_sha="$(jq -er '.commit.sha' <<<"$consumer_main_branch")"
+  # GitHub's "Get rules for a branch" endpoint requires only the App token's
+  # implicit Metadata read permission.  Do not replace it with the similarly
+  # named branch-protection endpoint, which requires Administration read.
+  # https://docs.github.com/rest/repos/rules#get-rules-for-a-branch
+  consumer_main_rules="$(
+    github_api --paginate \
+      "repos/${CONSUMER_REPOSITORY}/rules/branches/main?per_page=100" \
+      | jq -sc '[.[][]]'
+  )"
+  jq -e '
+    type == "array"
+    and any(.[]; .type == "non_fast_forward")
+    and any(.[]; .type == "deletion")
+    and any(.[];
+      .type == "pull_request"
+      and .parameters.dismiss_stale_reviews_on_push == true
+      and .parameters.required_review_thread_resolution == true
+    )
+    and any(.[];
+      .type == "required_status_checks"
+      and .parameters.strict_required_status_checks_policy == true
+      and any(.parameters.required_status_checks[];
+        .context == "Successful Copilot review"
+      )
+    )
+  ' <<<"$consumer_main_rules" >/dev/null \
+    || fail_closed "consumer main branch rules are not fail-closed"
+  consumer_main_rules_observations="$(jq -ec '
+    [
+      .[]
+      | select(.type == "non_fast_forward"
+          or .type == "deletion"
+          or .type == "pull_request"
+          or .type == "required_status_checks")
+      | {
+          type,
+          parameters: (.parameters // null),
+          rulesetSourceType: .ruleset_source_type,
+          rulesetSource: .ruleset_source,
+          rulesetId: .ruleset_id
+        }
+    ] | sort_by(.type, .rulesetId)
+  ' <<<"$consumer_main_rules")"
+  consumer_main_rules_digest="sha256:$(
+    jq -cS . <<<"$consumer_main_rules_observations" \
+      | tr -d '\n' \
+      | sha256sum \
+      | awk '{print $1}'
+  )"
+  consumer_main_ancestry="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/compare/${INPUT_CONSUMER_MERGE_SHA}...${consumer_main_sha}")"
+  jq -e \
+    --arg release_source "$INPUT_CONSUMER_MERGE_SHA" \
+    --arg protected_main "$consumer_main_sha" '
+      .base_commit.sha == $release_source
+      and .merge_base_commit.sha == $release_source
+      and .behind_by == 0
+      and (
+        if $release_source == $protected_main then
+          .status == "identical" and .ahead_by == 0
+        else
+          .status == "ahead" and .ahead_by > 0
+        end
+      )
+    ' <<<"$consumer_main_ancestry" >/dev/null \
+    || fail_closed \
+      "consumer release source is not on the protected main lineage"
   container_release="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/releases/${INPUT_CONTAINER_RELEASE_ID}")"
   jq -e \
@@ -1045,17 +1147,61 @@ PY
   container_cosign_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   consumer_merge="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_MERGE_SHA}")"
+  consumer_release_prs="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_MERGE_SHA}/pulls")"
+  consumer_release_pr="$(jq -ec \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg source "$INPUT_CONSUMER_MERGE_SHA" '
+      [
+        .[]
+        | select(
+            .state == "closed"
+            and .merged_at != null
+            and .base.ref == "main"
+            and .head.repo.full_name == $repository
+            and .merge_commit_sha == $source
+            and .user.login == $actor
+          )
+      ]
+      | if length == 1 then .[0]
+        else error("exactly one release promotion pull request is required")
+        end
+    ' <<<"$consumer_release_prs")" \
+    || fail_closed "consumer release source is not an exact main promotion"
+  consumer_pr_merge="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/commits/${consumer_pr_merge_sha}")"
   consumer_base_sha="$(jq -er '.consumer.baseSha' \
     "$INPUT_ROOT/mlx90-container-evidence.json")"
   jq -e \
     --arg base "$consumer_base_sha" \
     --arg head "$INPUT_CONSUMER_HEAD_SHA" \
+    --arg merge "$consumer_pr_merge_sha" '
+      .sha == $merge
+      and (.parents | length) == 2
+      and .parents[0].sha == $base
+      and .parents[1].sha == $head
+    ' <<<"$consumer_pr_merge" >/dev/null \
+    || fail_closed "consumer pull-request merge topology is invalid"
+  [ "$(jq -er '.base.sha' <<<"$consumer_pr")" = "$consumer_base_sha" ] \
+    || fail_closed "consumer pull-request base SHA is not evidence-bound"
+  jq -e \
+    --arg merge "$INPUT_CONSUMER_MERGE_SHA" '
+      .sha == $merge
+      and (.parents | length) == 2
+      and all(.parents[]; .sha | test("^[0-9a-f]{40}$"))
+    ' <<<"$consumer_merge" >/dev/null \
+    || fail_closed "consumer release source merge topology is invalid"
+  jq -e \
+    --arg base "$(jq -er '.base.sha' <<<"$consumer_release_pr")" \
+    --arg head "$(jq -er '.head.sha' <<<"$consumer_release_pr")" \
     --arg merge "$INPUT_CONSUMER_MERGE_SHA" '
       .sha == $merge
       and (.parents | length) == 2
       and .parents[0].sha == $base
       and .parents[1].sha == $head
-    ' <<<"$consumer_merge" >/dev/null
+    ' <<<"$consumer_merge" >/dev/null \
+    || fail_closed "consumer release promotion merge topology is invalid"
   container_workflow_path=".github/workflows/container-build-publish.yml"
   container_workflow_entry="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/git/trees/${INPUT_CONSUMER_MERGE_SHA}?recursive=1" \
@@ -1304,11 +1450,51 @@ PY
     --arg state "$(jq -er '.state' <<<"$consumer_pr")" \
     --arg merged_at "$(jq -er '.merged_at' <<<"$consumer_pr")" \
     --arg base_ref "$(jq -er '.base.ref' <<<"$consumer_pr")" \
-    --arg base_sha "$(jq -er '.parents[0].sha' <<<"$consumer_merge")" \
+    --arg base_sha "$consumer_base_sha" \
     --arg head_repository "$(jq -er '.head.repo.full_name' <<<"$consumer_pr")" \
     --arg head_sha "$(jq -er '.head.sha' <<<"$consumer_pr")" \
-    --arg merge_sha "$(jq -er '.merge_commit_sha' <<<"$consumer_pr")" \
+    --arg pull_request_merge_sha "$consumer_pr_merge_sha" \
+    --argjson pull_request_merge_parents "$(jq -ec '[.parents[].sha]' \
+      <<<"$consumer_pr_merge")" \
+    --arg merge_sha "$INPUT_CONSUMER_MERGE_SHA" \
     --argjson merge_parents "$(jq -ec '[.parents[].sha]' \
+      <<<"$consumer_merge")" \
+    --arg ancestry_status "$(jq -er '.status' \
+      <<<"$consumer_pr_ancestry")" \
+    --argjson ancestry_ahead_by "$(jq -er '.ahead_by' \
+      <<<"$consumer_pr_ancestry")" \
+    --argjson ancestry_behind_by "$(jq -er '.behind_by' \
+      <<<"$consumer_pr_ancestry")" \
+    --arg ancestry_merge_base_sha "$(jq -er '.merge_base_commit.sha' \
+      <<<"$consumer_pr_ancestry")" \
+    --arg protected_main_sha "$consumer_main_sha" \
+    --argjson protected_main_protected "$(jq -er '.protected' \
+      <<<"$consumer_main_branch")" \
+    --arg protected_main_ancestry_status "$(jq -er '.status' \
+      <<<"$consumer_main_ancestry")" \
+    --argjson protected_main_ahead_by "$(jq -er '.ahead_by' \
+      <<<"$consumer_main_ancestry")" \
+    --argjson protected_main_behind_by "$(jq -er '.behind_by' \
+      <<<"$consumer_main_ancestry")" \
+    --arg protected_main_merge_base_sha "$(jq -er '.merge_base_commit.sha' \
+      <<<"$consumer_main_ancestry")" \
+    --argjson protected_main_rules "$consumer_main_rules_observations" \
+    --arg protected_main_rules_digest "$consumer_main_rules_digest" \
+    --argjson release_promotion_pull_request "$(jq -er '.number' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_merged_at "$(jq -er '.merged_at' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_base_sha "$(jq -er '.base.sha' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_head_repository "$(jq -er '.head.repo.full_name' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_head_sha "$(jq -er '.head.sha' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_author "$(jq -er '.user.login' \
+      <<<"$consumer_release_pr")" \
+    --arg release_promotion_merge_sha "$(jq -er '.merge_commit_sha' \
+      <<<"$consumer_release_pr")" \
+    --argjson release_promotion_merge_parents "$(jq -ec '[.parents[].sha]' \
       <<<"$consumer_merge")" '{
       pullRequest: $pull_request,
       state: $state,
@@ -1317,8 +1503,30 @@ PY
       baseSha: $base_sha,
       headRepository: $head_repository,
       headSha: $head_sha,
+      pullRequestMergeSha: $pull_request_merge_sha,
+      pullRequestMergeParents: $pull_request_merge_parents,
       mergeSha: $merge_sha,
-      mergeParents: $merge_parents
+      mergeParents: $merge_parents,
+      ancestryStatus: $ancestry_status,
+      ancestryAheadBy: $ancestry_ahead_by,
+      ancestryBehindBy: $ancestry_behind_by,
+      ancestryMergeBaseSha: $ancestry_merge_base_sha,
+      protectedMainSha: $protected_main_sha,
+      protectedMainProtected: $protected_main_protected,
+      protectedMainAncestryStatus: $protected_main_ancestry_status,
+      protectedMainAheadBy: $protected_main_ahead_by,
+      protectedMainBehindBy: $protected_main_behind_by,
+      protectedMainMergeBaseSha: $protected_main_merge_base_sha,
+      protectedMainRules: $protected_main_rules,
+      protectedMainRulesDigest: $protected_main_rules_digest,
+      releasePromotionPullRequest: $release_promotion_pull_request,
+      releasePromotionMergedAt: $release_promotion_merged_at,
+      releasePromotionBaseSha: $release_promotion_base_sha,
+      releasePromotionHeadRepository: $release_promotion_head_repository,
+      releasePromotionHeadSha: $release_promotion_head_sha,
+      releasePromotionAuthor: $release_promotion_author,
+      releasePromotionMergeSha: $release_promotion_merge_sha,
+      releasePromotionMergeParents: $release_promotion_merge_parents
     }')"
   write_receipt container-release "$container_release_checked_at" "$(jq -cn \
     --argjson release_id "$(jq -er '.id' <<<"$container_release")" \

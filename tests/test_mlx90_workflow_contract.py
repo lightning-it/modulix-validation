@@ -373,6 +373,23 @@ esac
             '[ "$GITHUB_ACTOR" = "lightning-it-release-automation[bot]" ]',
             'python3 "$POLICY_VALIDATOR"',
             "cosign verify-blob",
+            (
+                "compare/${consumer_pr_merge_sha}..."
+                "${INPUT_CONSUMER_MERGE_SHA}"
+            ),
+            ".merge_base_commit.sha == $pull_request_merge",
+            "consumer pull-request merge is not an ancestor",
+            "repos/${CONSUMER_REPOSITORY}/branches/main",
+            ".protected == true",
+            "repos/${CONSUMER_REPOSITORY}/rules/branches/main?per_page=100",
+            "requires only the App token's",
+            "implicit Metadata read permission",
+            '.type == "non_fast_forward"',
+            "consumer main branch rules are not fail-closed",
+            "commits/${INPUT_CONSUMER_MERGE_SHA}/pulls",
+            "consumer release source is not an exact main promotion",
+            "consumer release promotion merge topology is invalid",
+            "consumer release source is not on the protected main lineage",
             "verify-container-materials",
             "verify-buildkit-attestations",
             '--certificate-github-workflow-sha "$INPUT_CONSUMER_MERGE_SHA"',
@@ -408,6 +425,7 @@ esac
         self.assertIn("oauth2-bearer", self.script)
         self.assertIn('"$layer_digest" "$layer_size"', self.script)
         self.assertNotIn("Authorization:", self.script)
+        self.assertNotIn(".merge_commit_sha == $merge", self.script)
         self.assertNotIn("--location-trusted", self.script)
         self.assertIn("immutable reference digest mismatch", self.script)
         self.assertNotIn(
