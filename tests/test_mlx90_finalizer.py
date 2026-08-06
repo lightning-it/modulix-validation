@@ -437,6 +437,44 @@ class FinalizerTests(unittest.TestCase):
         container_asset_snapshot_digest = MODULE.canonical_value_digest(
             container_asset_snapshot
         )
+        protected_main_rules = [
+            {
+                "type": "deletion",
+                "parameters": None,
+                "rulesetSourceType": "Enterprise",
+                "rulesetSource": "l-it",
+                "rulesetId": 10934312,
+            },
+            {
+                "type": "non_fast_forward",
+                "parameters": None,
+                "rulesetSourceType": "Enterprise",
+                "rulesetSource": "l-it",
+                "rulesetId": 10934312,
+            },
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "dismiss_stale_reviews_on_push": True,
+                    "required_review_thread_resolution": True,
+                },
+                "rulesetSourceType": "Repository",
+                "rulesetSource": MODULE.CONSUMER_REPOSITORY,
+                "rulesetId": 19045555,
+            },
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "strict_required_status_checks_policy": True,
+                    "required_status_checks": [
+                        {"context": "Successful Copilot review"}
+                    ],
+                },
+                "rulesetSourceType": "Repository",
+                "rulesetSource": MODULE.CONSUMER_REPOSITORY,
+                "rulesetId": 19045555,
+            },
+        ]
         globals_by_id = {
             "producer-evidence": {
                 "evidenceId": evidence_id,
@@ -507,10 +545,42 @@ class FinalizerTests(unittest.TestCase):
                 "baseSha": container["consumer"]["baseSha"],
                 "headRepository": MODULE.CONSUMER_REPOSITORY,
                 "headSha": self.identity.consumer_head_sha,
-                "mergeSha": self.identity.consumer_merge_sha,
-                "mergeParents": [
+                "pullRequestMergeSha": "a" * 40,
+                "pullRequestMergeParents": [
                     container["consumer"]["baseSha"],
                     self.identity.consumer_head_sha,
+                ],
+                "mergeSha": self.identity.consumer_merge_sha,
+                "mergeParents": [
+                    "b" * 40,
+                    "c" * 40,
+                ],
+                "ancestryStatus": "ahead",
+                "ancestryAheadBy": 77,
+                "ancestryBehindBy": 0,
+                "ancestryMergeBaseSha": "a" * 40,
+                "protectedMainSha": "d" * 40,
+                "protectedMainProtected": True,
+                "protectedMainAncestryStatus": "ahead",
+                "protectedMainAheadBy": 12,
+                "protectedMainBehindBy": 0,
+                "protectedMainMergeBaseSha": self.identity.consumer_merge_sha,
+                "protectedMainRules": protected_main_rules,
+                "protectedMainRulesDigest": MODULE.canonical_value_digest(
+                    protected_main_rules
+                ),
+                "releasePromotionPullRequest": 561,
+                "releasePromotionMergedAt": "2026-08-06T01:01:12Z",
+                "releasePromotionBaseSha": "b" * 40,
+                "releasePromotionHeadRepository": MODULE.CONSUMER_REPOSITORY,
+                "releasePromotionHeadSha": "c" * 40,
+                "releasePromotionAuthor": (
+                    "lightning-it-release-automation[bot]"
+                ),
+                "releasePromotionMergeSha": self.identity.consumer_merge_sha,
+                "releasePromotionMergeParents": [
+                    "b" * 40,
+                    "c" * 40,
                 ],
             },
             "container-release": {
@@ -924,6 +994,45 @@ class FinalizerTests(unittest.TestCase):
                     "producerEvidenceDigest", f"sha256:{'0' * 64}"
                 ),
                 "producer evidence digest",
+            ),
+            (
+                "consumer-identity",
+                lambda value: value["observations"].__setitem__(
+                    "ancestryBehindBy", 1
+                ),
+                "ancestry behind count",
+            ),
+            (
+                "consumer-identity",
+                lambda value: value["observations"].__setitem__(
+                    "protectedMainBehindBy", 1
+                ),
+                "protected main ancestry behind count",
+            ),
+            (
+                "consumer-identity",
+                lambda value: value["observations"]["protectedMainRules"].__setitem__(
+                    1,
+                    {
+                        **value["observations"]["protectedMainRules"][1],
+                        "type": "creation",
+                    },
+                ),
+                "non-fast-forward updates",
+            ),
+            (
+                "consumer-identity",
+                lambda value: value["observations"].__setitem__(
+                    "releasePromotionHeadSha", "e" * 40
+                ),
+                "release promotion merge topology",
+            ),
+            (
+                "consumer-identity",
+                lambda value: value["observations"]["mergeParents"].__setitem__(
+                    0, "e" * 40
+                ),
+                "release source merge parents do not match promotion",
             ),
             (
                 "container-release",

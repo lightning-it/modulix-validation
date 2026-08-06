@@ -2247,12 +2247,209 @@ def validate_receipt_observations(
                 "baseSha",
                 "headRepository",
                 "headSha",
+                "pullRequestMergeSha",
+                "pullRequestMergeParents",
                 "mergeSha",
                 "mergeParents",
+                "ancestryStatus",
+                "ancestryAheadBy",
+                "ancestryBehindBy",
+                "ancestryMergeBaseSha",
+                "protectedMainSha",
+                "protectedMainProtected",
+                "protectedMainAncestryStatus",
+                "protectedMainAheadBy",
+                "protectedMainBehindBy",
+                "protectedMainMergeBaseSha",
+                "protectedMainRules",
+                "protectedMainRulesDigest",
+                "releasePromotionPullRequest",
+                "releasePromotionMergedAt",
+                "releasePromotionBaseSha",
+                "releasePromotionHeadRepository",
+                "releasePromotionHeadSha",
+                "releasePromotionAuthor",
+                "releasePromotionMergeSha",
+                "releasePromotionMergeParents",
             },
             "consumer-identity observations",
         )
         require_timestamp(observations["mergedAt"], "consumer mergedAt")
+        pull_request_merge_sha = require_sha(
+            observations["pullRequestMergeSha"],
+            "consumer pullRequestMergeSha",
+        )
+        ancestry_merge_base_sha = require_sha(
+            observations["ancestryMergeBaseSha"],
+            "consumer ancestryMergeBaseSha",
+        )
+        pull_request_merge_parents = observations["pullRequestMergeParents"]
+        if not isinstance(pull_request_merge_parents, list) or len(
+            pull_request_merge_parents
+        ) != 2:
+            fail("consumer pull-request merge parents are invalid")
+        for position, parent in enumerate(pull_request_merge_parents):
+            require_sha(parent, f"consumer pullRequestMergeParents[{position}]")
+        merge_parents = observations["mergeParents"]
+        if not isinstance(merge_parents, list) or len(merge_parents) != 2:
+            fail("consumer release source merge parents are invalid")
+        for position, parent in enumerate(merge_parents):
+            require_sha(parent, f"consumer mergeParents[{position}]")
+        ancestry_status = observations["ancestryStatus"]
+        ancestry_ahead_by = require_nonnegative(
+            observations["ancestryAheadBy"],
+            "consumer ancestryAheadBy",
+        )
+        ancestry_behind_by = require_nonnegative(
+            observations["ancestryBehindBy"],
+            "consumer ancestryBehindBy",
+        )
+        if ancestry_status not in {"ahead", "identical"}:
+            fail("consumer pull-request ancestry status is invalid")
+        if ancestry_behind_by != 0:
+            fail("consumer pull-request ancestry behind count is invalid")
+        if ancestry_merge_base_sha != pull_request_merge_sha:
+            fail("consumer pull-request ancestry merge base is invalid")
+        release_source_sha = identity.consumer_merge_sha
+        if pull_request_merge_sha == release_source_sha:
+            if ancestry_status != "identical" or ancestry_ahead_by != 0:
+                fail("consumer pull-request identical ancestry is invalid")
+        elif ancestry_status != "ahead" or ancestry_ahead_by <= 0:
+            fail("consumer pull-request ancestor relation is invalid")
+        protected_main_sha = require_sha(
+            observations["protectedMainSha"],
+            "consumer protectedMainSha",
+        )
+        protected_main_merge_base_sha = require_sha(
+            observations["protectedMainMergeBaseSha"],
+            "consumer protectedMainMergeBaseSha",
+        )
+        protected_main_status = observations["protectedMainAncestryStatus"]
+        protected_main_ahead_by = require_nonnegative(
+            observations["protectedMainAheadBy"],
+            "consumer protectedMainAheadBy",
+        )
+        protected_main_behind_by = require_nonnegative(
+            observations["protectedMainBehindBy"],
+            "consumer protectedMainBehindBy",
+        )
+        if observations["protectedMainProtected"] is not True:
+            fail("consumer main branch is not protected")
+        if protected_main_status not in {"ahead", "identical"}:
+            fail("consumer protected main ancestry status is invalid")
+        if protected_main_behind_by != 0:
+            fail("consumer protected main ancestry behind count is invalid")
+        if protected_main_merge_base_sha != release_source_sha:
+            fail("consumer protected main ancestry merge base is invalid")
+        if protected_main_sha == release_source_sha:
+            if protected_main_status != "identical" or protected_main_ahead_by != 0:
+                fail("consumer protected main identical ancestry is invalid")
+        elif protected_main_status != "ahead" or protected_main_ahead_by <= 0:
+            fail("consumer release source is not on protected main")
+        protected_main_rules = observations["protectedMainRules"]
+        if not isinstance(protected_main_rules, list) or not protected_main_rules:
+            fail("consumer protected main rules are invalid")
+        for position, rule in enumerate(protected_main_rules):
+            field = f"consumer protectedMainRules[{position}]"
+            rule = require_mapping(rule, field)
+            require_exact(
+                rule,
+                {
+                    "type",
+                    "parameters",
+                    "rulesetSourceType",
+                    "rulesetSource",
+                    "rulesetId",
+                },
+                field,
+            )
+            require_string(rule["type"], f"{field}.type")
+            require_string(rule["rulesetSourceType"], f"{field}.rulesetSourceType")
+            require_string(rule["rulesetSource"], f"{field}.rulesetSource")
+            require_positive(rule["rulesetId"], f"{field}.rulesetId")
+            if rule["parameters"] is not None:
+                require_mapping(rule["parameters"], f"{field}.parameters")
+
+        def protected_rules(rule_type: str) -> list[dict[str, Any]]:
+            return [
+                rule
+                for rule in protected_main_rules
+                if rule["type"] == rule_type
+            ]
+
+        if not protected_rules("non_fast_forward"):
+            fail("consumer protected main permits non-fast-forward updates")
+        if not protected_rules("deletion"):
+            fail("consumer protected main permits deletion")
+        pull_request_rules = protected_rules("pull_request")
+        if not any(
+            rule["parameters"] is not None
+            and rule["parameters"].get("dismiss_stale_reviews_on_push") is True
+            and rule["parameters"].get("required_review_thread_resolution") is True
+            for rule in pull_request_rules
+        ):
+            fail("consumer protected main pull-request rule is invalid")
+        status_check_rules = protected_rules("required_status_checks")
+        if not any(
+            rule["parameters"] is not None
+            and rule["parameters"].get(
+                "strict_required_status_checks_policy"
+            )
+            is True
+            and any(
+                isinstance(check, dict)
+                and check.get("context") == "Successful Copilot review"
+                for check in rule["parameters"].get(
+                    "required_status_checks", []
+                )
+            )
+            for rule in status_check_rules
+        ):
+            fail("consumer protected main status-check rule is invalid")
+        protected_main_rules_digest = require_digest(
+            observations["protectedMainRulesDigest"],
+            "consumer protectedMainRulesDigest",
+        )
+        if canonical_value_digest(protected_main_rules) != protected_main_rules_digest:
+            fail("consumer protected main rules digest is invalid")
+        release_promotion_pull_request = require_positive(
+            observations["releasePromotionPullRequest"],
+            "consumer releasePromotionPullRequest",
+        )
+        require_timestamp(
+            observations["releasePromotionMergedAt"],
+            "consumer releasePromotionMergedAt",
+        )
+        release_promotion_base_sha = require_sha(
+            observations["releasePromotionBaseSha"],
+            "consumer releasePromotionBaseSha",
+        )
+        release_promotion_head_sha = require_sha(
+            observations["releasePromotionHeadSha"],
+            "consumer releasePromotionHeadSha",
+        )
+        release_promotion_merge_sha = require_sha(
+            observations["releasePromotionMergeSha"],
+            "consumer releasePromotionMergeSha",
+        )
+        release_promotion_merge_parents = observations[
+            "releasePromotionMergeParents"
+        ]
+        if not isinstance(release_promotion_merge_parents, list) or len(
+            release_promotion_merge_parents
+        ) != 2:
+            fail("consumer release promotion merge parents are invalid")
+        for position, parent in enumerate(release_promotion_merge_parents):
+            require_sha(parent, f"consumer releasePromotionMergeParents[{position}]")
+        if release_promotion_merge_parents != [
+            release_promotion_base_sha,
+            release_promotion_head_sha,
+        ]:
+            fail("consumer release promotion merge topology is invalid")
+        if merge_parents != release_promotion_merge_parents:
+            fail("consumer release source merge parents do not match promotion")
+        if release_promotion_merge_sha != release_source_sha:
+            fail("consumer release promotion merge SHA is invalid")
         expected = {
             "pullRequest": identity.consumer_pr,
             "state": "closed",
@@ -2260,11 +2457,33 @@ def validate_receipt_observations(
             "baseSha": container["consumer"]["baseSha"],
             "headRepository": CONSUMER_REPOSITORY,
             "headSha": identity.consumer_head_sha,
-            "mergeSha": identity.consumer_merge_sha,
-            "mergeParents": [
+            "pullRequestMergeSha": pull_request_merge_sha,
+            "pullRequestMergeParents": [
                 container["consumer"]["baseSha"],
                 identity.consumer_head_sha,
             ],
+            "mergeSha": release_source_sha,
+            "mergeParents": merge_parents,
+            "ancestryStatus": ancestry_status,
+            "ancestryAheadBy": ancestry_ahead_by,
+            "ancestryBehindBy": 0,
+            "ancestryMergeBaseSha": pull_request_merge_sha,
+            "protectedMainSha": protected_main_sha,
+            "protectedMainProtected": True,
+            "protectedMainAncestryStatus": protected_main_status,
+            "protectedMainAheadBy": protected_main_ahead_by,
+            "protectedMainBehindBy": 0,
+            "protectedMainMergeBaseSha": release_source_sha,
+            "protectedMainRules": protected_main_rules,
+            "protectedMainRulesDigest": protected_main_rules_digest,
+            "releasePromotionPullRequest": release_promotion_pull_request,
+            "releasePromotionMergedAt": observations["releasePromotionMergedAt"],
+            "releasePromotionBaseSha": release_promotion_base_sha,
+            "releasePromotionHeadRepository": CONSUMER_REPOSITORY,
+            "releasePromotionHeadSha": release_promotion_head_sha,
+            "releasePromotionAuthor": "lightning-it-release-automation[bot]",
+            "releasePromotionMergeSha": release_source_sha,
+            "releasePromotionMergeParents": release_promotion_merge_parents,
         }
         if any(observations.get(key) != value for key, value in expected.items()):
             fail("consumer identity receipt mismatch")
