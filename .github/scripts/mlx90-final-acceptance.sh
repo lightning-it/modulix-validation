@@ -49,7 +49,7 @@ github_api() {
 resolve_pull_request_merge_sha() {
   local repository="$1"
   local pull_request="$2"
-  local pull_request_number merged_at merge_events
+  local pull_request_number merged_at
   [[ "$repository" =~ ^lightning-it/[A-Za-z0-9._-]+$ ]] \
     || fail_closed "pull-request repository is invalid"
   pull_request_number="$(jq -er '
@@ -64,15 +64,12 @@ resolve_pull_request_merge_sha() {
       ))
   ' <<<"$pull_request")" \
     || fail_closed "pull-request merge timestamp is invalid"
-  merge_events="$(
-    github_api --paginate \
-      "repos/${repository}/issues/${pull_request_number}/events?per_page=100" \
-      | jq -sc '[.[][]]'
-  )"
-  jq -er --arg merged_at "$merged_at" '
-    [.[] | select(.event == "merged")] as $merged
+  github_api --paginate \
+    "repos/${repository}/issues/${pull_request_number}/events?per_page=100" \
+    | jq -ser --arg merged_at "$merged_at" '
+    [.[][] | select(.event == "merged")] as $merged
     | if ($merged | length) != 1 then
-        error("pull request must have exactly one merged event")
+        error("pull-request must have exactly one merged event")
       elif $merged[0].created_at != $merged_at then
         error("pull-request merge event timestamp does not match")
       elif ($merged[0].actor.login | type) != "string"
@@ -84,7 +81,7 @@ resolve_pull_request_merge_sha() {
       else
         $merged[0].commit_id
       end
-  ' <<<"$merge_events"
+  '
 }
 
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric

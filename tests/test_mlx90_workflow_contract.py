@@ -28,9 +28,7 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
             driver = root / "driver.sh"
             driver.write_text(
                 self.script[
-                    : self.script.index(
-                        "\n# Validate the complete SemVer 2.0.0 grammar"
-                    )
+                    : self.script.index("\nis_semver() {")
                 ]
                 + """
 github_api() {
@@ -433,6 +431,11 @@ esac
                 "timestamp does not match",
             ),
             (
+                "invalid-actor",
+                [{**merge_event, "actor": {"login": ""}}],
+                "merge event actor is invalid",
+            ),
+            (
                 "invalid-commit",
                 [{**merge_event, "commit_id": "c" * 39}],
                 "merge event commit is invalid",
@@ -467,8 +470,9 @@ esac
             "consumer main branch rules are not fail-closed",
             "commits/${INPUT_CONSUMER_MERGE_SHA}/pulls",
             "issues/${pull_request_number}/events?per_page=100",
-            "pull request must have exactly one merged event",
+            "pull-request must have exactly one merged event",
             "pull-request merge event timestamp does not match",
+            "pull-request merge event actor is invalid",
             "pull-request merge event commit is invalid",
             "consumer release source is not an exact main promotion",
             "consumer release promotion merge topology is invalid",

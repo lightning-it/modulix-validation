@@ -116,6 +116,8 @@ jobs:
             shared-assets-lit
           permission-actions: read
           permission-contents: read
+          # GitHub's issue-number-scoped event endpoint accepts Pull requests
+          # read as an alternative to Issues read; do not broaden the App token.
           permission-pull-requests: read
 
       - name: Verify exact App installation and token repository scope
