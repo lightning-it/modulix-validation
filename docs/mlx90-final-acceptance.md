@@ -115,14 +115,15 @@ each attestation manifest by the
 descriptor digest covered by the signed index and each in-toto layer by the
 digest covered by that manifest. The layer bytes and sizes must match their
 descriptors, and every SPDX and SLSA in-toto subject must name exactly the
-SHA-bound `mlx90-candidate-<consumer-merge-sha>` reference created by the
-Security build for its platform and carry that platform manifest's exact
-SHA-256 digest. Release, bare-version, and `sha-<12>` aliases are created only
-after the candidate has passed the consumer's verification and revocation
-check, so the finalizer verifies those three live aliases separately against
-the accepted, signed index digest. It does not require or inspect `latest`
-before delivery; the consumer moves that mutable tag only after authenticating
-the durable `delivered` callback.
+attempt-bound
+`mlx90-candidate-<consumer-merge-sha>-<publisher-run-id>-<publisher-attempt>`
+reference created by the Security build for its platform and carry that
+platform manifest's exact SHA-256 digest. The finalizer separately resolves
+that one unique candidate tag and requires the accepted, signed index digest.
+The Security path does not create or retarget release, bare-version,
+`sha-<12>`, or `latest` aliases because Quay does not provide an atomic
+create-if-absent alias operation. The durable callback revalidates the accepted
+digests and identities but performs no Quay tag mutation.
 
 MLX-90 additionally binds the original and rerun-triggering App actors before
 any secret or token use. The evidence and publisher attempts must share the
@@ -240,8 +241,8 @@ Every successful live check emits one typed
 covers producer evidence and identity, initial producer/container revocation,
 producer and container Cosign verification, producer/container materials, the
 exact producer central-CI attempt and validation gate, consumer and
-container-release identity, and for every variant the OCI index,
-three immutable tags, live image signature, release materials, BuildKit
+container-release identity, and for every variant the OCI index, the exact
+immutable candidate tag, live image signature, release materials, BuildKit
 attestations, pull by digest, and installed collection state. `public` and
 `certified` additionally require a receipt for the exact reviewed profile
 command; `bootstrap` must not have one. Every receipt carries the correlation

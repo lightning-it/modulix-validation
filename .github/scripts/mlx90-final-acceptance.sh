@@ -1727,12 +1727,15 @@ PY
   local platform platform_digest safe_platform attestation_manifest_path
   local predicate_name predicate_type layer_descriptor layer_digest layer_size
   local statement_path
-  local container_version short_consumer_sha immutable_tag live_tag_digest
+  local candidate_run_attempt candidate_tag live_tag_digest
   local receipt_checked_at live_signature_digest tag_digests platform_digests
   local buildkit_platforms repo_digests installed_state installed_version
   local installed_observation_path
-  container_version="${INPUT_CONTAINER_RELEASE_TAG#v}"
-  short_consumer_sha="${INPUT_CONSUMER_MERGE_SHA:0:12}"
+  candidate_run_attempt="$(jq -er '
+    .release.workflowRunAttempt
+    | select(type == "number" and floor == . and . > 0)
+  ' "$INPUT_ROOT/mlx90-container-evidence.json")"
+  candidate_tag="mlx90-candidate-${INPUT_CONSUMER_MERGE_SHA}-${INPUT_CONTAINER_RELEASE_RUN_ID}-${candidate_run_attempt}"
   for variant in public certified bootstrap; do
     image="$(jq -er --arg variant "$variant" \
       '.variants[$variant].image' \
@@ -1797,23 +1800,15 @@ PY
         sourceSha: $source_sha
       }')"
 
-    tag_digests='{}'
-    for immutable_tag in \
-      "$INPUT_CONTAINER_RELEASE_TAG" \
-      "$container_version" \
-      "sha-$short_consumer_sha"
-    do
-      live_tag_digest="$(docker buildx imagetools inspect \
-        "${image}:${immutable_tag}" --format '{{ .Manifest.Digest }}')"
-      [ "$live_tag_digest" = "$manifest" ] \
-        || fail_closed \
-          "${variant} immutable tag ${immutable_tag} differs from accepted index"
-      tag_digests="$(jq -cn \
-        --argjson current "$tag_digests" \
-        --arg tag "$immutable_tag" \
-        --arg digest "$live_tag_digest" \
-        '$current + {($tag): $digest}')"
-    done
+    live_tag_digest="$(docker buildx imagetools inspect \
+      "${image}:${candidate_tag}" --format '{{ .Manifest.Digest }}')"
+    [ "$live_tag_digest" = "$manifest" ] \
+      || fail_closed \
+        "${variant} immutable candidate tag differs from accepted index"
+    tag_digests="$(jq -cn \
+      --arg tag "$candidate_tag" \
+      --arg digest "$live_tag_digest" \
+      '{($tag): $digest}')"
     receipt_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
     write_receipt "${variant}-immutable-tags" "$receipt_checked_at" "$(jq -cn \
       --arg variant "$variant" \

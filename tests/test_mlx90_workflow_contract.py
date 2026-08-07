@@ -601,10 +601,13 @@ esac
             "verify-buildkit-attestations",
             '--certificate-github-workflow-sha "$INPUT_CONSUMER_MERGE_SHA"',
             "docker buildx imagetools inspect --raw",
-            "\"${image}:${immutable_tag}\" --format '{{ .Manifest.Digest }}'",
-            '"$INPUT_CONTAINER_RELEASE_TAG"',
-            '"$container_version"',
-            '"sha-$short_consumer_sha"',
+            "\"${image}:${candidate_tag}\" --format '{{ .Manifest.Digest }}'",
+            (
+                'candidate_tag="mlx90-candidate-${INPUT_CONSUMER_MERGE_SHA}-'
+                '${INPUT_CONTAINER_RELEASE_RUN_ID}-'
+                '${candidate_run_attempt}"'
+            ),
+            ".release.workflowRunAttempt",
             '"${image}@${attestation_digest}"',
             '"https://quay.io/v2/${repository}/blobs/${digest}"',
             "--max-filesize 67108864",
@@ -643,12 +646,15 @@ esac
         signed_index = self.script.index(
             '      "$image_ref" >"$INPUT_ROOT/${variant}-signature-live.json"'
         )
-        immutable_alias = self.script.index(
-            '        "${image}:${immutable_tag}" --format'
+        immutable_candidate = self.script.index(
+            '      "${image}:${candidate_tag}" --format'
         )
         attached_payload = self.script.index("        download_quay_blob \\")
-        self.assertLess(signed_index, immutable_alias)
-        self.assertLess(immutable_alias, attached_payload)
+        self.assertLess(signed_index, immutable_candidate)
+        self.assertLess(immutable_candidate, attached_payload)
+        self.assertNotIn('"${image}:$INPUT_CONTAINER_RELEASE_TAG"', self.script)
+        self.assertNotIn('"${image}:$container_version"', self.script)
+        self.assertNotIn('"${image}:sha-$short_consumer_sha"', self.script)
         self.assertNotIn(
             'docker buildx imagetools inspect "${image}:latest"',
             self.script,
