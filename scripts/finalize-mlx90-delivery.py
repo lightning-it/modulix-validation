@@ -54,6 +54,7 @@ DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 FINALIZER_INPUT_MAX_BYTES = 64 * 1024 * 1024
 RELEASE_ASSET_MAX_BYTES = 10 * 1024 * 1024
+CONTAINER_SBOM_ASSET_MAX_BYTES = 64 * 1024 * 1024
 COLLECTION_ARCHIVE_MAX_BYTES = RELEASE_ASSET_MAX_BYTES
 MATERIAL_FILE_ERROR = "material is not a bounded regular file"
 CLI_CONTRACT_ERROR = "input does not satisfy the required contract"
@@ -1494,8 +1495,13 @@ def verify_container_materials(
         reference_urls[reference] = require_https(
             expected.get("url"), f"{variant_name}.{reference}.url"
         )
+        maximum_bytes = (
+            CONTAINER_SBOM_ASSET_MAX_BYTES
+            if reference == "sbom"
+            else RELEASE_ASSET_MAX_BYTES
+        )
         material_snapshots[reference] = secure_file_snapshot(
-            path, RELEASE_ASSET_MAX_BYTES, capture_payload=True
+            path, maximum_bytes, capture_payload=True
         )
         if material_snapshots[reference].digest != expected.get("digest"):
             fail(f"{variant_name} {reference} file digest mismatch")

@@ -19,6 +19,8 @@ readonly RECEIPT_ROOT="${RUNNER_TEMP:?}/mlx90-verification-receipts"
 readonly ISSUER="https://token.actions.githubusercontent.com"
 readonly GITHUB_REST_API_VERSION="2026-03-10"
 readonly SEMVER_MAX_LENGTH=255
+readonly RELEASE_ASSET_MAX_BYTES=10485760
+readonly CONTAINER_SBOM_ASSET_MAX_BYTES=67108864
 declare -a EVIDENCE_ARGS=()
 declare -a IDENTITY_ARGS=()
 
@@ -144,6 +146,20 @@ list_release_assets() {
     | jq -sc 'add // []'
 }
 
+release_asset_max_bytes() {
+  local repository="$1"
+  local asset_name="$2"
+  if [ "$repository" = "$CONSUMER_REPOSITORY" ]; then
+    case "$asset_name" in
+      sbom.cdx.json|sbom-bootstrap.cdx.json|sbom-certified.cdx.json|sbom-public.cdx.json)
+        printf '%s\n' "$CONTAINER_SBOM_ASSET_MAX_BYTES"
+        return
+        ;;
+    esac
+  fi
+  printf '%s\n' "$RELEASE_ASSET_MAX_BYTES"
+}
+
 canonical_consumed_asset_snapshot() {
   local repository="$1"
   local release_id="$2"
@@ -151,7 +167,11 @@ canonical_consumed_asset_snapshot() {
   local expected_urls="$4"
   jq -ecS \
     --arg repository "$repository" \
+    --arg consumer_repository "$CONSUMER_REPOSITORY" \
     --argjson release_id "$release_id" \
+    --argjson release_asset_max_bytes "$RELEASE_ASSET_MAX_BYTES" \
+    --argjson container_sbom_asset_max_bytes \
+      "$CONTAINER_SBOM_ASSET_MAX_BYTES" \
     --argjson expected_urls "$expected_urls" '
       ($expected_urls | sort | unique) as $expected
       | if ($expected_urls | length) != ($expected | length) then
@@ -183,7 +203,16 @@ canonical_consumed_asset_snapshot() {
           or (.size | type) != "number"
           or (.size | floor) != .size
           or .size <= 0
-          or .size > 10485760
+          or .size > (
+            if $repository == $consumer_repository
+              and (.name == "sbom.cdx.json"
+                or .name == "sbom-bootstrap.cdx.json"
+                or .name == "sbom-certified.cdx.json"
+                or .name == "sbom-public.cdx.json")
+            then $container_sbom_asset_max_bytes
+            else $release_asset_max_bytes
+            end
+          )
         ) then
           error("consumed release asset metadata is invalid")
         elif ([$assets[].id] | unique | length) != ($assets | length)
@@ -253,7 +282,8 @@ download_release_assets_and_compare() {
     asset_name="$(jq -er '.name' <<<"$asset")"
     asset_size="$(jq -er '.size' <<<"$asset")"
     download_release_asset_by_id \
-      "$repository" "$asset_id" "$asset_size" "$output_root/$asset_name"
+      "$repository" "$asset_id" "$asset_size" "$asset_name" \
+      "$output_root/$asset_name"
     cmp "$source_root/$asset_name" "$output_root/$asset_name" \
       || fail_closed "persisted release asset differs: ${asset_name}"
   done < <(jq -c '.[]' <<<"$assets")
@@ -268,14 +298,19 @@ download_release_asset_by_id() {
   local repository="$1"
   local asset_id="$2"
   local asset_size="$3"
-  local output="$4"
+  local asset_name="$4"
+  local output="$5"
+  local max_bytes
   [[ "$repository" =~ ^lightning-it/[A-Za-z0-9._-]+$ ]] \
     || fail_closed "release asset repository is invalid"
   [[ "$asset_id" =~ ^[1-9][0-9]*$ ]] \
     || fail_closed "release asset ID is invalid"
+  [[ "$asset_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$ ]] \
+    || fail_closed "release asset name is invalid"
+  max_bytes="$(release_asset_max_bytes "$repository" "$asset_name")"
   [[ "$asset_size" =~ ^[1-9][0-9]*$ ]] \
-    && [ "$asset_size" -le 10485760 ] \
-    || fail_closed "release asset size is invalid or exceeds 10 MiB"
+    && [ "$asset_size" -le "$max_bytes" ] \
+    || fail_closed "release asset size is invalid or exceeds its bound"
   [ ! -e "$output" ] && [ ! -L "$output" ] \
     || fail_closed "release asset download output already exists"
   github_api \
@@ -322,7 +357,8 @@ redownload_snapshot_and_compare() {
   local snapshot="$1"
   local bindings="$2"
   local output_root="$3"
-  local repository asset asset_id asset_size asset_url output binding_count
+  local repository asset asset_id asset_name asset_size asset_url output
+  local binding_count
   repository="$(jq -er '.repository' <<<"$snapshot")"
   [ ! -e "$output_root" ] && [ ! -L "$output_root" ] \
     || fail_closed "final release asset comparison path already exists"
@@ -330,11 +366,12 @@ redownload_snapshot_and_compare() {
   while IFS= read -r asset; do
     [ -n "$asset" ] || continue
     asset_id="$(jq -er '.id' <<<"$asset")"
+    asset_name="$(jq -er '.name' <<<"$asset")"
     asset_size="$(jq -er '.size' <<<"$asset")"
     asset_url="$(jq -er '.url' <<<"$asset")"
     output="$output_root/${asset_id}"
     download_release_asset_by_id \
-      "$repository" "$asset_id" "$asset_size" "$output"
+      "$repository" "$asset_id" "$asset_size" "$asset_name" "$output"
     binding_count="$(jq --arg url "$asset_url" \
       '[.[] | select(.url == $url)] | length' <<<"$bindings")"
     [ "$binding_count" -gt 0 ] \
@@ -352,7 +389,7 @@ download_release_asset() {
   local url="$1"
   local output="$2"
   local repository prefix remainder tag asset release release_assets
-  local asset_metadata asset_id asset_size release_id
+  local asset_metadata asset_id asset_size max_bytes release_id
   case "$url" in
     https://github.com/lightning-it/ansible-collection-supplementary/releases/download/*)
       repository="lightning-it/ansible-collection-supplementary"
@@ -380,12 +417,13 @@ download_release_asset() {
   ) end' <<<"$release_assets")"
   asset_id="$(jq -er '.id' <<<"$asset_metadata")"
   asset_size="$(jq -er '.size' <<<"$asset_metadata")"
+  max_bytes="$(release_asset_max_bytes "$repository" "$asset")"
   [[ "$asset_id" =~ ^[1-9][0-9]*$ ]] \
     && [[ "$asset_size" =~ ^[1-9][0-9]*$ ]] \
-    && [ "$asset_size" -le 10485760 ] \
-    || fail_closed "release asset metadata is invalid or exceeds 10 MiB"
+    && [ "$asset_size" -le "$max_bytes" ] \
+    || fail_closed "release asset metadata is invalid or exceeds its bound"
   download_release_asset_by_id \
-    "$repository" "$asset_id" "$asset_size" "$output"
+    "$repository" "$asset_id" "$asset_size" "$asset" "$output"
 }
 
 verify_reference() {
@@ -2366,6 +2404,7 @@ persist_mode() {
           "$FINALIZER_REPOSITORY" \
           "$(jq -er '.[0].id' <<<"$asset_metadata")" \
           "$(jq -er '.[0].size' <<<"$asset_metadata")" \
+          "$filename" \
           "$draft_dir/$filename"
         cmp "$EVIDENCE_ROOT/$filename" "$draft_dir/$filename" \
           || fail_closed "existing draft asset differs: ${filename}"
