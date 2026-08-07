@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "mlx90-final-acceptance.yml"
 SCRIPT_PATH = ROOT / ".github" / "scripts" / "mlx90-final-acceptance.sh"
 PROFILE_PATH = ROOT / "acceptance" / "mlx90" / "profiles.json"
+DOCS_PATH = ROOT / "docs" / "mlx90-final-acceptance.md"
 
 
 class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
@@ -21,6 +22,7 @@ class FinalAcceptanceWorkflowContractTests(unittest.TestCase):
         self.workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.workflow = yaml.safe_load(self.workflow_text)
         self.script = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.docs = DOCS_PATH.read_text(encoding="utf-8")
 
     def _run_merge_event_resolution(self, pull_request, events):
         with tempfile.TemporaryDirectory() as temporary:
@@ -306,6 +308,14 @@ esac
         self.assertIn(
             "https://docs.github.com/en/rest/issues/events?apiVersion=2026-03-10#list-issue-events",
             self.workflow_text,
+        )
+        self.assertIn(
+            "the endpoint accepts either `Issues: read` or `Pull requests: read`",
+            self.docs,
+        )
+        self.assertIn(
+            "`Issues` permission is intentionally not requested",
+            self.docs,
         )
         self.assertIn(
             'test "$APP_INSTALLATION_ID" = "148019054"',
