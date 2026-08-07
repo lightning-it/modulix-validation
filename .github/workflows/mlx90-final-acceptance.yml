@@ -116,6 +116,9 @@ jobs:
             shared-assets-lit
           permission-actions: read
           permission-contents: read
+          # GitHub documents Pull requests: read as an alternative to Issues:
+          # read for this exact endpoint. Keep the App token least-privileged.
+          # https://docs.github.com/en/rest/issues/events?apiVersion=2026-03-10#list-issue-events
           permission-pull-requests: read
 
       - name: Verify exact App installation and token repository scope
