@@ -2572,6 +2572,78 @@ class FinalizerTests(unittest.TestCase):
                         run_attempt=1,
                     )
 
+    def test_consumed_asset_snapshot_uses_the_container_sbom_bound_only(self):
+        _, container = self.validated()
+        release_id = self.identity.container_release_id
+
+        def snapshot(url, size):
+            return {
+                "repository": MODULE.CONSUMER_REPOSITORY,
+                "releaseId": release_id,
+                "assets": [
+                    {
+                        "id": 20001,
+                        "name": url.rsplit("/", 1)[-1],
+                        "url": url,
+                        "state": "uploaded",
+                        "size": size,
+                    }
+                ],
+            }
+
+        sbom_url = container["variants"]["public"]["sbom"]["url"]
+        accepted = snapshot(sbom_url, 29_646_241)
+        self.assertIs(
+            accepted,
+            MODULE.validate_consumed_asset_snapshot(
+                accepted,
+                MODULE.CONSUMER_REPOSITORY,
+                release_id,
+                {sbom_url},
+                "container snapshot",
+            ),
+        )
+
+        for url, size in (
+            (sbom_url, MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES + 1),
+            (
+                sbom_url.replace("sbom-public.cdx.json", "release-evidence.json"),
+                MODULE.RELEASE_ASSET_MAX_BYTES + 1,
+            ),
+        ):
+            with self.subTest(url=url, size=size):
+                with self.assertRaisesRegex(ValueError, "bounded uploaded asset"):
+                    MODULE.validate_consumed_asset_snapshot(
+                        snapshot(url, size),
+                        MODULE.CONSUMER_REPOSITORY,
+                        release_id,
+                        {url},
+                        "container snapshot",
+                    )
+
+        producer_sbom_url = self.producer["artifact"]["sbom"]["url"]
+        producer_snapshot = {
+            "repository": MODULE.PRODUCER_REPOSITORY,
+            "releaseId": 654321,
+            "assets": [
+                {
+                    "id": 10001,
+                    "name": producer_sbom_url.rsplit("/", 1)[-1],
+                    "url": producer_sbom_url,
+                    "state": "uploaded",
+                    "size": MODULE.RELEASE_ASSET_MAX_BYTES + 1,
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "bounded uploaded asset"):
+            MODULE.validate_consumed_asset_snapshot(
+                producer_snapshot,
+                MODULE.PRODUCER_REPOSITORY,
+                654321,
+                {producer_sbom_url},
+                "producer snapshot",
+            )
+
     def test_initial_asset_snapshots_reject_metadata_and_digest_tampering(self):
         producer, container = self.validated()
         profiles = MODULE.load_profiles(self.profiles_path)
@@ -3297,6 +3369,39 @@ class FinalizerTests(unittest.TestCase):
             )
 
         verify()
+
+        sbom_value["metadata"]["largeAnnotation"] = "x" * (
+            MODULE.RELEASE_ASSET_MAX_BYTES
+        )
+        write_json(sbom, sbom_value)
+        self.assertGreater(sbom.stat().st_size, MODULE.RELEASE_ASSET_MAX_BYTES)
+        self.assertLessEqual(
+            sbom.stat().st_size, MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES
+        )
+        variant["sbom"]["digest"] = MODULE.file_digest(
+            sbom, MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES
+        )
+        provenance_value["subject"][1]["digest"]["sha256"] = variant[
+            "sbom"
+        ]["digest"].removeprefix("sha256:")
+        write_json_line(provenance, provenance_value)
+        variant["provenance"]["digest"] = MODULE.file_digest(provenance)
+        verify()
+
+        with sbom.open("wb") as oversized:
+            oversized.seek(MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES)
+            oversized.write(b"\n")
+        with self.assertRaisesRegex(ValueError, MODULE.MATERIAL_FILE_ERROR):
+            verify()
+
+        del sbom_value["metadata"]["largeAnnotation"]
+        write_json(sbom, sbom_value)
+        variant["sbom"]["digest"] = MODULE.file_digest(sbom)
+        provenance_value["subject"][1]["digest"]["sha256"] = variant[
+            "sbom"
+        ]["digest"].removeprefix("sha256:")
+        write_json_line(provenance, provenance_value)
+        variant["provenance"]["digest"] = MODULE.file_digest(provenance)
 
         unrelated_signature = copy.deepcopy(signature_value)
         unrelated_signature[0]["optional"]["unrelated"] = True
