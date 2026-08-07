@@ -678,16 +678,15 @@ class FinalizerTests(unittest.TestCase):
                 "platformDigests": copy.deepcopy(source["platformDigests"]),
             }
         if suffix == "immutable-tags":
+            candidate_tag = MODULE.mlx90_candidate_tag(
+                self.identity.consumer_merge_sha,
+                container["release"]["workflowRunId"],
+                container["release"]["workflowRunAttempt"],
+            )
             return {
                 **common,
                 "tagDigests": {
-                    self.identity.container_release_tag: source["manifestDigest"],
-                    self.identity.container_release_tag.removeprefix("v"): source[
-                        "manifestDigest"
-                    ],
-                    f"sha-{self.identity.consumer_merge_sha[:12]}": source[
-                        "manifestDigest"
-                    ],
+                    candidate_tag: source["manifestDigest"],
                 },
             }
         if suffix == "cosign":
@@ -1068,6 +1067,14 @@ class FinalizerTests(unittest.TestCase):
                     "variant", "certified"
                 ),
                 "variant",
+            ),
+            (
+                "public-immutable-tags",
+                lambda value: value["observations"]["tagDigests"].__setitem__(
+                    self.identity.container_release_tag,
+                    container["variants"]["public"]["manifestDigest"],
+                ),
+                "tagDigests",
             ),
             (
                 "producer-materials",
@@ -1639,13 +1646,16 @@ class FinalizerTests(unittest.TestCase):
         attestation_root = self.root / f"{variant_name}-buildkit"
         attestation_root.mkdir(exist_ok=True)
         manifests = []
+        candidate_tag = MODULE.mlx90_candidate_tag(
+            source_sha, run_id, run_attempt
+        )
         for platform in MODULE.PLATFORMS:
             platform_digest = variant["platformDigests"][platform]
             encoded_platform = platform.replace("/", "%2F")
             subjects = [
                 {
                     "name": (
-                        f"pkg:docker/{image}@mlx90-candidate-{source_sha}"
+                        f"pkg:docker/{image}@{candidate_tag}"
                         f"?platform={encoded_platform}"
                     ),
                     "digest": {
@@ -3546,17 +3556,50 @@ class FinalizerTests(unittest.TestCase):
             attestation_root,
         )
 
-    def test_buildkit_subject_is_the_exact_sha_bound_candidate(self):
+    def test_buildkit_subject_is_the_exact_attempt_bound_candidate(self):
         _, container = self.validated()
         variant = container["variants"]["public"]
         source_sha = container["release"]["sourceSha"]
+        run_id = container["release"]["workflowRunId"]
+        run_attempt = container["release"]["workflowRunAttempt"]
+        candidate_tag = MODULE.mlx90_candidate_tag(
+            source_sha, run_id, run_attempt
+        )
         self.assertEqual(
             {
-                f"pkg:docker/{variant['image']}@mlx90-candidate-{source_sha}"
+                f"pkg:docker/{variant['image']}@{candidate_tag}"
                 "?platform=linux%2Farm64"
             },
             MODULE.buildkit_subject_names(
-                variant["image"], source_sha, "linux/arm64"
+                variant["image"],
+                source_sha,
+                run_id,
+                run_attempt,
+                "linux/arm64",
+            ),
+        )
+
+    def test_candidate_tag_binds_the_exact_run_and_evidence_attempt(self):
+        _, container = self.validated()
+        release = container["release"]
+        self.assertEqual(
+            (
+                "mlx90-candidate-"
+                f"{release['sourceSha']}-{release['workflowRunId']}-"
+                f"{release['workflowRunAttempt']}"
+            ),
+            MODULE.mlx90_candidate_tag(
+                release["sourceSha"],
+                release["workflowRunId"],
+                release["workflowRunAttempt"],
+            ),
+        )
+        self.assertNotEqual(
+            MODULE.mlx90_candidate_tag(
+                release["sourceSha"], release["workflowRunId"], 2
+            ),
+            MODULE.mlx90_candidate_tag(
+                release["sourceSha"], release["workflowRunId"], 1
             ),
         )
 
@@ -3585,7 +3628,7 @@ class FinalizerTests(unittest.TestCase):
         index_path, attestation_root = self.write_buildkit_fixture(
             container, mutator=add_release_alias
         )
-        with self.assertRaisesRegex(ValueError, "SHA-bound candidate"):
+        with self.assertRaisesRegex(ValueError, "attempt-bound candidate"):
             MODULE.verify_buildkit_attestations(
                 container,
                 "public",
@@ -3599,18 +3642,23 @@ class FinalizerTests(unittest.TestCase):
         def replace_candidate_with_latest(platform, statements):
             if platform != "linux/arm64":
                 return
+            candidate_tag = MODULE.mlx90_candidate_tag(
+                container["release"]["sourceSha"],
+                container["release"]["workflowRunId"],
+                container["release"]["workflowRunAttempt"],
+            )
             for statement in statements.values():
                 statement["subject"][0]["name"] = statement["subject"][0][
                     "name"
                 ].replace(
-                    "@mlx90-candidate-" + container["release"]["sourceSha"],
+                    f"@{candidate_tag}",
                     "@latest",
                 )
 
         index_path, attestation_root = self.write_buildkit_fixture(
             container, mutator=replace_candidate_with_latest
         )
-        with self.assertRaisesRegex(ValueError, "SHA-bound candidate"):
+        with self.assertRaisesRegex(ValueError, "attempt-bound candidate"):
             MODULE.verify_buildkit_attestations(
                 container,
                 "public",
