@@ -56,6 +56,14 @@ FINALIZER_INPUT_MAX_BYTES = 64 * 1024 * 1024
 RELEASE_ASSET_MAX_BYTES = 10 * 1024 * 1024
 CONTAINER_SBOM_ASSET_MAX_BYTES = 64 * 1024 * 1024
 COLLECTION_ARCHIVE_MAX_BYTES = RELEASE_ASSET_MAX_BYTES
+CONTAINER_SBOM_ASSET_NAMES = frozenset(
+    {
+        "sbom.cdx.json",
+        "sbom-bootstrap.cdx.json",
+        "sbom-certified.cdx.json",
+        "sbom-public.cdx.json",
+    }
+)
 MATERIAL_FILE_ERROR = "material is not a bounded regular file"
 CLI_CONTRACT_ERROR = "input does not satisfy the required contract"
 CLI_IO_ERROR = "file operation failed"
@@ -1335,6 +1343,15 @@ def canonical_value_digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def release_asset_max_bytes(repository: str, asset_name: str) -> int:
+    if (
+        repository == CONSUMER_REPOSITORY
+        and asset_name in CONTAINER_SBOM_ASSET_NAMES
+    ):
+        return CONTAINER_SBOM_ASSET_MAX_BYTES
+    return RELEASE_ASSET_MAX_BYTES
+
+
 def consumed_release_asset_urls(
     identity: DispatchIdentity,
     producer: dict[str, Any],
@@ -1404,7 +1421,10 @@ def validate_consumed_asset_snapshot(
         size = require_positive(item["size"], f"{item_field}.size")
         name = require_string(item["name"], f"{item_field}.name")
         url = require_https(item["url"], f"{item_field}.url")
-        if size > 10 * 1024 * 1024 or item["state"] != "uploaded":
+        if (
+            size > release_asset_max_bytes(repository, name)
+            or item["state"] != "uploaded"
+        ):
             fail(f"{item_field} is not a bounded uploaded asset")
         if url not in expected_urls or unquote(urlsplit(url).path).split("/")[-1] != name:
             fail(f"{item_field} is not an exact consumed release asset")
