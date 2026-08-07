@@ -59,6 +59,15 @@ authenticated GitHub Release asset downloads. It is not a personal token and
 does not introduce a new secret. The same-repository persistence job continues
 to use only its repository-scoped `GITHUB_TOKEN`. Job permissions are:
 
+The least-privilege choice for merge-event lookup was reverified on 2026-08-06
+against GitHub's versioned REST permission table for
+[`List issue events`](https://docs.github.com/en/rest/issues/events?apiVersion=2026-03-10#list-issue-events):
+the endpoint accepts either `Issues: read` or `Pull requests: read` for a
+fine-grained GitHub App installation token. MLX-90 uses the latter because all
+queried issue numbers are already identity-validated pull requests. The live
+event request fails closed before any delivered claim if GitHub ever rejects
+that documented scope; `Issues` permission is intentionally not requested.
+
 | Job | Actions | Contents | OIDC | Other permissions |
 | --- | --- | --- | --- | --- |
 | `verify` | read | read | write, for keyless evidence signing | none |
