@@ -302,6 +302,11 @@ esac
             },
             token_step["with"],
         )
+        self.assertNotIn("permission-issues", token_step["with"])
+        self.assertIn(
+            "https://docs.github.com/en/rest/issues/events?apiVersion=2026-03-10#list-issue-events",
+            self.workflow_text,
+        )
         self.assertIn(
             'test "$APP_INSTALLATION_ID" = "148019054"',
             self.workflow_text,
