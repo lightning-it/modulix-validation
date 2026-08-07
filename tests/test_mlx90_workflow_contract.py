@@ -54,6 +54,111 @@ resolve_pull_request_merge_sha \
                 },
             )
 
+    def _run_release_asset_limit(self, repository, asset_name):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\nverify_mode() {")]
+                + '\nrelease_asset_max_bytes "$REPOSITORY" "$ASSET_NAME"\n',
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                ["bash", str(driver)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(root),
+                    "REPOSITORY": repository,
+                    "ASSET_NAME": asset_name,
+                },
+            )
+
+    def _run_consumed_asset_snapshot(self, repository, asset_name, size):
+        url = f"https://github.com/{repository}/releases/download/v1/{asset_name}"
+        assets = [
+            {
+                "id": 1,
+                "name": asset_name,
+                "browser_download_url": url,
+                "state": "uploaded",
+                "size": size,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\nverify_mode() {")]
+                + """
+canonical_consumed_asset_snapshot \\
+  "$REPOSITORY" 1 "$ASSETS" "$EXPECTED_URLS"
+""",
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                ["bash", str(driver)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(root),
+                    "REPOSITORY": repository,
+                    "ASSETS": json.dumps(assets),
+                    "EXPECTED_URLS": json.dumps([url]),
+                },
+            )
+
+    def test_container_sbom_asset_limit_is_narrow_and_bounded(self):
+        consumer = "lightning-it/container-ee-wunder-ansible-ubi9"
+        producer = "lightning-it/ansible-collection-supplementary"
+        for asset_name in (
+            "sbom.cdx.json",
+            "sbom-bootstrap.cdx.json",
+            "sbom-certified.cdx.json",
+            "sbom-public.cdx.json",
+        ):
+            with self.subTest(asset_name=asset_name):
+                result = self._run_release_asset_limit(consumer, asset_name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), str(64 * 1024 * 1024))
+
+        for repository, asset_name in (
+            (producer, "sbom.cdx.json"),
+            (consumer, "sbom-bootstrap.cdx.json.sigstore.json"),
+            (consumer, "release-evidence.json"),
+        ):
+            with self.subTest(repository=repository, asset_name=asset_name):
+                result = self._run_release_asset_limit(repository, asset_name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), str(10 * 1024 * 1024))
+
+    def test_consumed_asset_snapshot_enforces_type_specific_size_limits(self):
+        consumer = "lightning-it/container-ee-wunder-ansible-ubi9"
+        accepted = self._run_consumed_asset_snapshot(
+            consumer, "sbom-public.cdx.json", 29_646_241
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        oversized_sbom = self._run_consumed_asset_snapshot(
+            consumer, "sbom-public.cdx.json", 64 * 1024 * 1024 + 1
+        )
+        self.assertNotEqual(oversized_sbom.returncode, 0)
+        self.assertIn(
+            "consumed release asset metadata is invalid", oversized_sbom.stderr
+        )
+
+        oversized_default = self._run_consumed_asset_snapshot(
+            consumer, "release-evidence.json", 10 * 1024 * 1024 + 1
+        )
+        self.assertNotEqual(oversized_default.returncode, 0)
+        self.assertIn(
+            "consumed release asset metadata is invalid", oversized_default.stderr
+        )
+
     def _run_quay_blob_download(
         self,
         challenge=None,
