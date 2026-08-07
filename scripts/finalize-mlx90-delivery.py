@@ -2025,6 +2025,21 @@ def require_variant_observation(
     return variant, receipt_id.removeprefix(f"{variant}-")
 
 
+def mlx90_candidate_tag(
+    source_sha: str, workflow_run_id: int, workflow_run_attempt: int
+) -> str:
+    source_sha = require_sha(source_sha, "candidate source SHA")
+    workflow_run_id = require_positive(
+        workflow_run_id, "candidate workflow run ID"
+    )
+    workflow_run_attempt = require_positive(
+        workflow_run_attempt, "candidate workflow run attempt"
+    )
+    return (
+        f"mlx90-candidate-{source_sha}-{workflow_run_id}-{workflow_run_attempt}"
+    )
+
+
 def validate_receipt_observations(
     receipt_id: str,
     observations: Any,
@@ -2750,9 +2765,11 @@ def validate_receipt_observations(
             observations["tagDigests"], f"{receipt_id} tagDigests"
         )
         expected_tags = {
-            identity.container_release_tag,
-            identity.container_release_tag.removeprefix("v"),
-            f"sha-{identity.consumer_merge_sha[:12]}",
+            mlx90_candidate_tag(
+                identity.consumer_merge_sha,
+                release["workflowRunId"],
+                release["workflowRunAttempt"],
+            )
         }
         require_exact(tag_digests, expected_tags, f"{receipt_id} tagDigests")
         if (
@@ -3540,12 +3557,15 @@ def verify_index(
 def buildkit_subject_names(
     image: str,
     source_sha: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
     platform: str,
 ) -> set[str]:
     suffix = f"?platform={quote(platform, safe='')}"
-    return {
-        f"pkg:docker/{image}@mlx90-candidate-{source_sha}{suffix}"
-    }
+    candidate_tag = mlx90_candidate_tag(
+        source_sha, workflow_run_id, workflow_run_attempt
+    )
+    return {f"pkg:docker/{image}@{candidate_tag}{suffix}"}
 
 
 def verify_buildkit_statement(
@@ -3553,6 +3573,8 @@ def verify_buildkit_statement(
     predicate_type: str,
     image: str,
     source_sha: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
     platform: str,
     platform_digest: str,
 ) -> dict[str, Any]:
@@ -3569,7 +3591,13 @@ def verify_buildkit_statement(
     subjects = statement["subject"]
     if not isinstance(subjects, list) or not subjects:
         fail(f"{platform} BuildKit subjects must be non-empty")
-    expected_names = buildkit_subject_names(image, source_sha, platform)
+    expected_names = buildkit_subject_names(
+        image,
+        source_sha,
+        workflow_run_id,
+        workflow_run_attempt,
+        platform,
+    )
     observed_names: set[str] = set()
     expected_digest = platform_digest.removeprefix("sha256:")
     for position, item in enumerate(subjects):
@@ -3589,7 +3617,7 @@ def verify_buildkit_statement(
             )
     if observed_names != expected_names:
         fail(
-            f"{platform} BuildKit subjects do not match the SHA-bound "
+            f"{platform} BuildKit subjects do not match the attempt-bound "
             "candidate reference"
         )
     return require_mapping(
@@ -3899,6 +3927,12 @@ def verify_buildkit_attestations(
     image = require_string(variant.get("image"), f"{variant_name}.image")
     release = require_mapping(container_evidence.get("release"), "container release")
     source_sha = require_sha(release.get("sourceSha"), "container release.sourceSha")
+    workflow_run_id = require_positive(
+        release.get("workflowRunId"), "container release.workflowRunId"
+    )
+    workflow_run_attempt = require_positive(
+        release.get("workflowRunAttempt"), "container release.workflowRunAttempt"
+    )
     predicate_paths = {
         SPDX_PREDICATE: "spdx",
         SLSA_PREDICATE: "slsa",
@@ -4008,6 +4042,8 @@ def verify_buildkit_attestations(
                 predicate_type,
                 image,
                 source_sha,
+                workflow_run_id,
+                workflow_run_attempt,
                 platform,
                 binding["platformDigest"],
             )
