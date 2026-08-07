@@ -1589,10 +1589,19 @@ def verify_container_materials(
         optional = entry.get("optional")
         if optional is not None and not isinstance(optional, dict):
             fail(f"{variant_name} signature[{index}].optional is malformed")
+        signature_type = critical.get("type")
+        docker_reference = identity.get("docker-reference")
+        legacy_signature = (
+            signature_type == "cosign container image signature"
+            and docker_reference == image
+        )
+        sigstore_v1_signature = (
+            signature_type == "https://sigstore.dev/cosign/sign/v1"
+            and docker_reference == image_ref
+        )
         if (
             signed_image.get("docker-manifest-digest") != manifest_digest
-            or identity.get("docker-reference") != image
-            or critical.get("type") != "cosign container image signature"
+            or not (legacy_signature or sigstore_v1_signature)
         ):
             fail(f"{variant_name} signature receipt identity or digest mismatch")
         if canonical_json(entry) not in live_entries:

@@ -3412,6 +3412,47 @@ class FinalizerTests(unittest.TestCase):
 
         verify()
 
+        sigstore_v1_signature = copy.deepcopy(signature_value)
+        sigstore_v1_signature[0]["critical"]["identity"][
+            "docker-reference"
+        ] = image_ref
+        sigstore_v1_signature[0]["critical"]["type"] = (
+            "https://sigstore.dev/cosign/sign/v1"
+        )
+        write_json(signature, sigstore_v1_signature)
+        write_json(live_signature, sigstore_v1_signature)
+        signature_digest = MODULE.file_digest(signature)
+        variant["signature"]["digest"] = signature_digest
+        provenance_value["subject"][0]["digest"]["sha256"] = (
+            signature_digest.removeprefix("sha256:")
+        )
+        write_json_line(provenance, provenance_value)
+        variant["provenance"]["digest"] = MODULE.file_digest(provenance)
+        verify()
+        signature_value = sigstore_v1_signature
+
+        for field, value in (
+            ("docker-reference", image),
+            ("type", "https://sigstore.dev/cosign/sign/v2"),
+        ):
+            malformed_signature = copy.deepcopy(signature_value)
+            if field == "docker-reference":
+                malformed_signature[0]["critical"]["identity"][field] = value
+            else:
+                malformed_signature[0]["critical"][field] = value
+            write_json(signature, malformed_signature)
+            write_json(live_signature, malformed_signature)
+            variant["signature"]["digest"] = MODULE.file_digest(signature)
+            with self.subTest(sigstore_v1_field=field):
+                with self.assertRaisesRegex(
+                    ValueError, "signature receipt identity or digest mismatch"
+                ):
+                    verify()
+
+        write_json(signature, signature_value)
+        write_json(live_signature, signature_value)
+        variant["signature"]["digest"] = signature_digest
+
         sbom_value["metadata"]["largeAnnotation"] = "x" * (
             MODULE.RELEASE_ASSET_MAX_BYTES
         )
