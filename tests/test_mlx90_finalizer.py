@@ -3298,6 +3298,39 @@ class FinalizerTests(unittest.TestCase):
 
         verify()
 
+        sbom_value["metadata"]["largeAnnotation"] = "x" * (
+            MODULE.RELEASE_ASSET_MAX_BYTES
+        )
+        write_json(sbom, sbom_value)
+        self.assertGreater(sbom.stat().st_size, MODULE.RELEASE_ASSET_MAX_BYTES)
+        self.assertLessEqual(
+            sbom.stat().st_size, MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES
+        )
+        variant["sbom"]["digest"] = MODULE.file_digest(
+            sbom, MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES
+        )
+        provenance_value["subject"][1]["digest"]["sha256"] = variant[
+            "sbom"
+        ]["digest"].removeprefix("sha256:")
+        write_json_line(provenance, provenance_value)
+        variant["provenance"]["digest"] = MODULE.file_digest(provenance)
+        verify()
+
+        with sbom.open("wb") as oversized:
+            oversized.seek(MODULE.CONTAINER_SBOM_ASSET_MAX_BYTES)
+            oversized.write(b"\n")
+        with self.assertRaisesRegex(ValueError, MODULE.MATERIAL_FILE_ERROR):
+            verify()
+
+        del sbom_value["metadata"]["largeAnnotation"]
+        write_json(sbom, sbom_value)
+        variant["sbom"]["digest"] = MODULE.file_digest(sbom)
+        provenance_value["subject"][1]["digest"]["sha256"] = variant[
+            "sbom"
+        ]["digest"].removeprefix("sha256:")
+        write_json_line(provenance, provenance_value)
+        variant["provenance"]["digest"] = MODULE.file_digest(provenance)
+
         unrelated_signature = copy.deepcopy(signature_value)
         unrelated_signature[0]["optional"]["unrelated"] = True
         write_json(signature, unrelated_signature)

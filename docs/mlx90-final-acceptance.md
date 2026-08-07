@@ -210,10 +210,12 @@ errors identify only the contract field and failure class; they do not echo
 untrusted keys, values, tokens, or secret material.
 
 Files whose bytes are bound by a digest use one non-following, nonblocking
-descriptor read. The finalizer requires a regular file, enforces a 10 MiB cap
-for every downloaded release asset (including the collection archive) and a
-64 MiB cap for other OCI/BuildKit inputs, and compares device, inode, byte
-size, modification time, and change time before and after the bounded read.
+descriptor read. The finalizer requires a regular file and enforces a 10 MiB
+cap for release assets by default, including the collection archive. Only the
+four exact container CycloneDX names (`sbom.cdx.json` and the `bootstrap`,
+`certified`, and `public` variants) use the 64 MiB SBOM cap; other OCI/BuildKit
+inputs are likewise capped at 64 MiB. It compares device, inode, byte size,
+modification time, and change time before and after the bounded read.
 Digest, size, and JSON/JSONL parsing are all derived from that same immutable
 byte snapshot. A symlink, FIFO, device, oversized input, or file that changes
 during the read fails with a fixed value-free diagnostic.
