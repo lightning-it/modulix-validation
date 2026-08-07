@@ -1741,9 +1741,9 @@ class FinalizerTests(unittest.TestCase):
                             "resolvedDependencies": False,
                         },
                         "buildkit_metadata": {"vcs:revision": source_sha},
-                        "finishedOn": "2026-08-02T10:04:00Z",
+                        "finishedOn": "2026-08-06T02:45:27.107609096Z",
                         "invocationId": f"synthetic-{platform}",
-                        "startedOn": "2026-08-02T10:02:00Z",
+                        "startedOn": "2026-08-06T02:44:17.518864821Z",
                     },
                 },
             }
@@ -1916,6 +1916,38 @@ class FinalizerTests(unittest.TestCase):
                     "2026-08-02T12:00:00z", "test timestamp"
                 )
             normalizer.assert_not_called()
+
+        buildkit_values = {
+            "2026-08-06T02:44:17.518864821Z": (518864, 821),
+            "2026-07-31T23:33:35.1+05:30": (100000, 0),
+            "2026-07-31T23:33:35Z": (0, 0),
+        }
+        for value, expected in buildkit_values.items():
+            with self.subTest(buildkit=value):
+                parsed, submicroseconds = MODULE.require_buildkit_timestamp(
+                    value, "BuildKit timestamp"
+                )
+                self.assertEqual(expected[0], parsed.microsecond)
+                self.assertEqual(expected[1], submicroseconds)
+
+        nanosecond_start = MODULE.require_buildkit_timestamp(
+            "2026-08-06T02:44:17.123456001Z", "BuildKit startedOn"
+        )
+        nanosecond_finish = MODULE.require_buildkit_timestamp(
+            "2026-08-06T02:44:17.123456002Z", "BuildKit finishedOn"
+        )
+        self.assertLess(nanosecond_start, nanosecond_finish)
+
+        for value in (
+            "2026-07-31T23:33:35.1234567890Z",
+            "2026-07-31T23:33:35.123456789z",
+            "2026-07-31T23:33:60.123456789Z",
+        ):
+            with self.subTest(invalid_buildkit=value):
+                with self.assertRaisesRegex(ValueError, "RFC3339 timestamp"):
+                    MODULE.require_buildkit_timestamp(
+                        value, "BuildKit timestamp"
+                    )
 
     def test_ascii_controls_fail_before_trusted_url_parsing(self):
         controls = tuple(chr(value) for value in range(0x20)) + ("\x7f",)

@@ -187,6 +187,14 @@ to `+00:00` and right-pads a present 1–6 digit fraction to six digits. This is
 lossless and preserves the accepted grammar while making every permitted
 fractional precision work consistently on Python 3.9 and later.
 
+BuildKit-authored SLSA `runDetails.metadata.startedOn` and `finishedOn` values
+use a separate RFC3339 profile because BuildKit serializes Go timestamps with
+up to nine fractional digits. For those two fields only, the finalizer accepts
+either no fractional part or exactly 1–9 digits when a fraction is present and
+preserves the final three nanosecond digits when it checks strict
+start-before-finish ordering. The 1–6 digit limit for all MLX-90-authored
+evidence remains unchanged.
+
 Every producer collection version, producer affected/fixed version, and
 container release tag uses the complete SemVer 2.0.0 grammar. Major, minor,
 patch, and numeric prerelease identifiers reject leading zeroes except for the

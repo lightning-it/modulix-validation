@@ -110,6 +110,14 @@ RFC3339_TIMESTAMP = re.compile(
     r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
     r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
 )
+# BuildKit serializes its SLSA timestamps with Go's nanosecond precision.
+# Keep that third-party contract separate from the microsecond-only profile for
+# MLX-90-authored evidence so accepting BuildKit bytes cannot weaken it.
+RFC3339_BUILDKIT_TIMESTAMP = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+    r"(?:\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+)
 
 VARIANTS = ("public", "certified", "bootstrap")
 PLATFORMS = ("linux/amd64", "linux/arm64")
@@ -465,6 +473,33 @@ def require_timestamp(value: Any, field: str) -> datetime:
     if parsed.tzinfo is None:
         fail(requirement)
     return parsed
+
+
+def require_buildkit_timestamp(value: Any, field: str) -> tuple[datetime, int]:
+    """Parse a BuildKit RFC3339 timestamp without losing nanosecond ordering."""
+    value = require_string(value, field)
+    requirement = (
+        f"{field} must be an RFC3339 timestamp with T, seconds, timezone, "
+        "and 1-9 fractional digits when a fraction is present"
+    )
+    if RFC3339_BUILDKIT_TIMESTAMP.fullmatch(value) is None:
+        fail(requirement)
+    parser_value = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    local_time, timezone = parser_value[:-6], parser_value[-6:]
+    submicroseconds = 0
+    if "." in local_time:
+        seconds, fraction = local_time.rsplit(".", 1)
+        parser_fraction = fraction[:6].ljust(6, "0")
+        parser_value = f"{seconds}.{parser_fraction}{timezone}"
+        if len(fraction) > 6:
+            submicroseconds = int(fraction[6:].ljust(3, "0"))
+    try:
+        parsed = datetime.fromisoformat(parser_value)
+    except ValueError as exc:
+        raise ValueError(requirement) from exc
+    if parsed.tzinfo is None:
+        fail(requirement)
+    return parsed, submicroseconds
 
 
 def require_https(value: Any, field: str) -> str:
@@ -3894,10 +3929,10 @@ def verify_buildkit_slsa(
     require_string(
         metadata["invocationId"], f"{field}.runDetails.metadata.invocationId"
     )
-    started = require_timestamp(
+    started = require_buildkit_timestamp(
         metadata["startedOn"], f"{field}.runDetails.metadata.startedOn"
     )
-    finished = require_timestamp(
+    finished = require_buildkit_timestamp(
         metadata["finishedOn"], f"{field}.runDetails.metadata.finishedOn"
     )
     if started >= finished:
