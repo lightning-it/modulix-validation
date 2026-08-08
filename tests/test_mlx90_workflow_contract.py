@@ -1297,7 +1297,7 @@ gh() {
             "supplementary/scripts/verify-keycloak-26.7.1-security.py"
         )
         keycloak_sha256 = (
-            "1221f1ed95dcba26e0aca2a0ca76662a34b96f338fa3b2c1b5da9d097141c2e1"
+            "3b2e895b0e875458f769543736ee56eb80eb195d0c8456591ec40c5c5cf49f85"
         )
         keycloak_command = (
             f"script={keycloak_path}; "
