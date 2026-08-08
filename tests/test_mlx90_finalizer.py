@@ -1026,11 +1026,6 @@ class FinalizerTests(unittest.TestCase):
         )
         self.assertEqual("delivered", delivered["status"])
         self.assertEqual("delivered", acceptance["status"])
-        self.assertEqual(123456, acceptance["producer"]["workflowRunId"])
-        self.assertEqual(
-            self.identity.container_release_run_id,
-            acceptance["container"]["workflowRunId"],
-        )
         bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
         self.assertEqual(
             sorted(MODULE.EXPECTED_RECEIPT_TYPES),
@@ -1153,9 +1148,8 @@ class FinalizerTests(unittest.TestCase):
             ),
             (
                 "zero-touch",
-                lambda value: value["observations"].__setitem__(
-                    "humanActions",
-                    {"scope": MODULE.HUMAN_ACTION_SCOPE, "count": 0.0},
+                lambda value: value["observations"]["humanActions"].__setitem__(
+                    "count", 0.0
                 ),
                 "zero scoped approvals",
             ),

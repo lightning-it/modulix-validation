@@ -607,19 +607,18 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "zero scoped approvals"):
             MODULE.validate(float_zero)
 
-        foreign_producer_run = delivered_fixture()
-        foreign_producer_run["zeroTouch"]["workflowApprovalHistory"][0][
-            "runId"
-        ] = 111112
-        with self.assertRaisesRegex(ValueError, "producer.*not evidence-bound"):
-            MODULE.validate(foreign_producer_run)
-
-        foreign_container_run = delivered_fixture()
-        foreign_container_run["zeroTouch"]["workflowApprovalHistory"][2][
-            "runId"
-        ] = 222223
-        with self.assertRaisesRegex(ValueError, "container.*not evidence-bound"):
-            MODULE.validate(foreign_container_run)
+        for position, label, foreign_id in (
+            (0, "producer", 111112),
+            (2, "container", 222223),
+        ):
+            foreign_run = delivered_fixture()
+            foreign_run["zeroTouch"]["workflowApprovalHistory"][position][
+                "runId"
+            ] = foreign_id
+            with self.assertRaisesRegex(
+                ValueError, f"{label}.*not evidence-bound"
+            ):
+                MODULE.validate(foreign_run)
 
     def test_ascii_controls_fail_before_trusted_url_parsing(self):
         controls = tuple(chr(value) for value in range(0x20)) + ("\x7f",)
