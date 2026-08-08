@@ -740,10 +740,15 @@ def validate_delivered(result: dict[str, Any]) -> None:
             "workflowRunAttempt",
             "workflowName",
             "workflowPath",
-            "workflowEvent",
-            "workflowActor",
-            "workflowTriggeringActor",
-        },
+                "workflowEvent",
+                "workflowActor",
+                "workflowTriggeringActor",
+                "pullRequest",
+                "baseRef",
+                "baseSha",
+                "headRef",
+                "headRepository",
+            },
         "zeroTouch.currentHeadReviewGate",
     )
     positive_integer(review_gate["id"], "zeroTouch review gate id")
@@ -754,6 +759,13 @@ def validate_delivered(result: dict[str, Any]) -> None:
         review_gate["workflowRunAttempt"],
         "zeroTouch review workflow run attempt",
     )
+    positive_integer(
+        review_gate["pullRequest"], "zeroTouch review pull request"
+    )
+    review_base_sha = full_sha(
+        review_gate["baseSha"], "zeroTouch review base SHA"
+    )
+    string(review_gate["headRef"], "zeroTouch review head ref")
     if (
         review_gate["name"] != COPILOT_REVIEW_JOB_NAME
         or review_gate["status"] != "completed"
@@ -765,6 +777,10 @@ def validate_delivered(result: dict[str, Any]) -> None:
         or review_gate["workflowActor"] != RELEASE_AUTOMATION_ACTOR
         or review_gate["workflowTriggeringActor"]
         != RELEASE_AUTOMATION_ACTOR
+        or review_gate["pullRequest"] != consumer_pull_request
+        or review_gate["baseRef"] != "main"
+        or review_base_sha != consumer["baseSha"]
+        or review_gate["headRepository"] != CONSUMER_REPOSITORY
     ):
         fail("zeroTouch current-head review gate is invalid")
     if (

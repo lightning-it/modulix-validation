@@ -2802,6 +2802,11 @@ def validate_receipt_observations(
                 "workflowEvent",
                 "workflowActor",
                 "workflowTriggeringActor",
+                "pullRequest",
+                "baseRef",
+                "baseSha",
+                "headRef",
+                "headRepository",
             },
             "zero-touch currentHeadReviewGate",
         )
@@ -2814,6 +2819,12 @@ def validate_receipt_observations(
             review_gate["workflowRunAttempt"],
             "zero-touch review workflow run attempt",
         )
+        require_positive(
+            review_gate["pullRequest"],
+            "zero-touch review pull request",
+        )
+        require_sha(review_gate["baseSha"], "zero-touch review base SHA")
+        require_string(review_gate["headRef"], "zero-touch review head ref")
         if review_gate != {
             "id": review_gate["id"],
             "name": COPILOT_REVIEW_JOB_NAME,
@@ -2828,6 +2839,11 @@ def validate_receipt_observations(
             "workflowEvent": "pull_request",
             "workflowActor": CONTAINER_RELEASE_ACTOR,
             "workflowTriggeringActor": CONTAINER_RELEASE_ACTOR,
+            "pullRequest": identity.consumer_pr,
+            "baseRef": "main",
+            "baseSha": container["consumer"]["baseSha"],
+            "headRef": review_gate["headRef"],
+            "headRepository": CONSUMER_REPOSITORY,
         }:
             fail("zero-touch current-head review gate is invalid")
         approval_history = observations["workflowApprovalHistory"]

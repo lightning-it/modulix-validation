@@ -1060,7 +1060,8 @@ PY
   local container_release_assets
   local container_consumed_urls container_asset_bindings
   local container_initial_asset_snapshot container_initial_asset_snapshot_digest
-  local consumer_ai_check consumer_ai_job consumer_ai_run
+  local consumer_ai_check consumer_ai_job consumer_ai_pull_requests
+  local consumer_ai_run
   local consumer_ai_run_id consumer_ai_run_attempt
   consumer_pr="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/pulls/${INPUT_CONSUMER_PR}")"
@@ -1123,6 +1124,30 @@ PY
     || fail_closed "consumer current-head AI review job is invalid"
   consumer_ai_run_id="$(jq -er '.run_id' <<<"$consumer_ai_job")"
   consumer_ai_run_attempt="$(jq -er '.run_attempt' <<<"$consumer_ai_job")"
+  consumer_ai_pull_requests="$(github_api --paginate \
+    "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_HEAD_SHA}/pulls?per_page=100" \
+    | jq -sc '[.[][]]')"
+  jq -e \
+    --argjson pull_request "$INPUT_CONSUMER_PR" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg base_ref "main" \
+    --arg base_sha "$(jq -er '.base.sha' <<<"$consumer_pr")" \
+    --arg head_ref "$(jq -er '.head.ref' <<<"$consumer_pr")" \
+    --arg head_sha "$INPUT_CONSUMER_HEAD_SHA" \
+    --arg repository "$CONSUMER_REPOSITORY" '
+      [.[] | select(.head.sha == $head_sha)] as $associated
+      | ($associated | length) == 1
+      and $associated[0].number == $pull_request
+      and $associated[0].state == "closed"
+      and $associated[0].merged_at != null
+      and $associated[0].user.login == $actor
+      and $associated[0].base.ref == $base_ref
+      and $associated[0].base.sha == $base_sha
+      and $associated[0].head.ref == $head_ref
+      and $associated[0].head.sha == $head_sha
+      and $associated[0].head.repo.full_name == $repository
+    ' <<<"$consumer_ai_pull_requests" >/dev/null \
+    || fail_closed "consumer AI review head has an ambiguous PR association"
   consumer_ai_run="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/actions/runs/${consumer_ai_run_id}/attempts/${consumer_ai_run_attempt}")"
   jq -e \
@@ -1130,6 +1155,7 @@ PY
     --argjson run_attempt "$consumer_ai_run_attempt" \
     --arg actor "lightning-it-release-automation[bot]" \
     --arg head "$INPUT_CONSUMER_HEAD_SHA" \
+    --arg head_ref "$(jq -er '.head.ref' <<<"$consumer_pr")" \
     --arg repository "$CONSUMER_REPOSITORY" \
     --arg workflow "$COPILOT_REVIEW_WORKFLOW" \
     --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" '
@@ -1138,6 +1164,7 @@ PY
       and .name == $workflow_name
       and .path == $workflow
       and .event == "pull_request"
+      and .head_branch == $head_ref
       and .head_sha == $head
       and .repository.full_name == $repository
       and .head_repository.full_name == $repository
@@ -1152,7 +1179,12 @@ PY
     --argjson workflow_run_attempt "$consumer_ai_run_attempt" \
     --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" \
     --arg workflow_path "$COPILOT_REVIEW_WORKFLOW" \
-    --arg workflow_actor "lightning-it-release-automation[bot]" '
+    --arg workflow_actor "lightning-it-release-automation[bot]" \
+    --argjson pull_request "$INPUT_CONSUMER_PR" \
+    --arg base_ref "main" \
+    --arg base_sha "$(jq -er '.base.sha' <<<"$consumer_pr")" \
+    --arg head_ref "$(jq -er '.head.ref' <<<"$consumer_pr")" \
+    --arg head_repository "$CONSUMER_REPOSITORY" '
       . + {
         workflowRunId: $workflow_run_id,
         workflowRunAttempt: $workflow_run_attempt,
@@ -1160,7 +1192,12 @@ PY
         workflowPath: $workflow_path,
         workflowEvent: "pull_request",
         workflowActor: $workflow_actor,
-        workflowTriggeringActor: $workflow_actor
+        workflowTriggeringActor: $workflow_actor,
+        pullRequest: $pull_request,
+        baseRef: $base_ref,
+        baseSha: $base_sha,
+        headRef: $head_ref,
+        headRepository: $head_repository
       }
     ' <<<"$consumer_ai_check")"
   consumer_pr_ancestry="$(github_api \

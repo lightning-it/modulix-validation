@@ -173,6 +173,11 @@ def delivered_fixture() -> dict[str, object]:
                 "workflowEvent": "pull_request",
                 "workflowActor": MODULE.RELEASE_AUTOMATION_ACTOR,
                 "workflowTriggeringActor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                "pullRequest": 503,
+                "baseRef": "main",
+                "baseSha": "7" * 40,
+                "headRef": "security-release/LIT-SEC-MLX90-2026-001",
+                "headRepository": MODULE.CONSUMER_REPOSITORY,
             },
             "workflowApprovalHistory": [
                 {
@@ -557,6 +562,10 @@ class DeliveryTests(unittest.TestCase):
             ("workflowEvent", "workflow_dispatch"),
             ("workflowActor", "attacker[bot]"),
             ("workflowTriggeringActor", "attacker[bot]"),
+            ("pullRequest", 999),
+            ("baseRef", "develop"),
+            ("baseSha", "6" * 40),
+            ("headRepository", "attacker/repository"),
         ):
             with self.subTest(review_field=field):
                 spoofed_review = delivered_fixture()

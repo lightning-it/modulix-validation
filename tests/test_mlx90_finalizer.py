@@ -678,6 +678,11 @@ class FinalizerTests(unittest.TestCase):
                     "workflowEvent": "pull_request",
                     "workflowActor": MODULE.CONTAINER_RELEASE_ACTOR,
                     "workflowTriggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
+                    "pullRequest": self.identity.consumer_pr,
+                    "baseRef": "main",
+                    "baseSha": "7" * 40,
+                    "headRef": "security-release/LIT-SEC-MLX90-2026-001",
+                    "headRepository": MODULE.CONSUMER_REPOSITORY,
                 },
                 "workflowApprovalHistory": [
                     {
@@ -1135,6 +1140,13 @@ class FinalizerTests(unittest.TestCase):
                     "humanActions", 1
                 ),
                 "integer zero",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"][
+                    "currentHeadReviewGate"
+                ].__setitem__("pullRequest", 999),
+                "current-head review gate is invalid",
             ),
             (
                 "zero-touch",
