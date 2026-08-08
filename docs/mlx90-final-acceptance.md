@@ -438,7 +438,7 @@ or the final revocation check.
 
 The Keycloak profile is independently fixed to the packaged
 `scripts/verify-keycloak-26.7.1-security.py` verifier at
-`sha256:929a4c043e17e40e303cf058220b58fe874650d9097c5bfdffe04aebbdc183ec`.
+`sha256:1221f1ed95dcba26e0aca2a0ca76662a34b96f338fa3b2c1b5da9d097141c2e1`.
 That verifier fails unless the installed collection binds the official
 Keycloak `26.7.1` OCI index digest
 `sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6`
