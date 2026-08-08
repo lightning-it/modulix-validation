@@ -437,6 +437,7 @@ def validate_delivered(result: dict[str, Any]) -> None:
             "collectionDigest",
             "releaseUrl",
             "evidence",
+            "workflowRunId",
         },
         "producer",
     )
@@ -464,6 +465,9 @@ def validate_delivered(result: dict[str, Any]) -> None:
         producer_tag,
         "producer.evidence",
         expected_name="security-release-evidence.json",
+    )
+    producer_workflow_run_id = positive_integer(
+        producer["workflowRunId"], "producer.workflowRunId"
     )
 
     consumer = mapping(result["consumer"], "consumer")
@@ -509,6 +513,7 @@ def validate_delivered(result: dict[str, Any]) -> None:
             "sourceSha",
             "evidence",
             "variants",
+            "workflowRunId",
         },
         "container",
     )
@@ -542,6 +547,9 @@ def validate_delivered(result: dict[str, Any]) -> None:
         release_tag,
         "container.evidence",
         expected_name="mlx90-container-evidence.json",
+    )
+    container_workflow_run_id = positive_integer(
+        container["workflowRunId"], "container.workflowRunId"
     )
 
     variants = mapping(container["variants"], "container.variants")
@@ -664,6 +672,7 @@ def validate_delivered(result: dict[str, Any]) -> None:
     if (
         human_actions["scope"] != HUMAN_ACTION_SCOPE
         or isinstance(human_actions["count"], bool)
+        or not isinstance(human_actions["count"], int)
         or human_actions["count"] != 0
     ):
         fail("zeroTouch.humanActions must record zero scoped approvals")
@@ -832,6 +841,10 @@ def validate_delivered(result: dict[str, Any]) -> None:
             fail("zeroTouch workflow run contains a human approval")
     if approval_history[1]["runId"] != review_gate["workflowRunId"]:
         fail("zeroTouch review-gate approval history is not evidence-bound")
+    if approval_history[0]["runId"] != producer_workflow_run_id:
+        fail("zeroTouch producer approval history is not evidence-bound")
+    if approval_history[2]["runId"] != container_workflow_run_id:
+        fail("zeroTouch container approval history is not evidence-bound")
 
     finalizer = mapping(result["finalizer"], "finalizer")
     exact_fields(

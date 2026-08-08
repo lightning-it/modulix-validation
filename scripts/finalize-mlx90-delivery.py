@@ -2014,6 +2014,9 @@ def build_final_evidence(
                 "url": identity.producer_evidence_url,
                 "digest": f"sha256:{identity.producer_evidence_sha256}",
             },
+            "workflowRunId": verification["zeroTouch"][
+                "workflowApprovalHistory"
+            ][0]["runId"],
         },
         "consumer": consumer,
         "container": {
@@ -2024,6 +2027,7 @@ def build_final_evidence(
             "sourceSha": release["sourceSha"],
             "evidence": container_evidence_reference,
             "variants": variants,
+            "workflowRunId": release["workflowRunId"],
         },
         "acceptance": {
             "profile": producer_evidence["acceptance"]["profile"],
@@ -2738,6 +2742,7 @@ def validate_receipt_observations(
         if (
             human_actions["scope"] != HUMAN_ACTION_SCOPE
             or isinstance(human_actions["count"], bool)
+            or not isinstance(human_actions["count"], int)
             or human_actions["count"] != 0
         ):
             fail("zero-touch humanActions must record zero scoped approvals")

@@ -88,6 +88,7 @@ def delivered_fixture() -> dict[str, object]:
                 "security-release-evidence.json",
                 "1",
             ),
+            "workflowRunId": 111111,
         },
         "consumer": {
             "repository": MODULE.CONSUMER_REPOSITORY,
@@ -118,6 +119,7 @@ def delivered_fixture() -> dict[str, object]:
                 "certified": variant("certified", "4"),
                 "bootstrap": variant("bootstrap", "5"),
             },
+            "workflowRunId": 222222,
         },
         "acceptance": {
             "profile": "lit.supplementary/security-fix-2026-001",
@@ -599,6 +601,25 @@ class DeliveryTests(unittest.TestCase):
         ] = 765499
         with self.assertRaisesRegex(ValueError, "not evidence-bound"):
             MODULE.validate(foreign_review_run)
+
+        float_zero = delivered_fixture()
+        float_zero["zeroTouch"]["humanActions"]["count"] = 0.0
+        with self.assertRaisesRegex(ValueError, "zero scoped approvals"):
+            MODULE.validate(float_zero)
+
+        foreign_producer_run = delivered_fixture()
+        foreign_producer_run["zeroTouch"]["workflowApprovalHistory"][0][
+            "runId"
+        ] = 111112
+        with self.assertRaisesRegex(ValueError, "producer.*not evidence-bound"):
+            MODULE.validate(foreign_producer_run)
+
+        foreign_container_run = delivered_fixture()
+        foreign_container_run["zeroTouch"]["workflowApprovalHistory"][2][
+            "runId"
+        ] = 222223
+        with self.assertRaisesRegex(ValueError, "container.*not evidence-bound"):
+            MODULE.validate(foreign_container_run)
 
     def test_ascii_controls_fail_before_trusted_url_parsing(self):
         controls = tuple(chr(value) for value in range(0x20)) + ("\x7f",)
