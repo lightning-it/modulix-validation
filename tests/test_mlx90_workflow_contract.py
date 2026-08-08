@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -76,6 +77,88 @@ resolve_pull_request_merge_sha \
                 },
             )
 
+    def _run_trusted_workflow_digest(
+        self, base_content, head_content, *, same_blob=None
+    ):
+        workflow_path = ".github/workflows/copilot-review.yml"
+        base_blob = "c" * 40
+        head_blob = base_blob if same_blob is not False else "d" * 40
+
+        def payload(content, blob):
+            return {
+                "type": "file",
+                "path": workflow_path,
+                "encoding": "base64",
+                "size": len(content),
+                "content": base64.b64encode(content).decode("ascii"),
+                "sha": blob,
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver = root / "driver.sh"
+            driver.write_text(
+                self.script[: self.script.index("\nis_semver() {")]
+                + """
+github_api() {
+  case "$1" in
+    *"ref=${BASE_SHA:?}") printf '%s\n' "${BASE_PAYLOAD:?}" ;;
+    *"ref=${HEAD_SHA:?}") printf '%s\n' "${HEAD_PAYLOAD:?}" ;;
+    *) return 91 ;;
+  esac
+}
+trusted_workflow_content_digest \\
+  lightning-it/container-ee-wunder-ansible-ubi9 \\
+  .github/workflows/copilot-review.yml \\
+  "${BASE_SHA:?}" "${HEAD_SHA:?}"
+""",
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                ["bash", str(driver)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(root),
+                    "BASE_SHA": "a" * 40,
+                    "HEAD_SHA": "b" * 40,
+                    "BASE_PAYLOAD": json.dumps(payload(base_content, base_blob)),
+                    "HEAD_PAYLOAD": json.dumps(payload(head_content, head_blob)),
+                },
+            )
+
+    def test_current_head_review_workflow_is_bound_to_protected_base(self):
+        workflow = b"name: Copilot review gate\n"
+        accepted = self._run_trusted_workflow_digest(workflow, workflow)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+        self.assertEqual(
+            "sha256:" + hashlib.sha256(workflow).hexdigest(),
+            accepted.stdout.strip(),
+        )
+
+        modified = self._run_trusted_workflow_digest(
+            workflow,
+            b"name: spoofed gate\n",
+            same_blob=False,
+        )
+        self.assertNotEqual(0, modified.returncode)
+        self.assertIn(
+            "candidate Copilot workflow differs from trusted base",
+            modified.stderr,
+        )
+
+        collision_shaped = self._run_trusted_workflow_digest(
+            workflow,
+            b"name: spoofed gate\n",
+            same_blob=True,
+        )
+        self.assertNotEqual(0, collision_shaped.returncode)
+        self.assertIn(
+            "content digest differs from trusted base",
+            collision_shaped.stderr,
+        )
     def _run_consumed_asset_snapshot(self, repository, asset_name, size):
         url = f"https://github.com/{repository}/releases/download/v1/{asset_name}"
         assets = [
@@ -604,7 +687,9 @@ esac
             'type == "array" and length == 0',
             "workflow run contains a human environment approval",
             'write_receipt zero-touch "$zero_touch_checked_at"',
-            "humanActions: 0",
+            'scope: "environment-approval-reviews-on-evidence-bound-runs"',
+            "workflowContentDigest: $workflow_content_digest",
+            "candidate Copilot workflow differs from trusted base",
             "consumer release source is not an exact main promotion",
             "consumer release promotion merge topology is invalid",
             "consumer release source is not on the protected main lineage",

@@ -105,6 +105,69 @@ workflow_approval_history() {
   printf '%s\n' "$reviews"
 }
 
+trusted_workflow_content_digest() {
+  local repository="$1"
+  local workflow_path="$2"
+  local trusted_base_sha="$3"
+  local candidate_head_sha="$4"
+  local trusted_payload candidate_payload trusted_blob candidate_blob
+  local trusted_digest candidate_digest
+  [[ "$repository" =~ ^lightning-it/[A-Za-z0-9._-]+$ ]] \
+    || fail_closed "trusted workflow repository is invalid"
+  [[ "$workflow_path" =~ ^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$ ]] \
+    || fail_closed "trusted workflow path is invalid"
+  [[ "$trusted_base_sha" =~ ^[0-9a-f]{40}$ ]] \
+    || fail_closed "trusted workflow base SHA is invalid"
+  [[ "$candidate_head_sha" =~ ^[0-9a-f]{40}$ ]] \
+    || fail_closed "trusted workflow candidate SHA is invalid"
+
+  trusted_payload="$(github_api \
+    "repos/${repository}/contents/${workflow_path}?ref=${trusted_base_sha}")" \
+    || fail_closed "trusted workflow base content is unavailable"
+  candidate_payload="$(github_api \
+    "repos/${repository}/contents/${workflow_path}?ref=${candidate_head_sha}")" \
+    || fail_closed "candidate workflow content is unavailable"
+  trusted_blob="$(jq -er --arg path "$workflow_path" '
+    select(
+      type == "object"
+      and .type == "file"
+      and .path == $path
+      and .encoding == "base64"
+      and (.size | type == "number" and floor == . and . > 0 and . <= 1048576)
+      and (.content | type == "string" and length > 0)
+      and (.sha | type == "string" and test("^[0-9a-f]{40}$"))
+    )
+    | .sha
+  ' <<<"$trusted_payload")" \
+    || fail_closed "trusted workflow base metadata is invalid"
+  candidate_blob="$(jq -er --arg path "$workflow_path" '
+    select(
+      type == "object"
+      and .type == "file"
+      and .path == $path
+      and .encoding == "base64"
+      and (.size | type == "number" and floor == . and . > 0 and . <= 1048576)
+      and (.content | type == "string" and length > 0)
+      and (.sha | type == "string" and test("^[0-9a-f]{40}$"))
+    )
+    | .sha
+  ' <<<"$candidate_payload")" \
+    || fail_closed "candidate workflow metadata is invalid"
+  [ "$candidate_blob" = "$trusted_blob" ] \
+    || fail_closed "candidate Copilot workflow differs from trusted base"
+  trusted_digest="$(jq -er '.content' <<<"$trusted_payload" \
+    | tr -d '\n' | base64 --decode | sha256sum | awk '{print $1}')" \
+    || fail_closed "trusted workflow content digest is unavailable"
+  candidate_digest="$(jq -er '.content' <<<"$candidate_payload" \
+    | tr -d '\n' | base64 --decode | sha256sum | awk '{print $1}')" \
+    || fail_closed "candidate workflow content digest is unavailable"
+  [[ "$trusted_digest" =~ ^[0-9a-f]{64}$ ]] \
+    || fail_closed "trusted workflow content digest is invalid"
+  [ "$candidate_digest" = "$trusted_digest" ] \
+    || fail_closed "candidate Copilot workflow content digest differs from trusted base"
+  printf 'sha256:%s\n' "$trusted_digest"
+}
+
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric
 # identifier as a shell integer. Numeric build identifiers may have leading
 # zeroes; numeric core and prerelease identifiers may not.
@@ -1061,7 +1124,7 @@ PY
   local container_consumed_urls container_asset_bindings
   local container_initial_asset_snapshot container_initial_asset_snapshot_digest
   local consumer_ai_check consumer_ai_job consumer_ai_pull_requests
-  local consumer_ai_run
+  local consumer_ai_run consumer_ai_workflow_digest
   local consumer_ai_run_id consumer_ai_run_attempt
   consumer_pr="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/pulls/${INPUT_CONSUMER_PR}")"
@@ -1081,6 +1144,11 @@ PY
     "$CONSUMER_REPOSITORY" "$consumer_pr")" \
     || fail_closed "consumer pull-request merge event is invalid"
   consumer_pr_merge_sha="$(jq -er '.commitSha' <<<"$consumer_pr_merge_event")"
+  consumer_ai_workflow_digest="$(trusted_workflow_content_digest \
+    "$CONSUMER_REPOSITORY" "$COPILOT_REVIEW_WORKFLOW" \
+    "$(jq -er '.base.sha' <<<"$consumer_pr")" \
+    "$INPUT_CONSUMER_HEAD_SHA")" \
+    || fail_closed "consumer Copilot workflow is not bound to the protected base"
 
   consumer_ai_check="$(github_api --paginate \
     "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_HEAD_SHA}/check-runs?per_page=100" \
@@ -1179,6 +1247,7 @@ PY
     --argjson workflow_run_attempt "$consumer_ai_run_attempt" \
     --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" \
     --arg workflow_path "$COPILOT_REVIEW_WORKFLOW" \
+    --arg workflow_content_digest "$consumer_ai_workflow_digest" \
     --arg workflow_actor "lightning-it-release-automation[bot]" \
     --argjson pull_request "$INPUT_CONSUMER_PR" \
     --arg base_ref "main" \
@@ -1190,6 +1259,7 @@ PY
         workflowRunAttempt: $workflow_run_attempt,
         workflowName: $workflow_name,
         workflowPath: $workflow_path,
+        workflowContentDigest: $workflow_content_digest,
         workflowEvent: "pull_request",
         workflowActor: $workflow_actor,
         workflowTriggeringActor: $workflow_actor,
@@ -1901,7 +1971,10 @@ PY
     --argjson container_run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
     --argjson container_reviews "$container_approval_history" \
     --argjson finalizer_reviews "$finalizer_approval_history" '{
-      humanActions: 0,
+      humanActions: {
+        scope: "environment-approval-reviews-on-evidence-bound-runs",
+        count: 0
+      },
       app: {
         slug: $app_slug,
         installationId: $app_installation_id

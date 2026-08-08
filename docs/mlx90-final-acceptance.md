@@ -262,17 +262,22 @@ ID, both evidence-file digests, finalizer workflow SHA, run ID, run attempt,
 timestamp, receipt type, and type-specific observations. Receipts never contain
 tokens, private keys, or secret values.
 
-The receipt set also contains one `ZeroTouch` receipt with the literal
-`humanActions: 0`. It binds the release-automation App slug and installation
-ID, both App-authored merge events, the exact successful current-head review
-gate, and the producer, container, and finalizer workflow-run IDs. For each of
-those runs the workflow queries GitHub's Actions approval-history endpoint and
-requires the returned review list to be empty. Any human environment approval,
-foreign App identity, changed run ID, non-current review gate, or missing API
-evidence stops the finalizer before durable acceptance is created. The
-evidence token is scoped to the four repositories required for these reads and
-retains only `Actions: read`, `Checks: read`, `Contents: read`, and
-`Pull requests: read`.
+The receipt set also contains one `ZeroTouch` receipt whose `humanActions`
+object is deliberately scoped to
+`environment-approval-reviews-on-evidence-bound-runs` and records `count: 0`.
+This is not an unverifiable claim that no human ever interacted with GitHub.
+It is the narrower durable claim GitHub can prove: the release-automation App
+authored both protected merge events and the bound workflow transitions, while
+the producer, current-head review, container, and finalizer runs have empty
+Actions environment-approval histories. The current-head review is accepted
+only when `.github/workflows/copilot-review.yml` at the candidate head has the
+same Git blob and SHA-256 content digest as the workflow at the protected
+`main` base SHA recorded for that PR. A candidate-modified self-attesting gate,
+human environment approval, foreign App identity, changed run ID, non-current
+review gate, or missing API evidence stops the finalizer before durable
+acceptance is created. The evidence token is scoped to the four repositories
+required for these reads and retains only `Actions: read`, `Checks: read`,
+`Contents: read`, and `Pull requests: read`.
 
 Every finalizer JSON output uses one no-clobber writer. It rejects an existing
 regular file or symlink, creates its temporary file exclusively, and publishes

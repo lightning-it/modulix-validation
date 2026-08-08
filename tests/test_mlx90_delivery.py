@@ -132,7 +132,10 @@ def delivered_fixture() -> dict[str, object]:
         },
         "checks": {name: True for name in MODULE.REQUIRED_CHECKS},
         "zeroTouch": {
-            "humanActions": 0,
+            "humanActions": {
+                "scope": MODULE.HUMAN_ACTION_SCOPE,
+                "count": 0,
+            },
             "app": {
                 "slug": MODULE.RELEASE_AUTOMATION_APP_SLUG,
                 "installationId": MODULE.RELEASE_AUTOMATION_INSTALLATION_ID,
@@ -170,6 +173,7 @@ def delivered_fixture() -> dict[str, object]:
                 "workflowRunAttempt": 1,
                 "workflowName": MODULE.COPILOT_REVIEW_WORKFLOW_NAME,
                 "workflowPath": MODULE.COPILOT_REVIEW_WORKFLOW,
+                "workflowContentDigest": f"sha256:{'6' * 64}",
                 "workflowEvent": "pull_request",
                 "workflowActor": MODULE.RELEASE_AUTOMATION_ACTOR,
                 "workflowTriggeringActor": MODULE.RELEASE_AUTOMATION_ACTOR,
@@ -574,6 +578,13 @@ class DeliveryTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(ValueError, "review gate is invalid"):
                     MODULE.validate(spoofed_review)
+
+        malformed_workflow_digest = delivered_fixture()
+        malformed_workflow_digest["zeroTouch"]["currentHeadReviewGate"][
+            "workflowContentDigest"
+        ] = "sha256:spoofed"
+        with self.assertRaisesRegex(ValueError, "immutable sha256 digest"):
+            MODULE.validate(malformed_workflow_digest)
 
         human_review_gate = delivered_fixture()
         human_review_gate["zeroTouch"]["workflowApprovalHistory"][1][

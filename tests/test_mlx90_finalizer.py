@@ -635,7 +635,10 @@ class FinalizerTests(unittest.TestCase):
                 "sourceSha": self.identity.consumer_merge_sha,
             },
             "zero-touch": {
-                "humanActions": 0,
+                "humanActions": {
+                    "scope": MODULE.HUMAN_ACTION_SCOPE,
+                    "count": 0,
+                },
                 "app": {
                     "slug": MODULE.RELEASE_AUTOMATION_APP_SLUG,
                     "installationId": (
@@ -675,6 +678,7 @@ class FinalizerTests(unittest.TestCase):
                     "workflowRunAttempt": 1,
                     "workflowName": MODULE.COPILOT_REVIEW_WORKFLOW_NAME,
                     "workflowPath": MODULE.COPILOT_REVIEW_WORKFLOW,
+                    "workflowContentDigest": f"sha256:{'6' * 64}",
                     "workflowEvent": "pull_request",
                     "workflowActor": MODULE.CONTAINER_RELEASE_ACTOR,
                     "workflowTriggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
@@ -1137,9 +1141,10 @@ class FinalizerTests(unittest.TestCase):
             (
                 "zero-touch",
                 lambda value: value["observations"].__setitem__(
-                    "humanActions", 1
+                    "humanActions",
+                    {"scope": MODULE.HUMAN_ACTION_SCOPE, "count": 1},
                 ),
-                "integer zero",
+                "zero scoped approvals",
             ),
             (
                 "zero-touch",

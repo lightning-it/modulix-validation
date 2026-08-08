@@ -67,6 +67,7 @@ CONSUMER_REPOSITORY = "lightning-it/container-ee-wunder-ansible-ubi9"
 COPILOT_REVIEW_WORKFLOW = ".github/workflows/copilot-review.yml"
 COPILOT_REVIEW_WORKFLOW_NAME = "Copilot review gate"
 COPILOT_REVIEW_JOB_NAME = "Successful Copilot review"
+HUMAN_ACTION_SCOPE = "environment-approval-reviews-on-evidence-bound-runs"
 FINALIZER_REPOSITORY = "lightning-it/modulix-validation"
 FINALIZER_WORKFLOW = ".github/workflows/mlx90-final-acceptance.yml"
 RELEASE_AUTOMATION_ACTOR = "lightning-it-release-automation[bot]"
@@ -658,11 +659,14 @@ def validate_delivered(result: dict[str, Any]) -> None:
         },
         "zeroTouch",
     )
+    human_actions = mapping(zero_touch["humanActions"], "zeroTouch.humanActions")
+    exact_fields(human_actions, {"scope", "count"}, "zeroTouch.humanActions")
     if (
-        isinstance(zero_touch["humanActions"], bool)
-        or zero_touch["humanActions"] != 0
+        human_actions["scope"] != HUMAN_ACTION_SCOPE
+        or isinstance(human_actions["count"], bool)
+        or human_actions["count"] != 0
     ):
-        fail("zeroTouch.humanActions must be the integer zero")
+        fail("zeroTouch.humanActions must record zero scoped approvals")
     app = mapping(zero_touch["app"], "zeroTouch.app")
     exact_fields(app, {"slug", "installationId"}, "zeroTouch.app")
     if app != {
@@ -740,15 +744,16 @@ def validate_delivered(result: dict[str, Any]) -> None:
             "workflowRunAttempt",
             "workflowName",
             "workflowPath",
-                "workflowEvent",
-                "workflowActor",
-                "workflowTriggeringActor",
-                "pullRequest",
-                "baseRef",
-                "baseSha",
-                "headRef",
-                "headRepository",
-            },
+            "workflowContentDigest",
+            "workflowEvent",
+            "workflowActor",
+            "workflowTriggeringActor",
+            "pullRequest",
+            "baseRef",
+            "baseSha",
+            "headRef",
+            "headRepository",
+        },
         "zeroTouch.currentHeadReviewGate",
     )
     positive_integer(review_gate["id"], "zeroTouch review gate id")
@@ -764,6 +769,10 @@ def validate_delivered(result: dict[str, Any]) -> None:
     )
     review_base_sha = full_sha(
         review_gate["baseSha"], "zeroTouch review base SHA"
+    )
+    digest(
+        review_gate["workflowContentDigest"],
+        "zeroTouch review workflow content digest",
     )
     string(review_gate["headRef"], "zeroTouch review head ref")
     if (

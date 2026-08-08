@@ -37,6 +37,7 @@ CONSUMER_REPOSITORY = "lightning-it/container-ee-wunder-ansible-ubi9"
 COPILOT_REVIEW_WORKFLOW = ".github/workflows/copilot-review.yml"
 COPILOT_REVIEW_WORKFLOW_NAME = "Copilot review gate"
 COPILOT_REVIEW_JOB_NAME = "Successful Copilot review"
+HUMAN_ACTION_SCOPE = "environment-approval-reviews-on-evidence-bound-runs"
 FINALIZER_REPOSITORY = "lightning-it/modulix-validation"
 FINALIZER_WORKFLOW = ".github/workflows/mlx90-final-acceptance.yml"
 CONTAINER_WORKFLOW = ".github/workflows/container-build-publish.yml"
@@ -2728,11 +2729,18 @@ def validate_receipt_observations(
             },
             "zero-touch observations",
         )
+        human_actions = require_mapping(
+            observations["humanActions"], "zero-touch humanActions"
+        )
+        require_exact(
+            human_actions, {"scope", "count"}, "zero-touch humanActions"
+        )
         if (
-            isinstance(observations["humanActions"], bool)
-            or observations["humanActions"] != 0
+            human_actions["scope"] != HUMAN_ACTION_SCOPE
+            or isinstance(human_actions["count"], bool)
+            or human_actions["count"] != 0
         ):
-            fail("zero-touch humanActions must be the integer zero")
+            fail("zero-touch humanActions must record zero scoped approvals")
         app = require_mapping(observations["app"], "zero-touch app")
         require_exact(app, {"slug", "installationId"}, "zero-touch app")
         if app != {
@@ -2799,6 +2807,7 @@ def validate_receipt_observations(
                 "workflowRunAttempt",
                 "workflowName",
                 "workflowPath",
+                "workflowContentDigest",
                 "workflowEvent",
                 "workflowActor",
                 "workflowTriggeringActor",
@@ -2824,6 +2833,10 @@ def validate_receipt_observations(
             "zero-touch review pull request",
         )
         require_sha(review_gate["baseSha"], "zero-touch review base SHA")
+        require_digest(
+            review_gate["workflowContentDigest"],
+            "zero-touch review workflow content digest",
+        )
         require_string(review_gate["headRef"], "zero-touch review head ref")
         if review_gate != {
             "id": review_gate["id"],
@@ -2836,6 +2849,7 @@ def validate_receipt_observations(
             "workflowRunAttempt": review_gate["workflowRunAttempt"],
             "workflowName": COPILOT_REVIEW_WORKFLOW_NAME,
             "workflowPath": COPILOT_REVIEW_WORKFLOW,
+            "workflowContentDigest": review_gate["workflowContentDigest"],
             "workflowEvent": "pull_request",
             "workflowActor": CONTAINER_RELEASE_ACTOR,
             "workflowTriggeringActor": CONTAINER_RELEASE_ACTOR,
