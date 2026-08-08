@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment:
-      name: ansible-collection-runtime-protected
+      name: mlx90-final-acceptance
     permissions:
       actions: read
       contents: read
@@ -113,8 +113,11 @@ jobs:
           repositories: |
             ansible-collection-supplementary
             container-ee-wunder-ansible-ubi9
+            modulix-validation
             shared-assets-lit
           permission-actions: read
+          # Required by the exact current-head check-runs lookup below.
+          permission-checks: read
           permission-contents: read
           # GitHub documents Pull requests: read as an alternative to Issues:
           # read for this exact endpoint. Keep the App token least-privileged.
@@ -138,6 +141,7 @@ jobs:
           expected_repositories='[
             "lightning-it/ansible-collection-supplementary",
             "lightning-it/container-ee-wunder-ansible-ubi9",
+            "lightning-it/modulix-validation",
             "lightning-it/shared-assets-lit"
           ]'
           jq -e \
@@ -160,6 +164,8 @@ jobs:
       - name: Verify immutable chain and create signed final evidence
         id: acceptance
         env:
+          APP_INSTALLATION_ID: ${{ steps.evidence-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.evidence-app.outputs.app-slug }}
           GH_TOKEN: ${{ steps.evidence-app.outputs.token }}
           INPUT_CORRELATION_ID: ${{ inputs.correlation_id }}
           INPUT_PRODUCER_EVIDENCE_URL: ${{ inputs.producer_evidence_url }}
@@ -242,7 +248,7 @@ jobs:
     timeout-minutes: 10
     needs: persist
     environment:
-      name: ansible-collection-runtime-protected
+      name: mlx90-final-acceptance
     permissions:
       contents: read
     steps:

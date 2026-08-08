@@ -34,12 +34,19 @@ PRODUCER_WORKFLOW = ".github/workflows/collection-ci.yml"
 PRODUCER_WORKFLOW_NAME = "Collection CI"
 PRODUCER_VALIDATION_JOB = "Collection / Release Validation"
 CONSUMER_REPOSITORY = "lightning-it/container-ee-wunder-ansible-ubi9"
+COPILOT_REVIEW_WORKFLOW = ".github/workflows/copilot-review.yml"
+COPILOT_REVIEW_WORKFLOW_NAME = "Copilot review gate"
+COPILOT_REVIEW_JOB_NAME = "Successful Copilot review"
+HUMAN_ACTION_SCOPE = "environment-approval-reviews-on-evidence-bound-runs"
 FINALIZER_REPOSITORY = "lightning-it/modulix-validation"
 FINALIZER_WORKFLOW = ".github/workflows/mlx90-final-acceptance.yml"
 CONTAINER_WORKFLOW = ".github/workflows/container-build-publish.yml"
 CONTAINER_WORKFLOW_NAME = "Container Build & Publish"
 CONTAINER_WORKFLOW_JOB = "build"
 CONTAINER_RELEASE_ACTOR = "lightning-it-release-automation[bot]"
+RELEASE_AUTOMATION_APP_SLUG = "lightning-it-release-automation"
+RELEASE_AUTOMATION_INSTALLATION_ID = 148019054
+GITHUB_ACTIONS_APP_ID = 15368
 BUILDKIT_BUILD_TYPE = (
     "https://github.com/moby/buildkit/blob/master/"
     "docs/attestations/slsa-definitions.md"
@@ -137,6 +144,7 @@ FINAL_CHECKS = {
     "provenance",
     "buildkitAttestations",
     "notRevoked",
+    "zeroTouch",
 }
 RECEIPT_API_VERSION = "lit.security-release.verification-receipt/v1"
 RECEIPT_BUNDLE_API_VERSION = (
@@ -153,6 +161,7 @@ GLOBAL_RECEIPT_TYPES = {
     "container-release": "ContainerRelease",
     "container-revocation-initial": "ContainerRevocation",
     "container-cosign": "ContainerCosign",
+    "zero-touch": "ZeroTouch",
     "final-revocation": "FinalRevocation",
 }
 VARIANT_RECEIPT_TYPES = {
@@ -213,6 +222,7 @@ CHECK_RECEIPTS = {
         *(f"{variant}-buildkit" for variant in VARIANTS),
     },
     "notRevoked": {"final-revocation"},
+    "zeroTouch": {"zero-touch"},
 }
 
 
@@ -984,7 +994,7 @@ def validate_producer_evidence(
         {"identifiers", "affectedVersion", "fixedVersion"},
         "security",
     )
-    identifiers = require_security_identifiers(security["identifiers"])
+    require_security_identifiers(security["identifiers"])
     affected_version = require_string(
         security["affectedVersion"], "security.affectedVersion"
     )
@@ -1799,6 +1809,7 @@ def validate_verification_report(
             "containerEvidenceDigest",
             "receiptBundle",
             "checks",
+            "zeroTouch",
             "variants",
         },
         "verification report",
@@ -1872,6 +1883,8 @@ def validate_verification_report(
         "final revocation receipt checkedAt",
     ):
         fail("verification checkedAt is not derived from final revocation receipt")
+    if payload["zeroTouch"] != receipts["zero-touch"]["observations"]:
+        fail("verification zeroTouch evidence is not receipt-derived")
     checks = require_mapping(payload["checks"], "verification checks")
     require_exact(checks, FINAL_CHECKS, "verification checks")
     if any(value is not True for value in checks.values()):
@@ -1978,6 +1991,13 @@ def build_final_evidence(
         ),
         "digest": verification["containerEvidenceDigest"],
     }
+    consumer = copy.deepcopy(container_evidence["consumer"])
+    consumer["changeMergeSha"] = verification["zeroTouch"]["mergeEvents"][0][
+        "commitSha"
+    ]
+    consumer["promotionPullRequest"] = verification["zeroTouch"][
+        "mergeEvents"
+    ][1]["pullRequest"]
     acceptance = {
         "apiVersion": "lit.security-release.acceptance/v1",
         "kind": "SecurityReleaseAcceptance",
@@ -1994,8 +2014,11 @@ def build_final_evidence(
                 "url": identity.producer_evidence_url,
                 "digest": f"sha256:{identity.producer_evidence_sha256}",
             },
+            "workflowRunId": verification["zeroTouch"][
+                "workflowApprovalHistory"
+            ][0]["runId"],
         },
-        "consumer": copy.deepcopy(container_evidence["consumer"]),
+        "consumer": consumer,
         "container": {
             "repository": CONSUMER_REPOSITORY,
             "releaseId": release["id"],
@@ -2004,6 +2027,7 @@ def build_final_evidence(
             "sourceSha": release["sourceSha"],
             "evidence": container_evidence_reference,
             "variants": variants,
+            "workflowRunId": release["workflowRunId"],
         },
         "acceptance": {
             "profile": producer_evidence["acceptance"]["profile"],
@@ -2013,6 +2037,7 @@ def build_final_evidence(
         },
         "receiptBundle": copy.deepcopy(verification["receiptBundle"]),
         "checks": copy.deepcopy(verification["checks"]),
+        "zeroTouch": copy.deepcopy(verification["zeroTouch"]),
         "finalizer": {
             "repository": FINALIZER_REPOSITORY,
             "workflow": FINALIZER_WORKFLOW,
@@ -2695,6 +2720,181 @@ def validate_receipt_observations(
             fail("container Cosign receipt identity mismatch")
         return observations
 
+    if receipt_id == "zero-touch":
+        require_exact(
+            observations,
+            {
+                "humanActions",
+                "app",
+                "finalizer",
+                "mergeEvents",
+                "currentHeadReviewGate",
+                "workflowApprovalHistory",
+            },
+            "zero-touch observations",
+        )
+        human_actions = require_mapping(
+            observations["humanActions"], "zero-touch humanActions"
+        )
+        require_exact(
+            human_actions, {"scope", "count"}, "zero-touch humanActions"
+        )
+        if (
+            human_actions["scope"] != HUMAN_ACTION_SCOPE
+            or isinstance(human_actions["count"], bool)
+            or not isinstance(human_actions["count"], int)
+            or human_actions["count"] != 0
+        ):
+            fail("zero-touch humanActions must record zero scoped approvals")
+        app = require_mapping(observations["app"], "zero-touch app")
+        require_exact(app, {"slug", "installationId"}, "zero-touch app")
+        if app != {
+            "slug": RELEASE_AUTOMATION_APP_SLUG,
+            "installationId": RELEASE_AUTOMATION_INSTALLATION_ID,
+        }:
+            fail("zero-touch App identity is invalid")
+        finalizer = require_mapping(
+            observations["finalizer"], "zero-touch finalizer"
+        )
+        require_exact(
+            finalizer,
+            {"repository", "runId", "actor", "triggeringActor"},
+            "zero-touch finalizer",
+        )
+        require_positive(finalizer["runId"], "zero-touch finalizer runId")
+        if (
+            finalizer["repository"] != FINALIZER_REPOSITORY
+            or finalizer["actor"] != CONTAINER_RELEASE_ACTOR
+            or finalizer["triggeringActor"] != CONTAINER_RELEASE_ACTOR
+        ):
+            fail("zero-touch finalizer identity is invalid")
+        merge_events = observations["mergeEvents"]
+        if not isinstance(merge_events, list) or len(merge_events) != 2:
+            fail("zero-touch mergeEvents must contain exactly two events")
+        for position, event_value in enumerate(merge_events):
+            event = require_mapping(
+                event_value, f"zero-touch mergeEvents[{position}]"
+            )
+            require_exact(
+                event,
+                {"purpose", "repository", "pullRequest", "actor", "commitSha"},
+                f"zero-touch mergeEvents[{position}]",
+            )
+            if event["purpose"] not in {"consumer-change", "main-promotion"}:
+                fail("zero-touch merge event purpose is invalid")
+            if (
+                event["repository"] != CONSUMER_REPOSITORY
+                or event["actor"] != CONTAINER_RELEASE_ACTOR
+            ):
+                fail("zero-touch merge event identity is invalid")
+            require_positive(
+                event["pullRequest"],
+                f"zero-touch mergeEvents[{position}].pullRequest",
+            )
+            require_sha(
+                event["commitSha"],
+                f"zero-touch mergeEvents[{position}].commitSha",
+            )
+        review_gate = require_mapping(
+            observations["currentHeadReviewGate"],
+            "zero-touch currentHeadReviewGate",
+        )
+        require_exact(
+            review_gate,
+            {
+                "id",
+                "name",
+                "headSha",
+                "status",
+                "conclusion",
+                "appId",
+                "workflowRunId",
+                "workflowRunAttempt",
+                "workflowName",
+                "workflowPath",
+                "workflowContentDigest",
+                "workflowEvent",
+                "workflowActor",
+                "workflowTriggeringActor",
+                "pullRequest",
+                "baseRef",
+                "baseSha",
+                "headRef",
+                "headRepository",
+            },
+            "zero-touch currentHeadReviewGate",
+        )
+        require_positive(review_gate["id"], "zero-touch review gate ID")
+        require_positive(
+            review_gate["workflowRunId"],
+            "zero-touch review workflow run ID",
+        )
+        require_positive(
+            review_gate["workflowRunAttempt"],
+            "zero-touch review workflow run attempt",
+        )
+        require_positive(
+            review_gate["pullRequest"],
+            "zero-touch review pull request",
+        )
+        require_sha(review_gate["baseSha"], "zero-touch review base SHA")
+        require_digest(
+            review_gate["workflowContentDigest"],
+            "zero-touch review workflow content digest",
+        )
+        require_string(review_gate["headRef"], "zero-touch review head ref")
+        if review_gate != {
+            "id": review_gate["id"],
+            "name": COPILOT_REVIEW_JOB_NAME,
+            "headSha": identity.consumer_head_sha,
+            "status": "completed",
+            "conclusion": "success",
+            "appId": GITHUB_ACTIONS_APP_ID,
+            "workflowRunId": review_gate["workflowRunId"],
+            "workflowRunAttempt": review_gate["workflowRunAttempt"],
+            "workflowName": COPILOT_REVIEW_WORKFLOW_NAME,
+            "workflowPath": COPILOT_REVIEW_WORKFLOW,
+            "workflowContentDigest": review_gate["workflowContentDigest"],
+            "workflowEvent": "pull_request",
+            "workflowActor": CONTAINER_RELEASE_ACTOR,
+            "workflowTriggeringActor": CONTAINER_RELEASE_ACTOR,
+            "pullRequest": identity.consumer_pr,
+            "baseRef": "main",
+            "baseSha": container["consumer"]["baseSha"],
+            "headRef": review_gate["headRef"],
+            "headRepository": CONSUMER_REPOSITORY,
+        }:
+            fail("zero-touch current-head review gate is invalid")
+        approval_history = observations["workflowApprovalHistory"]
+        if not isinstance(approval_history, list) or len(approval_history) != 4:
+            fail("zero-touch workflowApprovalHistory must contain four runs")
+        observed_runs: set[tuple[str, int]] = set()
+        for position, history_value in enumerate(approval_history):
+            history = require_mapping(
+                history_value,
+                f"zero-touch workflowApprovalHistory[{position}]",
+            )
+            require_exact(
+                history,
+                {"repository", "runId", "reviews"},
+                f"zero-touch workflowApprovalHistory[{position}]",
+            )
+            repository = require_string(
+                history["repository"],
+                f"zero-touch workflowApprovalHistory[{position}].repository",
+            )
+            run_id = require_positive(
+                history["runId"],
+                f"zero-touch workflowApprovalHistory[{position}].runId",
+            )
+            if history["reviews"] != []:
+                fail("zero-touch workflow run contains a human approval")
+            key = (repository, run_id)
+            if key in observed_runs:
+                fail("zero-touch workflow approval histories must be unique")
+            observed_runs.add(key)
+        return observations
+
     if receipt_id == "final-revocation":
         require_exact(
             observations,
@@ -3197,6 +3397,53 @@ def validate_receipt_set(
         != producer_materials["provenanceDigest"]
     ):
         fail("producer central CI receipt is not bound to producer provenance")
+    zero_touch = by_id["zero-touch"]["observations"]
+    consumer_identity = by_id["consumer-identity"]["observations"]
+    container_release = by_id["container-release"]["observations"]
+    expected_merge_events = [
+        {
+            "purpose": "consumer-change",
+            "repository": CONSUMER_REPOSITORY,
+            "pullRequest": consumer_identity["pullRequest"],
+            "actor": CONTAINER_RELEASE_ACTOR,
+            "commitSha": consumer_identity["pullRequestMergeSha"],
+        },
+        {
+            "purpose": "main-promotion",
+            "repository": CONSUMER_REPOSITORY,
+            "pullRequest": consumer_identity["releasePromotionPullRequest"],
+            "actor": CONTAINER_RELEASE_ACTOR,
+            "commitSha": consumer_identity["releasePromotionMergeSha"],
+        },
+    ]
+    if zero_touch["mergeEvents"] != expected_merge_events:
+        fail("zero-touch merge events are not bound to consumer identity")
+    if zero_touch["finalizer"]["runId"] != run_id:
+        fail("zero-touch finalizer run ID is foreign to this receipt bundle")
+    expected_approval_history = [
+        {
+            "repository": PRODUCER_REPOSITORY,
+            "runId": producer_central_ci["workflowRunId"],
+            "reviews": [],
+        },
+        {
+            "repository": CONSUMER_REPOSITORY,
+            "runId": zero_touch["currentHeadReviewGate"]["workflowRunId"],
+            "reviews": [],
+        },
+        {
+            "repository": CONSUMER_REPOSITORY,
+            "runId": container_release["workflowRunId"],
+            "reviews": [],
+        },
+        {
+            "repository": FINALIZER_REPOSITORY,
+            "runId": run_id,
+            "reviews": [],
+        },
+    ]
+    if zero_touch["workflowApprovalHistory"] != expected_approval_history:
+        fail("zero-touch workflow approval history is not evidence-bound")
     final_checked = require_timestamp(
         by_id["final-revocation"]["checkedAt"], "final revocation checkedAt"
     )
@@ -3471,6 +3718,7 @@ def verification_report(
             "size": receipt_bundle_size,
         },
         "checks": checks,
+        "zeroTouch": copy.deepcopy(receipts["zero-touch"]["observations"]),
         "variants": observed_variants,
     }
 

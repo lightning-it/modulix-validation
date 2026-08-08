@@ -88,12 +88,15 @@ def delivered_fixture() -> dict[str, object]:
                 "security-release-evidence.json",
                 "1",
             ),
+            "workflowRunId": 111111,
         },
         "consumer": {
             "repository": MODULE.CONSUMER_REPOSITORY,
             "pullRequest": 503,
             "baseSha": "7" * 40,
             "headSha": "2" * 40,
+            "changeMergeSha": "8" * 40,
+            "promotionPullRequest": 504,
             "mergeSha": "3" * 40,
         },
         "container": {
@@ -116,6 +119,7 @@ def delivered_fixture() -> dict[str, object]:
                 "certified": variant("certified", "4"),
                 "bootstrap": variant("bootstrap", "5"),
             },
+            "workflowRunId": 222222,
         },
         "acceptance": {
             "profile": "lit.supplementary/security-fix-2026-001",
@@ -129,6 +133,81 @@ def delivered_fixture() -> dict[str, object]:
             "size": 12345,
         },
         "checks": {name: True for name in MODULE.REQUIRED_CHECKS},
+        "zeroTouch": {
+            "humanActions": {
+                "scope": MODULE.HUMAN_ACTION_SCOPE,
+                "count": 0,
+            },
+            "app": {
+                "slug": MODULE.RELEASE_AUTOMATION_APP_SLUG,
+                "installationId": MODULE.RELEASE_AUTOMATION_INSTALLATION_ID,
+            },
+            "finalizer": {
+                "repository": MODULE.FINALIZER_REPOSITORY,
+                "runId": 123456,
+                "actor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                "triggeringActor": MODULE.RELEASE_AUTOMATION_ACTOR,
+            },
+            "mergeEvents": [
+                {
+                    "purpose": "consumer-change",
+                    "repository": MODULE.CONSUMER_REPOSITORY,
+                    "pullRequest": 503,
+                    "actor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                    "commitSha": "8" * 40,
+                },
+                {
+                    "purpose": "main-promotion",
+                    "repository": MODULE.CONSUMER_REPOSITORY,
+                    "pullRequest": 504,
+                    "actor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                    "commitSha": "3" * 40,
+                },
+            ],
+            "currentHeadReviewGate": {
+                "id": 765432,
+                "name": "Successful Copilot review",
+                "headSha": "2" * 40,
+                "status": "completed",
+                "conclusion": "success",
+                "appId": MODULE.GITHUB_ACTIONS_APP_ID,
+                "workflowRunId": 765431,
+                "workflowRunAttempt": 1,
+                "workflowName": MODULE.COPILOT_REVIEW_WORKFLOW_NAME,
+                "workflowPath": MODULE.COPILOT_REVIEW_WORKFLOW,
+                "workflowContentDigest": f"sha256:{'6' * 64}",
+                "workflowEvent": "pull_request",
+                "workflowActor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                "workflowTriggeringActor": MODULE.RELEASE_AUTOMATION_ACTOR,
+                "pullRequest": 503,
+                "baseRef": "main",
+                "baseSha": "7" * 40,
+                "headRef": "security-release/LIT-SEC-MLX90-2026-001",
+                "headRepository": MODULE.CONSUMER_REPOSITORY,
+            },
+            "workflowApprovalHistory": [
+                {
+                    "repository": MODULE.PRODUCER_REPOSITORY,
+                    "runId": 111111,
+                    "reviews": [],
+                },
+                {
+                    "repository": MODULE.CONSUMER_REPOSITORY,
+                    "runId": 765431,
+                    "reviews": [],
+                },
+                {
+                    "repository": MODULE.CONSUMER_REPOSITORY,
+                    "runId": 222222,
+                    "reviews": [],
+                },
+                {
+                    "repository": MODULE.FINALIZER_REPOSITORY,
+                    "runId": 123456,
+                    "reviews": [],
+                },
+            ],
+        },
         "finalizer": {
             "repository": MODULE.FINALIZER_REPOSITORY,
             "workflow": MODULE.FINALIZER_WORKFLOW,
@@ -429,6 +508,117 @@ class DeliveryTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "does not match"):
             MODULE.validate(wrong_run)
+
+    def test_zero_touch_events_are_bound_to_the_accepted_chain(self):
+        mutations = (
+            ("consumer PR", 0, "pullRequest", 999, "consumer identity"),
+            (
+                "consumer merge",
+                0,
+                "commitSha",
+                "4" * 40,
+                "consumer identity",
+            ),
+            (
+                "consumer purpose",
+                0,
+                "purpose",
+                "main-promotion",
+                "consumer identity",
+            ),
+            (
+                "promotion source",
+                1,
+                "commitSha",
+                "5" * 40,
+                "consumer identity",
+            ),
+            (
+                "promotion PR",
+                1,
+                "pullRequest",
+                999,
+                "consumer identity",
+            ),
+            (
+                "promotion purpose",
+                1,
+                "purpose",
+                "consumer-change",
+                "consumer identity",
+            ),
+        )
+        for label, position, field, value, message in mutations:
+            with self.subTest(label=label):
+                document = delivered_fixture()
+                document["zeroTouch"]["mergeEvents"][position][field] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    MODULE.validate(document)
+
+        wrong_review_head = delivered_fixture()
+        wrong_review_head["zeroTouch"]["currentHeadReviewGate"]["headSha"] = (
+            "6" * 40
+        )
+        with self.assertRaisesRegex(ValueError, "bound to consumer head"):
+            MODULE.validate(wrong_review_head)
+
+        for field, value in (
+            ("workflowName", "Spoofed review gate"),
+            ("workflowPath", ".github/workflows/spoof.yml"),
+            ("workflowEvent", "workflow_dispatch"),
+            ("workflowActor", "attacker[bot]"),
+            ("workflowTriggeringActor", "attacker[bot]"),
+            ("pullRequest", 999),
+            ("baseRef", "develop"),
+            ("baseSha", "6" * 40),
+            ("headRepository", "attacker/repository"),
+        ):
+            with self.subTest(review_field=field):
+                spoofed_review = delivered_fixture()
+                spoofed_review["zeroTouch"]["currentHeadReviewGate"][field] = (
+                    value
+                )
+                with self.assertRaisesRegex(ValueError, "review gate is invalid"):
+                    MODULE.validate(spoofed_review)
+
+        malformed_workflow_digest = delivered_fixture()
+        malformed_workflow_digest["zeroTouch"]["currentHeadReviewGate"][
+            "workflowContentDigest"
+        ] = "sha256:spoofed"
+        with self.assertRaisesRegex(ValueError, "immutable sha256 digest"):
+            MODULE.validate(malformed_workflow_digest)
+
+        human_review_gate = delivered_fixture()
+        human_review_gate["zeroTouch"]["workflowApprovalHistory"][1][
+            "reviews"
+        ].append({"reviewer": "human"})
+        with self.assertRaisesRegex(ValueError, "human approval"):
+            MODULE.validate(human_review_gate)
+
+        foreign_review_run = delivered_fixture()
+        foreign_review_run["zeroTouch"]["workflowApprovalHistory"][1][
+            "runId"
+        ] = 765499
+        with self.assertRaisesRegex(ValueError, "not evidence-bound"):
+            MODULE.validate(foreign_review_run)
+
+        float_zero = delivered_fixture()
+        float_zero["zeroTouch"]["humanActions"]["count"] = 0.0
+        with self.assertRaisesRegex(ValueError, "zero scoped approvals"):
+            MODULE.validate(float_zero)
+
+        for position, label, foreign_id in (
+            (0, "producer", 111112),
+            (2, "container", 222223),
+        ):
+            foreign_run = delivered_fixture()
+            foreign_run["zeroTouch"]["workflowApprovalHistory"][position][
+                "runId"
+            ] = foreign_id
+            with self.assertRaisesRegex(
+                ValueError, f"{label}.*not evidence-bound"
+            ):
+                MODULE.validate(foreign_run)
 
     def test_ascii_controls_fail_before_trusted_url_parsing(self):
         controls = tuple(chr(value) for value in range(0x20)) + ("\x7f",)

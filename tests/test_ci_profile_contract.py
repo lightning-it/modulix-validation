@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -150,6 +151,8 @@ class CiProfileContractTests(unittest.TestCase):
         self.assertNotIn("collection-quality-profile.yml", workflow)
 
     def test_collection_release_transition_validates_artifact_names_in_bash(self):
+        bash = shutil.which("bash")
+        self.assertIsNotNone(bash, "bash is required for workflow contract tests")
         workflow = yaml.safe_load(
             (
                 ROOT / ".github/workflows/collection-release-transition.yml"
@@ -168,7 +171,7 @@ class CiProfileContractTests(unittest.TestCase):
         ):
             with self.subTest(version=version, artifact_name=artifact_name):
                 completed = subprocess.run(
-                    ["/bin/bash", "-c", validation],
+                    [bash, "-c", validation],
                     check=False,
                     capture_output=True,
                     env={
@@ -187,7 +190,7 @@ class CiProfileContractTests(unittest.TestCase):
         ):
             with self.subTest(artifact_name=artifact_name):
                 completed = subprocess.run(
-                    ["/bin/bash", "-c", validation],
+                    [bash, "-c", validation],
                     check=False,
                     capture_output=True,
                     env={
