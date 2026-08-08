@@ -634,6 +634,83 @@ class FinalizerTests(unittest.TestCase):
                 "identity": container_identity,
                 "sourceSha": self.identity.consumer_merge_sha,
             },
+            "zero-touch": {
+                "humanActions": {
+                    "scope": MODULE.HUMAN_ACTION_SCOPE,
+                    "count": 0,
+                },
+                "app": {
+                    "slug": MODULE.RELEASE_AUTOMATION_APP_SLUG,
+                    "installationId": (
+                        MODULE.RELEASE_AUTOMATION_INSTALLATION_ID
+                    ),
+                },
+                "finalizer": {
+                    "repository": MODULE.FINALIZER_REPOSITORY,
+                    "runId": 456789,
+                    "actor": MODULE.CONTAINER_RELEASE_ACTOR,
+                    "triggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
+                },
+                "mergeEvents": [
+                    {
+                        "purpose": "consumer-change",
+                        "repository": MODULE.CONSUMER_REPOSITORY,
+                        "pullRequest": self.identity.consumer_pr,
+                        "actor": MODULE.CONTAINER_RELEASE_ACTOR,
+                        "commitSha": "a" * 40,
+                    },
+                    {
+                        "purpose": "main-promotion",
+                        "repository": MODULE.CONSUMER_REPOSITORY,
+                        "pullRequest": 561,
+                        "actor": MODULE.CONTAINER_RELEASE_ACTOR,
+                        "commitSha": self.identity.consumer_merge_sha,
+                    },
+                ],
+                "currentHeadReviewGate": {
+                    "id": 654987,
+                    "name": "Successful Copilot review",
+                    "headSha": self.identity.consumer_head_sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "appId": MODULE.GITHUB_ACTIONS_APP_ID,
+                    "workflowRunId": 654986,
+                    "workflowRunAttempt": 1,
+                    "workflowName": MODULE.COPILOT_REVIEW_WORKFLOW_NAME,
+                    "workflowPath": MODULE.COPILOT_REVIEW_WORKFLOW,
+                    "workflowContentDigest": f"sha256:{'6' * 64}",
+                    "workflowEvent": "pull_request",
+                    "workflowActor": MODULE.CONTAINER_RELEASE_ACTOR,
+                    "workflowTriggeringActor": MODULE.CONTAINER_RELEASE_ACTOR,
+                    "pullRequest": self.identity.consumer_pr,
+                    "baseRef": "main",
+                    "baseSha": "7" * 40,
+                    "headRef": "security-release/LIT-SEC-MLX90-2026-001",
+                    "headRepository": MODULE.CONSUMER_REPOSITORY,
+                },
+                "workflowApprovalHistory": [
+                    {
+                        "repository": MODULE.PRODUCER_REPOSITORY,
+                        "runId": 123456,
+                        "reviews": [],
+                    },
+                    {
+                        "repository": MODULE.CONSUMER_REPOSITORY,
+                        "runId": 654986,
+                        "reviews": [],
+                    },
+                    {
+                        "repository": MODULE.CONSUMER_REPOSITORY,
+                        "runId": self.identity.container_release_run_id,
+                        "reviews": [],
+                    },
+                    {
+                        "repository": MODULE.FINALIZER_REPOSITORY,
+                        "runId": 456789,
+                        "reviews": [],
+                    },
+                ],
+            },
             "final-revocation": {
                 "producerReleaseId": producer_release_id,
                 "producerReleaseTag": f"v{artifact['version']}",
@@ -1060,6 +1137,49 @@ class FinalizerTests(unittest.TestCase):
                     "publishTriggeringActor", "human-reviewer"
                 ),
                 "container release receipt mismatch",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"].__setitem__(
+                    "humanActions",
+                    {"scope": MODULE.HUMAN_ACTION_SCOPE, "count": 1},
+                ),
+                "zero scoped approvals",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"]["humanActions"].__setitem__(
+                    "count", 0.0
+                ),
+                "zero scoped approvals",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"][
+                    "currentHeadReviewGate"
+                ].__setitem__("pullRequest", 999),
+                "current-head review gate is invalid",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"][
+                    "workflowApprovalHistory"
+                ][0]["reviews"].append({"reviewer": "human"}),
+                "human approval",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"][
+                    "workflowApprovalHistory"
+                ][1]["reviews"].append({"reviewer": "human"}),
+                "human approval",
+            ),
+            (
+                "zero-touch",
+                lambda value: value["observations"][
+                    "workflowApprovalHistory"
+                ][0].__setitem__("runId", 123457),
+                "not evidence-bound",
             ),
             (
                 "public-oci-index",

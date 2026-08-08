@@ -1082,6 +1082,22 @@ def expected_integration_tree(change: PlannedChange) -> str:
             purpose="compatibility merge worktree",
         )
         try:
+            refreshed = run(
+                [
+                    "git",
+                    "-c",
+                    f"core.hooksPath={disabled_hooks}",
+                    "update-index",
+                    "--refresh",
+                ],
+                capture=True,
+                cwd=worktree,
+            )
+            if refreshed.returncode:
+                raise RuntimeError(
+                    "could not refresh the compatibility merge worktree "
+                    "index: " + refreshed.stdout.strip()
+                )
             merged = run(
                 [
                     "git",
@@ -2682,7 +2698,7 @@ def review_prompt(
         "GitHub Actions failures. The patch combines committed, staged, "
         "unstaged, and safe untracked content relative to the recorded "
         "merge-base. The mounted workspace is a history-free synthetic root "
-        "commit containing the locally verified pull-request integration "
+        "commit containing the locally verified review workspace "
         "tree: a dependency need not have a diff hunk, so verify its presence "
         "in that workspace before reporting it as missing. Source commits, "
         "parents, and history objects are intentionally absent from the "
@@ -2722,7 +2738,10 @@ def review_prompt(
         + (" ".join(topology.head_parents) or "(none)")
         + "\n"
         + f"Authoritative base tree: {topology.base_tree}\n"
-        + f"Verified integration tree: {topology.integration_tree}\n"
+        + (
+            "Locally verified review workspace tree: "
+            f"{topology.integration_tree}\n"
+        )
         + f"Sanitized workspace root: {topology.workspace_commit}\n"
         + f"Patch SHA-256: {change.diff_sha256}\n"
         + "\n----- BEGIN TRACKED REVIEW INSTRUCTIONS -----\n"
@@ -3415,8 +3434,8 @@ def verify_pre_push_updates(
             local_ref != expected_branch
             or remote_ref != expected_branch
             or not local_ref.startswith("refs/heads/")
-            or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", local_oid)
-            or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", remote_oid)
+            or not is_full_git_object_id(local_oid)
+            or not is_full_git_object_id(remote_oid)
         ):
             raise RuntimeError("pre-push received an unsafe ref update")
         if set(local_oid) == {"0"}:
