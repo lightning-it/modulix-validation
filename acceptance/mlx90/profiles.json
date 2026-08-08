@@ -15,6 +15,15 @@
       ],
       "description": "Verify the MLX-90 Forgejo manifest secret-permission fix inside the immutable collection container.",
       "releaseEligible": true
+    },
+    "lit.supplementary/keycloak-26.7.1-security-v1": {
+      "containerCommand": [
+        "/bin/bash",
+        "-ceu",
+        "script=/usr/share/ansible/collections/ansible_collections/lit/supplementary/scripts/verify-keycloak-26.7.1-security.py; test -f \"$script\"; test ! -L \"$script\"; test \"$(sha256sum \"$script\" | cut -d' ' -f1)\" = \"929a4c043e17e40e303cf058220b58fe874650d9097c5bfdffe04aebbdc183ec\"; exec python3 \"$script\""
+      ],
+      "description": "Verify the exact Keycloak 26.7.1 Security-patch image binding inside the immutable collection container.",
+      "releaseEligible": true
     }
   },
   "schemaVersion": 1

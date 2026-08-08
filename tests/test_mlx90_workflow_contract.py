@@ -1239,12 +1239,13 @@ gh() {
             self.assertIn("installation is invalid", rejected.stderr)
             self.assertFalse(capture.exists())
 
-    def test_profiles_fix_exact_forgejo_command_and_keep_fixture_nonreleaseable(self):
+    def test_profiles_fix_exact_commands_and_keep_fixture_nonreleaseable(self):
         profile_document = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(1, profile_document["schemaVersion"])
         self.assertEqual(
             {
                 "lit.supplementary/forgejo-manifest-secret-permissions-v1",
+                "lit.supplementary/keycloak-26.7.1-security-v1",
                 "lit.supplementary/mlx90-fixture",
             },
             set(profile_document["profiles"]),
@@ -1288,6 +1289,29 @@ gh() {
             forgejo["containerCommand"],
         )
 
+        keycloak = profile_document["profiles"][
+            "lit.supplementary/keycloak-26.7.1-security-v1"
+        ]
+        keycloak_path = (
+            "/usr/share/ansible/collections/ansible_collections/lit/"
+            "supplementary/scripts/verify-keycloak-26.7.1-security.py"
+        )
+        keycloak_sha256 = (
+            "929a4c043e17e40e303cf058220b58fe874650d9097c5bfdffe04aebbdc183ec"
+        )
+        keycloak_command = (
+            f"script={keycloak_path}; "
+            'test -f "$script"; test ! -L "$script"; '
+            'test "$(sha256sum "$script" | cut -d\' \' -f1)" = '
+            f'"{keycloak_sha256}"; '
+            'exec python3 "$script"'
+        )
+        self.assertIs(keycloak["releaseEligible"], True)
+        self.assertEqual(
+            ["/bin/bash", "-ceu", keycloak_command],
+            keycloak["containerCommand"],
+        )
+
         with tempfile.TemporaryDirectory() as temporary:
             no_op = Path(temporary) / "verify-forgejo-manifest-security.py"
             no_op.write_text("raise SystemExit(0)\n", encoding="utf-8")
@@ -1296,6 +1320,21 @@ gh() {
                     "/bin/bash",
                     "-ceu",
                     command.replace(verifier_path, str(no_op)),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(0, rejected.returncode)
+
+            keycloak_no_op = Path(temporary) / "verify-keycloak-26.7.1-security.py"
+            keycloak_no_op.write_text("raise SystemExit(0)\n", encoding="utf-8")
+            rejected = subprocess.run(
+                [
+                    "/bin/bash",
+                    "-ceu",
+                    keycloak_command.replace(keycloak_path, str(keycloak_no_op)),
                 ],
                 cwd=ROOT,
                 capture_output=True,
