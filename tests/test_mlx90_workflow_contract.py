@@ -356,8 +356,8 @@ esac
                         first_step["run"],
                     )
         for fragment, count in (
-            ("and .triggering_actor.login == $actor", 1),
-            ("and .actor.login == $actor", 1),
+            ("and .triggering_actor.login == $actor", 3),
+            ("and .actor.login == $actor", 3),
             (
                 '[ "$GITHUB_TRIGGERING_ACTOR" = '
                 '"lightning-it-release-automation[bot]" ]',
@@ -385,7 +385,7 @@ esac
         self.assertEqual("persist", callback["needs"])
         self.assertEqual({"contents": "read"}, callback["permissions"])
         self.assertEqual(
-            {"name": "ansible-collection-runtime-protected"},
+            {"name": "mlx90-final-acceptance"},
             callback["environment"],
         )
         token_step = next(
@@ -401,9 +401,11 @@ esac
                 "repositories": (
                     "ansible-collection-supplementary\n"
                     "container-ee-wunder-ansible-ubi9\n"
+                    "modulix-validation\n"
                     "shared-assets-lit\n"
                 ),
                 "permission-actions": "read",
+                "permission-checks": "read",
                 "permission-contents": "read",
                 "permission-pull-requests": "read",
             },
@@ -438,12 +440,10 @@ esac
         )
         for forbidden in (
             "administration:",
-            "checks:",
             "deployments:",
             "environments:",
             "workflows:",
             "permission-administration:",
-            "permission-checks:",
             "permission-deployments:",
             "permission-environments:",
             "permission-secrets:",
@@ -513,7 +513,7 @@ esac
             self.workflow_text,
         )
         self.assertIn(
-            "name: ansible-collection-runtime-protected",
+            "name: mlx90-final-acceptance",
             self.workflow_text,
         )
 
@@ -525,14 +525,20 @@ esac
             "event": "merged",
             "created_at": merged_at,
             "commit_id": merge_sha,
-            "actor": {"login": "release-reviewer"},
+            "actor": {"login": "lightning-it-release-automation[bot]"},
         }
 
         accepted = self._run_merge_event_resolution(
             pull_request, [merge_event]
         )
         self.assertEqual(0, accepted.returncode, accepted.stderr)
-        self.assertEqual(merge_sha, accepted.stdout.strip())
+        self.assertEqual(
+            {
+                "actor": "lightning-it-release-automation[bot]",
+                "commitSha": merge_sha,
+            },
+            json.loads(accepted.stdout),
+        )
 
         rejected = (
             (
@@ -552,8 +558,8 @@ esac
             ),
             (
                 "invalid-actor",
-                [{**merge_event, "actor": {"login": ""}}],
-                "merge event actor is invalid",
+                [{**merge_event, "actor": {"login": "octocat"}}],
+                "merge event actor is not the release App",
             ),
             (
                 "invalid-commit",
@@ -592,8 +598,13 @@ esac
             "issues/${pull_request_number}/events?per_page=100",
             "pull-request must have exactly one merged event",
             "pull-request merge event timestamp does not match",
-            "pull-request merge event actor is invalid",
+            "pull-request merge event actor is not the release App",
             "pull-request merge event commit is invalid",
+            "repos/${repository}/actions/runs/${run_id}/approvals",
+            'type == "array" and length == 0',
+            "workflow run contains a human environment approval",
+            'write_receipt zero-touch "$zero_touch_checked_at"',
+            "humanActions: 0",
             "consumer release source is not an exact main promotion",
             "consumer release promotion merge topology is invalid",
             "consumer release source is not on the protected main lineage",
@@ -964,6 +975,14 @@ esac
             "producer-central-ci",
             'actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}',
             'actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}/jobs?per_page=100',
+            'consumer_ai_check="$(github_api --paginate',
+            'commits/${INPUT_CONSUMER_HEAD_SHA}/check-runs?per_page=100',
+            'actions/jobs/$(jq -er',
+            'actions/runs/${consumer_ai_run_id}/attempts/${consumer_ai_run_attempt}',
+            '.path == $workflow',
+            '.event == "pull_request"',
+            '.actor.login == $actor',
+            '.triggering_actor.login == $actor',
             'if length != 1 then',
             'producer central validation job did not complete successfully',
             "final live revocation check found revocation evidence",

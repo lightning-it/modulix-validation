@@ -46,18 +46,21 @@ mints a one-hour installation token from the existing organization-managed
 whose actor, ref, or repository differs from the exact MLX-90 contract. The
 token creation is then fail-closed on App slug
 `lightning-it-release-automation`, installation ID `148019054`, and exactly
-these three read-only evidence repositories:
+these four read-only evidence repositories:
 
 - `lightning-it/ansible-collection-supplementary`
 - `lightning-it/container-ee-wunder-ansible-ubi9`
+- `lightning-it/modulix-validation`
 - `lightning-it/shared-assets-lit`
 
-The minted token requests only `Actions: read`, `Contents: read`, and
-`Pull requests: read`, is revoked automatically at the end of the job, and is
-used for private cross-repository API reads, immutable policy checkout, and
-authenticated GitHub Release asset downloads. It is not a personal token and
-does not introduce a new secret. The same-repository persistence job continues
-to use only its repository-scoped `GITHUB_TOKEN`. Job permissions are:
+The minted token requests only `Actions: read`, `Checks: read`,
+`Contents: read`, and `Pull requests: read`, is revoked automatically at the
+end of the job, and is used for private cross-repository API reads, immutable
+policy checkout, and authenticated GitHub Release asset downloads. The
+`Checks: read` permission is required only for the exact current-head
+`check-runs` lookup. It is not a personal token and does not introduce a new
+secret. The same-repository persistence job continues to use only its
+repository-scoped `GITHUB_TOKEN`. Job permissions are:
 
 The least-privilege choice for merge-event lookup was reverified on 2026-08-06
 against GitHub's versioned REST permission table for
@@ -70,13 +73,14 @@ that documented scope; `Issues` permission is intentionally not requested.
 
 | Job | Actions | Contents | OIDC | Other permissions |
 | --- | --- | --- | --- | --- |
-| `verify` | read | read | write, for keyless evidence signing | none |
+| `verify` | read | read | write, for keyless evidence signing | App token: Checks read; Pull requests read |
 | `persist` | read | write, for the immutable evidence release | none | none |
 
-The `verify` job runs in the existing protected
-`ansible-collection-runtime-protected` environment. The `persist` job receives
-only the signed same-run artifact and cannot create a result unless all prior
-verification succeeded.
+The `verify` and callback jobs run in the dedicated protected
+`mlx90-final-acceptance` environment. Governance configures that environment
+without required reviewers only for the evidence-bound Security release path.
+The `persist` job receives only the signed same-run artifact and cannot create
+a result unless all prior verification succeeded.
 
 ## Required evidence
 
@@ -257,6 +261,18 @@ command; `bootstrap` must not have one. Every receipt carries the correlation
 ID, both evidence-file digests, finalizer workflow SHA, run ID, run attempt,
 timestamp, receipt type, and type-specific observations. Receipts never contain
 tokens, private keys, or secret values.
+
+The receipt set also contains one `ZeroTouch` receipt with the literal
+`humanActions: 0`. It binds the release-automation App slug and installation
+ID, both App-authored merge events, the exact successful current-head review
+gate, and the producer, container, and finalizer workflow-run IDs. For each of
+those runs the workflow queries GitHub's Actions approval-history endpoint and
+requires the returned review list to be empty. Any human environment approval,
+foreign App identity, changed run ID, non-current review gate, or missing API
+evidence stops the finalizer before durable acceptance is created. The
+evidence token is scoped to the four repositories required for these reads and
+retains only `Actions: read`, `Checks: read`, `Contents: read`, and
+`Pull requests: read`.
 
 Every finalizer JSON output uses one no-clobber writer. It rejects an existing
 regular file or symlink, creates its temporary file exclusively, and publishes

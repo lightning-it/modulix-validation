@@ -64,8 +64,15 @@ RFC3339_TIMESTAMP = re.compile(
 
 PRODUCER_REPOSITORY = "lightning-it/ansible-collection-supplementary"
 CONSUMER_REPOSITORY = "lightning-it/container-ee-wunder-ansible-ubi9"
+COPILOT_REVIEW_WORKFLOW = ".github/workflows/copilot-review.yml"
+COPILOT_REVIEW_WORKFLOW_NAME = "Copilot review gate"
+COPILOT_REVIEW_JOB_NAME = "Successful Copilot review"
 FINALIZER_REPOSITORY = "lightning-it/modulix-validation"
 FINALIZER_WORKFLOW = ".github/workflows/mlx90-final-acceptance.yml"
+RELEASE_AUTOMATION_ACTOR = "lightning-it-release-automation[bot]"
+RELEASE_AUTOMATION_APP_SLUG = "lightning-it-release-automation"
+RELEASE_AUTOMATION_INSTALLATION_ID = 148019054
+GITHUB_ACTIONS_APP_ID = 15368
 
 VARIANTS = ("public", "certified", "bootstrap")
 PLATFORMS = ("linux/amd64", "linux/arm64")
@@ -85,6 +92,7 @@ REQUIRED_CHECKS = {
     "provenance",
     "buildkitAttestations",
     "notRevoked",
+    "zeroTouch",
 }
 
 
@@ -408,6 +416,7 @@ def validate_delivered(result: dict[str, Any]) -> None:
             "acceptance",
             "receiptBundle",
             "checks",
+            "zeroTouch",
             "finalizer",
         },
         "result",
@@ -459,7 +468,15 @@ def validate_delivered(result: dict[str, Any]) -> None:
     consumer = mapping(result["consumer"], "consumer")
     exact_fields(
         consumer,
-        {"repository", "pullRequest", "baseSha", "headSha", "mergeSha"},
+        {
+            "repository",
+            "pullRequest",
+            "baseSha",
+            "headSha",
+            "changeMergeSha",
+            "promotionPullRequest",
+            "mergeSha",
+        },
         "consumer",
     )
     consumer_repository = string(
@@ -467,9 +484,17 @@ def validate_delivered(result: dict[str, Any]) -> None:
     )
     if consumer_repository != CONSUMER_REPOSITORY:
         fail("consumer.repository is not the trusted MLX-90 consumer")
-    positive_integer(consumer["pullRequest"], "consumer.pullRequest")
+    consumer_pull_request = positive_integer(
+        consumer["pullRequest"], "consumer.pullRequest"
+    )
     full_sha(consumer["baseSha"], "consumer.baseSha")
-    full_sha(consumer["headSha"], "consumer.headSha")
+    consumer_head_sha = full_sha(consumer["headSha"], "consumer.headSha")
+    consumer_change_merge_sha = full_sha(
+        consumer["changeMergeSha"], "consumer.changeMergeSha"
+    )
+    promotion_pull_request = positive_integer(
+        consumer["promotionPullRequest"], "consumer.promotionPullRequest"
+    )
     consumer_merge_sha = full_sha(consumer["mergeSha"], "consumer.mergeSha")
 
     container = mapping(result["container"], "container")
@@ -505,7 +530,10 @@ def validate_delivered(result: dict[str, Any]) -> None:
     )
     if container_release_url != expected_container_release_url:
         fail("container.releaseUrl is not bound to the release tag")
-    if full_sha(container["sourceSha"], "container.sourceSha") != consumer_merge_sha:
+    container_source_sha = full_sha(
+        container["sourceSha"], "container.sourceSha"
+    )
+    if container_source_sha != consumer_merge_sha:
         fail("container source SHA must equal the consumer merge SHA")
     release_asset_reference(
         container["evidence"],
@@ -617,6 +645,169 @@ def validate_delivered(result: dict[str, Any]) -> None:
     if any(value is not True for value in checks.values()):
         fail("all final acceptance checks must be true")
 
+    zero_touch = mapping(result["zeroTouch"], "zeroTouch")
+    exact_fields(
+        zero_touch,
+        {
+            "humanActions",
+            "app",
+            "finalizer",
+            "mergeEvents",
+            "currentHeadReviewGate",
+            "workflowApprovalHistory",
+        },
+        "zeroTouch",
+    )
+    if (
+        isinstance(zero_touch["humanActions"], bool)
+        or zero_touch["humanActions"] != 0
+    ):
+        fail("zeroTouch.humanActions must be the integer zero")
+    app = mapping(zero_touch["app"], "zeroTouch.app")
+    exact_fields(app, {"slug", "installationId"}, "zeroTouch.app")
+    if app != {
+        "slug": RELEASE_AUTOMATION_APP_SLUG,
+        "installationId": RELEASE_AUTOMATION_INSTALLATION_ID,
+    }:
+        fail("zeroTouch.app is invalid")
+    zero_finalizer = mapping(zero_touch["finalizer"], "zeroTouch.finalizer")
+    exact_fields(
+        zero_finalizer,
+        {"repository", "runId", "actor", "triggeringActor"},
+        "zeroTouch.finalizer",
+    )
+    if (
+        zero_finalizer["repository"] != FINALIZER_REPOSITORY
+        or zero_finalizer["actor"] != RELEASE_AUTOMATION_ACTOR
+        or zero_finalizer["triggeringActor"] != RELEASE_AUTOMATION_ACTOR
+    ):
+        fail("zeroTouch.finalizer identity is invalid")
+    positive_integer(zero_finalizer["runId"], "zeroTouch.finalizer.runId")
+    merge_events = zero_touch["mergeEvents"]
+    if not isinstance(merge_events, list) or len(merge_events) != 2:
+        fail("zeroTouch.mergeEvents must contain exactly two events")
+    validated_merge_events: list[dict[str, Any]] = []
+    for position, event_value in enumerate(merge_events):
+        event = mapping(event_value, f"zeroTouch.mergeEvents[{position}]")
+        exact_fields(
+            event,
+            {"purpose", "repository", "pullRequest", "actor", "commitSha"},
+            f"zeroTouch.mergeEvents[{position}]",
+        )
+        if event["purpose"] not in {"consumer-change", "main-promotion"}:
+            fail("zeroTouch merge event purpose is invalid")
+        if (
+            event["repository"] != CONSUMER_REPOSITORY
+            or event["actor"] != RELEASE_AUTOMATION_ACTOR
+        ):
+            fail("zeroTouch merge event identity is invalid")
+        positive_integer(event["pullRequest"], "zeroTouch merge pullRequest")
+        full_sha(event["commitSha"], "zeroTouch merge commitSha")
+        validated_merge_events.append(event)
+    expected_merge_events = (
+        {
+            "purpose": "consumer-change",
+            "repository": CONSUMER_REPOSITORY,
+            "pullRequest": consumer_pull_request,
+            "actor": RELEASE_AUTOMATION_ACTOR,
+            "commitSha": consumer_change_merge_sha,
+        },
+        {
+            "purpose": "main-promotion",
+            "repository": CONSUMER_REPOSITORY,
+            "pullRequest": promotion_pull_request,
+            "actor": RELEASE_AUTOMATION_ACTOR,
+            "commitSha": container_source_sha,
+        },
+    )
+    for position, expected in enumerate(expected_merge_events):
+        event = validated_merge_events[position]
+        if any(event.get(key) != value for key, value in expected.items()):
+            fail("zeroTouch merge events are not bound to consumer identity")
+    review_gate = mapping(
+        zero_touch["currentHeadReviewGate"], "zeroTouch.currentHeadReviewGate"
+    )
+    exact_fields(
+        review_gate,
+        {
+            "id",
+            "name",
+            "headSha",
+            "status",
+            "conclusion",
+            "appId",
+            "workflowRunId",
+            "workflowRunAttempt",
+            "workflowName",
+            "workflowPath",
+            "workflowEvent",
+            "workflowActor",
+            "workflowTriggeringActor",
+        },
+        "zeroTouch.currentHeadReviewGate",
+    )
+    positive_integer(review_gate["id"], "zeroTouch review gate id")
+    positive_integer(
+        review_gate["workflowRunId"], "zeroTouch review workflow run id"
+    )
+    positive_integer(
+        review_gate["workflowRunAttempt"],
+        "zeroTouch review workflow run attempt",
+    )
+    if (
+        review_gate["name"] != COPILOT_REVIEW_JOB_NAME
+        or review_gate["status"] != "completed"
+        or review_gate["conclusion"] != "success"
+        or review_gate["appId"] != GITHUB_ACTIONS_APP_ID
+        or review_gate["workflowName"] != COPILOT_REVIEW_WORKFLOW_NAME
+        or review_gate["workflowPath"] != COPILOT_REVIEW_WORKFLOW
+        or review_gate["workflowEvent"] != "pull_request"
+        or review_gate["workflowActor"] != RELEASE_AUTOMATION_ACTOR
+        or review_gate["workflowTriggeringActor"]
+        != RELEASE_AUTOMATION_ACTOR
+    ):
+        fail("zeroTouch current-head review gate is invalid")
+    if (
+        full_sha(review_gate["headSha"], "zeroTouch review gate headSha")
+        != consumer_head_sha
+    ):
+        fail("zeroTouch current-head review gate is not bound to consumer head")
+    approval_history = zero_touch["workflowApprovalHistory"]
+    if not isinstance(approval_history, list) or len(approval_history) != 4:
+        fail("zeroTouch.workflowApprovalHistory must contain four runs")
+    expected_approval_repositories = (
+        PRODUCER_REPOSITORY,
+        CONSUMER_REPOSITORY,
+        CONSUMER_REPOSITORY,
+        FINALIZER_REPOSITORY,
+    )
+    observed_approval_runs: set[tuple[str, int]] = set()
+    for position, history_value in enumerate(approval_history):
+        history = mapping(
+            history_value, f"zeroTouch.workflowApprovalHistory[{position}]"
+        )
+        exact_fields(
+            history,
+            {"repository", "runId", "reviews"},
+            f"zeroTouch.workflowApprovalHistory[{position}]",
+        )
+        repository = string(
+            history["repository"], "zeroTouch approval repository"
+        )
+        if repository != expected_approval_repositories[position]:
+            fail("zeroTouch workflow approval repository order is invalid")
+        approval_run_id = positive_integer(
+            history["runId"], "zeroTouch approval runId"
+        )
+        approval_identity = (repository, approval_run_id)
+        if approval_identity in observed_approval_runs:
+            fail("zeroTouch workflow approval runs must be unique")
+        observed_approval_runs.add(approval_identity)
+        if history["reviews"] != []:
+            fail("zeroTouch workflow run contains a human approval")
+    if approval_history[1]["runId"] != review_gate["workflowRunId"]:
+        fail("zeroTouch review-gate approval history is not evidence-bound")
+
     finalizer = mapping(result["finalizer"], "finalizer")
     exact_fields(
         finalizer,
@@ -643,6 +834,10 @@ def validate_delivered(result: dict[str, Any]) -> None:
     )
     if run_url != expected_url:
         fail("finalizer.runUrl does not match finalizer.runId")
+    if zero_finalizer["runId"] != run_id:
+        fail("zeroTouch finalizer run does not match finalizer.runId")
+    if approval_history[3]["runId"] != run_id:
+        fail("zeroTouch finalizer approval history is not evidence-bound")
 
 
 def validate(result: Any) -> None:

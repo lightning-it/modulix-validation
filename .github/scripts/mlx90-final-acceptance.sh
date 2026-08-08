@@ -6,6 +6,9 @@ readonly PRODUCER_WORKFLOW=".github/workflows/collection-ci.yml"
 readonly PRODUCER_WORKFLOW_NAME="Collection CI"
 readonly PRODUCER_VALIDATION_JOB="Collection / Release Validation"
 readonly CONSUMER_REPOSITORY="lightning-it/container-ee-wunder-ansible-ubi9"
+readonly COPILOT_REVIEW_WORKFLOW=".github/workflows/copilot-review.yml"
+readonly COPILOT_REVIEW_WORKFLOW_NAME="Copilot review gate"
+readonly COPILOT_REVIEW_JOB_NAME="Successful Copilot review"
 readonly FINALIZER_REPOSITORY="lightning-it/modulix-validation"
 readonly FINALIZER_WORKFLOW=".github/workflows/mlx90-final-acceptance.yml"
 readonly PROFILES="acceptance/mlx90/profiles.json"
@@ -68,22 +71,38 @@ resolve_pull_request_merge_sha() {
     || fail_closed "pull-request merge timestamp is invalid"
   github_api --paginate \
     "repos/${repository}/issues/${pull_request_number}/events?per_page=100" \
-    | jq -ser --arg merged_at "$merged_at" '
+    | jq -ser \
+      --arg actor "lightning-it-release-automation[bot]" \
+      --arg merged_at "$merged_at" '
     [.[][] | select(.event == "merged")] as $merged
     | if ($merged | length) != 1 then
         error("pull-request must have exactly one merged event")
       elif $merged[0].created_at != $merged_at then
         error("pull-request merge event timestamp does not match")
-      elif ($merged[0].actor.login | type) != "string"
-        or $merged[0].actor.login == "" then
-        error("pull-request merge event actor is invalid")
+      elif $merged[0].actor.login != $actor then
+        error("pull-request merge event actor is not the release App")
       elif ($merged[0].commit_id | type) != "string"
         or ($merged[0].commit_id | test("^[0-9a-f]{40}$") | not) then
         error("pull-request merge event commit is invalid")
       else
-        $merged[0].commit_id
+        {commitSha: $merged[0].commit_id, actor: $merged[0].actor.login}
       end
   '
+}
+
+workflow_approval_history() {
+  local repository="$1"
+  local run_id="$2"
+  local reviews
+  [[ "$repository" =~ ^lightning-it/[A-Za-z0-9._-]+$ ]] \
+    || fail_closed "workflow approval repository is invalid"
+  [[ "$run_id" =~ ^[1-9][0-9]*$ ]] \
+    || fail_closed "workflow approval run ID is invalid"
+  reviews="$(github_api "repos/${repository}/actions/runs/${run_id}/approvals")" \
+    || fail_closed "workflow approval history is unavailable"
+  jq -e 'type == "array" and length == 0' <<<"$reviews" >/dev/null \
+    || fail_closed "workflow run contains a human environment approval"
+  printf '%s\n' "$reviews"
 }
 
 # Validate the complete SemVer 2.0.0 grammar without interpreting any numeric
@@ -763,6 +782,8 @@ verify_mode() {
     GITHUB_RUN_ATTEMPT \
     GITHUB_RUN_ID \
     GITHUB_SHA \
+    APP_INSTALLATION_ID \
+    APP_SLUG \
     INPUT_CORRELATION_ID \
     INPUT_PRODUCER_EVIDENCE_URL \
     INPUT_PRODUCER_EVIDENCE_BUNDLE_URL \
@@ -785,6 +806,10 @@ verify_mode() {
     || fail_closed "only the release automation App may dispatch final acceptance"
   [ "$GITHUB_TRIGGERING_ACTOR" = "lightning-it-release-automation[bot]" ] \
     || fail_closed "only the release automation App may trigger final acceptance"
+  [ "$APP_SLUG" = "lightning-it-release-automation" ] \
+    || fail_closed "final acceptance App slug is invalid"
+  [ "$APP_INSTALLATION_ID" = "148019054" ] \
+    || fail_closed "final acceptance App installation ID is invalid"
   [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
     || fail_closed "finalizer workflow SHA is invalid"
   for required in \
@@ -976,6 +1001,7 @@ PY
   producer_ci_run="$(github_api \
     "repos/${PRODUCER_REPOSITORY}/actions/runs/${producer_ci_run_id}/attempts/${producer_ci_run_attempt}")"
   jq -e \
+    --arg actor "lightning-it-release-automation[bot]" \
     --argjson run_id "$producer_ci_run_id" \
     --argjson run_attempt "$producer_ci_run_attempt" \
     --arg repository "$PRODUCER_REPOSITORY" \
@@ -989,6 +1015,8 @@ PY
       and .name == $workflow_name
       and .path == $workflow
       and .event == "push"
+      and .actor.login == $actor
+      and .triggering_actor.login == $actor
       and .head_branch == "main"
       and .head_sha == $sha
       and .status == "completed"
@@ -1013,13 +1041,13 @@ PY
     ' <<<"$producer_ci_jobs")"
   producer_central_ci_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-  local consumer_pr consumer_pr_merge consumer_pr_merge_sha
+  local consumer_pr consumer_pr_merge consumer_pr_merge_event consumer_pr_merge_sha
   local consumer_pr_ancestry consumer_merge consumer_base_sha
   local consumer_main_branch consumer_main_sha consumer_main_ancestry
   local consumer_main_rules consumer_main_rules_observations
   local consumer_main_rules_digest
   local consumer_release_prs consumer_release_pr
-  local consumer_release_pr_merge_sha
+  local consumer_release_pr_merge_event consumer_release_pr_merge_sha
   local container_release container_release_by_tag
   local container_run container_evidence_run tag_commit
   local container_evidence_jobs container_publish_jobs
@@ -1032,6 +1060,8 @@ PY
   local container_release_assets
   local container_consumed_urls container_asset_bindings
   local container_initial_asset_snapshot container_initial_asset_snapshot_digest
+  local consumer_ai_check consumer_ai_job consumer_ai_run
+  local consumer_ai_run_id consumer_ai_run_attempt
   consumer_pr="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/pulls/${INPUT_CONSUMER_PR}")"
   jq -e \
@@ -1046,9 +1076,93 @@ PY
       and .head.sha == $head
     ' <<<"$consumer_pr" >/dev/null \
     || fail_closed "consumer pull-request identity is invalid"
-  consumer_pr_merge_sha="$(resolve_pull_request_merge_sha \
+  consumer_pr_merge_event="$(resolve_pull_request_merge_sha \
     "$CONSUMER_REPOSITORY" "$consumer_pr")" \
     || fail_closed "consumer pull-request merge event is invalid"
+  consumer_pr_merge_sha="$(jq -er '.commitSha' <<<"$consumer_pr_merge_event")"
+
+  consumer_ai_check="$(github_api --paginate \
+    "repos/${CONSUMER_REPOSITORY}/commits/${INPUT_CONSUMER_HEAD_SHA}/check-runs?per_page=100" \
+    | jq -sec \
+      --arg head "$INPUT_CONSUMER_HEAD_SHA" \
+      --arg job_name "$COPILOT_REVIEW_JOB_NAME" '
+      [
+        .[].check_runs[]
+        | select(
+            .name == $job_name
+            and .head_sha == $head
+            and .status == "completed"
+            and .conclusion == "success"
+            and .app.id == 15368
+          )
+        | {id, name, headSha: .head_sha, status, conclusion, appId: .app.id}
+      ]
+      | if length == 1 then .[0]
+        else error("exactly one successful current-head AI check is required")
+        end
+    ')" || fail_closed "consumer current-head AI review check is invalid"
+  consumer_ai_job="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/actions/jobs/$(jq -er '.id' \
+      <<<"$consumer_ai_check")")"
+  jq -e \
+    --argjson id "$(jq -er '.id' <<<"$consumer_ai_check")" \
+    --arg head "$INPUT_CONSUMER_HEAD_SHA" \
+    --arg job_name "$COPILOT_REVIEW_JOB_NAME" \
+    --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" \
+    --arg check_url "https://api.github.com/repos/${CONSUMER_REPOSITORY}/check-runs/$(jq -er '.id' <<<"$consumer_ai_check")" '
+      .id == $id
+      and (.run_id | type == "number" and floor == . and . > 0)
+      and (.run_attempt | type == "number" and floor == . and . > 0)
+      and .workflow_name == $workflow_name
+      and .head_sha == $head
+      and .name == $job_name
+      and .status == "completed"
+      and .conclusion == "success"
+      and .check_run_url == $check_url
+    ' <<<"$consumer_ai_job" >/dev/null \
+    || fail_closed "consumer current-head AI review job is invalid"
+  consumer_ai_run_id="$(jq -er '.run_id' <<<"$consumer_ai_job")"
+  consumer_ai_run_attempt="$(jq -er '.run_attempt' <<<"$consumer_ai_job")"
+  consumer_ai_run="$(github_api \
+    "repos/${CONSUMER_REPOSITORY}/actions/runs/${consumer_ai_run_id}/attempts/${consumer_ai_run_attempt}")"
+  jq -e \
+    --argjson run_id "$consumer_ai_run_id" \
+    --argjson run_attempt "$consumer_ai_run_attempt" \
+    --arg actor "lightning-it-release-automation[bot]" \
+    --arg head "$INPUT_CONSUMER_HEAD_SHA" \
+    --arg repository "$CONSUMER_REPOSITORY" \
+    --arg workflow "$COPILOT_REVIEW_WORKFLOW" \
+    --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" '
+      .id == $run_id
+      and .run_attempt == $run_attempt
+      and .name == $workflow_name
+      and .path == $workflow
+      and .event == "pull_request"
+      and .head_sha == $head
+      and .repository.full_name == $repository
+      and .head_repository.full_name == $repository
+      and .actor.login == $actor
+      and .triggering_actor.login == $actor
+      and .status == "completed"
+      and .conclusion == "success"
+    ' <<<"$consumer_ai_run" >/dev/null \
+    || fail_closed "consumer current-head AI review workflow run is invalid"
+  consumer_ai_check="$(jq -c \
+    --argjson workflow_run_id "$consumer_ai_run_id" \
+    --argjson workflow_run_attempt "$consumer_ai_run_attempt" \
+    --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" \
+    --arg workflow_path "$COPILOT_REVIEW_WORKFLOW" \
+    --arg workflow_actor "lightning-it-release-automation[bot]" '
+      . + {
+        workflowRunId: $workflow_run_id,
+        workflowRunAttempt: $workflow_run_attempt,
+        workflowName: $workflow_name,
+        workflowPath: $workflow_path,
+        workflowEvent: "pull_request",
+        workflowActor: $workflow_actor,
+        workflowTriggeringActor: $workflow_actor
+      }
+    ' <<<"$consumer_ai_check")"
   consumer_pr_ancestry="$(github_api \
     "repos/${CONSUMER_REPOSITORY}/compare/${consumer_pr_merge_sha}...${INPUT_CONSUMER_MERGE_SHA}")"
   jq -e \
@@ -1244,9 +1358,11 @@ PY
         end
     ' <<<"$consumer_release_prs")" \
     || fail_closed "consumer release source is not an exact main promotion"
-  consumer_release_pr_merge_sha="$(resolve_pull_request_merge_sha \
+  consumer_release_pr_merge_event="$(resolve_pull_request_merge_sha \
     "$CONSUMER_REPOSITORY" "$consumer_release_pr")" \
     || fail_closed "consumer release promotion merge event is invalid"
+  consumer_release_pr_merge_sha="$(jq -er \
+    '.commitSha' <<<"$consumer_release_pr_merge_event")"
   [ "$consumer_release_pr_merge_sha" = "$INPUT_CONSUMER_MERGE_SHA" ] \
     || fail_closed "consumer release source is not an exact main promotion"
   consumer_pr_merge="$(github_api \
@@ -1404,6 +1520,19 @@ PY
   container_initial_asset_snapshot_digest="$(asset_snapshot_digest \
     "$container_initial_asset_snapshot")"
   container_revocation_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+  local producer_approval_history review_gate_approval_history
+  local container_approval_history
+  local finalizer_approval_history zero_touch_checked_at
+  producer_approval_history="$(workflow_approval_history \
+    "$PRODUCER_REPOSITORY" "$producer_ci_run_id")"
+  review_gate_approval_history="$(workflow_approval_history \
+    "$CONSUMER_REPOSITORY" "$consumer_ai_run_id")"
+  container_approval_history="$(workflow_approval_history \
+    "$CONSUMER_REPOSITORY" "$INPUT_CONTAINER_RELEASE_RUN_ID")"
+  finalizer_approval_history="$(workflow_approval_history \
+    "$FINALIZER_REPOSITORY" "$GITHUB_RUN_ID")"
+  zero_touch_checked_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   local producer_evidence_digest producer_bundle_digest collection_bundle_digest
   local container_bundle_digest producer_release_url
@@ -1709,6 +1838,82 @@ PY
       bundleDigest: $bundle_digest,
       identity: $identity,
       sourceSha: $source_sha
+    }')"
+  write_receipt zero-touch "$zero_touch_checked_at" "$(jq -cn \
+    --arg app_slug "$APP_SLUG" \
+    --argjson app_installation_id "$APP_INSTALLATION_ID" \
+    --arg finalizer_repository "$FINALIZER_REPOSITORY" \
+    --argjson finalizer_run_id "$GITHUB_RUN_ID" \
+    --arg finalizer_actor "$GITHUB_ACTOR" \
+    --arg finalizer_triggering_actor "$GITHUB_TRIGGERING_ACTOR" \
+    --arg consumer_repository "$CONSUMER_REPOSITORY" \
+    --argjson consumer_pull_request "$INPUT_CONSUMER_PR" \
+    --arg consumer_merge_actor "$(jq -er '.actor' \
+      <<<"$consumer_pr_merge_event")" \
+    --arg consumer_merge_sha "$consumer_pr_merge_sha" \
+    --argjson promotion_pull_request "$(jq -er '.number' \
+      <<<"$consumer_release_pr")" \
+    --arg promotion_merge_actor "$(jq -er '.actor' \
+      <<<"$consumer_release_pr_merge_event")" \
+    --arg promotion_merge_sha "$consumer_release_pr_merge_sha" \
+    --argjson current_head_review_gate "$consumer_ai_check" \
+    --argjson producer_run_id "$producer_ci_run_id" \
+    --argjson producer_reviews "$producer_approval_history" \
+    --argjson review_gate_run_id "$consumer_ai_run_id" \
+    --argjson review_gate_reviews "$review_gate_approval_history" \
+    --argjson container_run_id "$INPUT_CONTAINER_RELEASE_RUN_ID" \
+    --argjson container_reviews "$container_approval_history" \
+    --argjson finalizer_reviews "$finalizer_approval_history" '{
+      humanActions: 0,
+      app: {
+        slug: $app_slug,
+        installationId: $app_installation_id
+      },
+      finalizer: {
+        repository: $finalizer_repository,
+        runId: $finalizer_run_id,
+        actor: $finalizer_actor,
+        triggeringActor: $finalizer_triggering_actor
+      },
+      mergeEvents: [
+        {
+          purpose: "consumer-change",
+          repository: $consumer_repository,
+          pullRequest: $consumer_pull_request,
+          actor: $consumer_merge_actor,
+          commitSha: $consumer_merge_sha
+        },
+        {
+          purpose: "main-promotion",
+          repository: $consumer_repository,
+          pullRequest: $promotion_pull_request,
+          actor: $promotion_merge_actor,
+          commitSha: $promotion_merge_sha
+        }
+      ],
+      currentHeadReviewGate: $current_head_review_gate,
+      workflowApprovalHistory: [
+        {
+          repository: "lightning-it/ansible-collection-supplementary",
+          runId: $producer_run_id,
+          reviews: $producer_reviews
+        },
+        {
+          repository: "lightning-it/container-ee-wunder-ansible-ubi9",
+          runId: $review_gate_run_id,
+          reviews: $review_gate_reviews
+        },
+        {
+          repository: "lightning-it/container-ee-wunder-ansible-ubi9",
+          runId: $container_run_id,
+          reviews: $container_reviews
+        },
+        {
+          repository: "lightning-it/modulix-validation",
+          runId: $finalizer_run_id,
+          reviews: $finalizer_reviews
+        }
+      ]
     }')"
 
   local collection version profile profile_json
