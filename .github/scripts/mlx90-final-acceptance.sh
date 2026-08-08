@@ -1164,23 +1164,44 @@ PY
             and .conclusion == "success"
             and .app.id == 15368
           )
-        | {id, name, headSha: .head_sha, status, conclusion, appId: .app.id}
+        | {
+            id,
+            name,
+            headSha: .head_sha,
+            status,
+            conclusion,
+            appId: .app.id,
+            detailsUrl: .details_url
+          }
       ]
       | if length == 1 then .[0]
         else error("exactly one successful current-head AI check is required")
         end
     ')" || fail_closed "consumer current-head AI review check is invalid"
+  consumer_ai_job_identity="$(jq -er \
+    --arg prefix \
+      "https://github.com/${CONSUMER_REPOSITORY}/actions/runs/" '
+      .detailsUrl
+      | select(type == "string" and startswith($prefix))
+      | ltrimstr($prefix)
+      | split("/job/")
+      | select(length == 2)
+      | select(all(.[]; test("^[1-9][0-9]*$")))
+      | {runId: (.[0] | tonumber), jobId: (.[1] | tonumber)}
+    ' <<<"$consumer_ai_check")" \
+    || fail_closed "consumer current-head AI check details URL is invalid"
+  consumer_ai_job_id="$(jq -er '.jobId' <<<"$consumer_ai_job_identity")"
   consumer_ai_job="$(github_api \
-    "repos/${CONSUMER_REPOSITORY}/actions/jobs/$(jq -er '.id' \
-      <<<"$consumer_ai_check")")"
+    "repos/${CONSUMER_REPOSITORY}/actions/jobs/${consumer_ai_job_id}")"
   jq -e \
-    --argjson id "$(jq -er '.id' <<<"$consumer_ai_check")" \
+    --argjson id "$consumer_ai_job_id" \
+    --argjson run_id "$(jq -er '.runId' <<<"$consumer_ai_job_identity")" \
     --arg head "$INPUT_CONSUMER_HEAD_SHA" \
     --arg job_name "$COPILOT_REVIEW_JOB_NAME" \
     --arg workflow_name "$COPILOT_REVIEW_WORKFLOW_NAME" \
     --arg check_url "https://api.github.com/repos/${CONSUMER_REPOSITORY}/check-runs/$(jq -er '.id' <<<"$consumer_ai_check")" '
       .id == $id
-      and (.run_id | type == "number" and floor == . and . > 0)
+      and .run_id == $run_id
       and (.run_attempt | type == "number" and floor == . and . > 0)
       and .workflow_name == $workflow_name
       and .head_sha == $head
