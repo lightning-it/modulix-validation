@@ -7,6 +7,10 @@ name: Promote develop to main
 on:
   push:
     branches: [develop]
+  schedule:
+    # Reconcile after trusted automerge jobs whose GITHUB_TOKEN merge does not
+    # emit another workflow-triggering push event.
+    - cron: "41 * * * *"
   workflow_dispatch:
 
 permissions:
