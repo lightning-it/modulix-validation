@@ -1,0 +1,126 @@
+# Managed by lightning-it/shared-assets-lit.
+# Keep this repository-local workflow aligned with the protected release policy.
+# yamllint disable rule:truthy
+---
+name: Promote develop to main
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-develop-to-main
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    # The App authors the PR; the protected normal-release environment still
+    # requires an independent release-team approval before main can advance.
+    if: >-
+      github.repository == 'lightning-it/shared-assets-lit' ||
+      github.repository == 'lightning-it/github-management-lit' ||
+      github.repository == 'lightning-it/modulix-validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Mint release automation App token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Resolve release automation App bot identity
+        id: release-bot
+        env:
+          APP_SLUG: ${{ steps.release-app.outputs.app-slug }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bot_json="$(gh api "users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || printf '{}')"
+          login="$(jq -r '.login // ""' <<<"$bot_json")"
+          bot_id="$(jq -r '.id // ""' <<<"$bot_json")"
+          if [ "$login" != "${APP_SLUG}[bot]" ] || ! [[ "$bot_id" =~ ^[0-9]+$ ]]; then
+            echo "::error::Unable to resolve the release automation App bot identity."
+            exit 1
+          fi
+          echo "login=$login" >>"$GITHUB_OUTPUT"
+          echo "email=${bot_id}+${login}@users.noreply.github.com" >>"$GITHUB_OUTPUT"
+
+      - name: Validate release bot token
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          login="$(gh api "users/lightning-it-release-automation%5Bbot%5D" --jq .login)"
+          if [ "${login}" != "lightning-it-release-automation[bot]" ]; then
+            echo "::error::Release App identity mismatch: expected lightning-it-release-automation[bot]."
+            exit 1
+          fi
+
+      - name: Create or update protected promotion
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title='chore(release): promote develop to main'
+          token_header="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${token_header}"
+
+          git init --quiet repository
+          cd repository
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+            fetch --quiet --no-tags origin main develop
+
+          if ! git merge-base --is-ancestor origin/main origin/develop; then
+            echo '::error::develop does not contain the current main ancestry; wait for the protected backmerge.'
+            exit 1
+          fi
+          if git diff --quiet origin/main origin/develop; then
+            echo 'main and develop have identical content; no promotion is needed.'
+            exit 0
+          fi
+
+          pr_number="$(
+            gh pr list \
+              --repo "${REPOSITORY}" \
+              --state open \
+              --base main \
+              --head develop \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [ -z "${pr_number}" ]; then
+            pr_url="$(
+              gh pr create \
+                --repo "${REPOSITORY}" \
+                --base main \
+                --head develop \
+                --title "${title}" \
+                --body "Automated protected promotion of reviewed changes from develop to main."
+            )"
+            pr_number="${pr_url##*/}"
+          fi
+
+          gh pr view "${pr_number}" \
+            --repo "${REPOSITORY}" \
+            --json author,baseRefName,headRefName,headRepositoryOwner,title \
+          | jq -e --arg title "${title}" \
+              '.author.login == "app/lightning-it-release-automation"
+               and .baseRefName == "main"
+               and .headRefName == "develop"
+               and .headRepositoryOwner.login == "lightning-it"
+               and .title == $title' \
+            | grep -qx true
+          echo "Promotion PR ${pr_number} is ready for protected Human approval and Current-Head checks."
