@@ -202,6 +202,30 @@ class StructureTests(unittest.TestCase):
 
         self.assertIn("heading.h1-title", {item.code for item in findings})
 
+    def test_technical_product_title_uses_readable_descriptor_for_h1(self) -> None:
+        cases = (
+            ("LIT-PGE-GOV-10-Governance-Model", "Governance Model"),
+            (
+                "LIT-PGE-GOV-ARC-20-Architecture-and-Controls",
+                "Architecture and Controls",
+            ),
+        )
+        for title, heading in cases:
+            with self.subTest(title=title):
+                current = page(
+                    "1",
+                    title,
+                    product_metadata(),
+                    h1_title=heading,
+                )
+
+                findings, _ = PGE.validate_tree(PGE.Tree(target(), [current]))
+
+                self.assertNotIn(
+                    "heading.h1-title",
+                    {item.code for item in findings},
+                )
+
     def test_header_cells_must_be_explicitly_bold_not_merely_th_cells(self) -> None:
         current = page(
             "1",
@@ -711,30 +735,65 @@ class TraversalTests(unittest.TestCase):
             ),
             "2": ([{"id": "3", "type": "page"}], []),
         }
-        current_target = target(expected_page_count=3)
+        current_target = target(
+            expected_page_count=3,
+            expected_non_page_count=1,
+            expected_content_count=4,
+            expected_non_page_classification_counts=PGE.NonPageClassificationCounts(
+                direct=1,
+                delegated=0,
+                disposition_excluded=0,
+            ),
+        )
 
         tree = PGE.crawl_tree(self.FakeClient(pages, children), current_target, 10)
         findings, _ = PGE.validate_tree(tree)
 
         self.assertEqual(["1", "2", "3"], [item.page_id for item in tree.pages])
         self.assertEqual(["99"], [item.content_id for item in tree.ignored_content])
-        self.assertIn("tree.non-page-ignored", {finding.code for finding in findings})
+        self.assertIn("tree.non-page-inventoried", {finding.code for finding in findings})
         self.assertNotIn("tree.page-count", {finding.code for finding in findings})
+        self.assertNotIn("tree.non-page-count", {finding.code for finding in findings})
+        self.assertNotIn("tree.content-count", {finding.code for finding in findings})
 
-    def test_page_only_traversal_does_not_enumerate_children(self) -> None:
+    def test_page_only_traversal_inventories_direct_non_page_children(self) -> None:
         root = page("1", "Root", product_metadata())
         fake = self.FakeClient({"1": root}, {})
-        fake.direct_children = mock.Mock(side_effect=AssertionError("must not traverse"))
-        current_target = target(traversal="page-only", expected_page_count=1)
+        fake.direct_children = mock.Mock(
+            return_value=(
+                [{"id": "2", "type": "page"}],
+                [PGE.IgnoredContent("9", "embed", "Embed", "1")],
+            )
+        )
+        current_target = target(
+            traversal="page-only",
+            expected_page_count=1,
+            expected_non_page_count=1,
+            expected_content_count=2,
+        )
 
         tree = PGE.crawl_tree(fake, current_target, 10)
 
         self.assertEqual(["1"], [item.page_id for item in tree.pages])
-        fake.direct_children.assert_not_called()
+        self.assertEqual(["9"], [item.content_id for item in tree.ignored_content])
+        fake.direct_children.assert_called_once_with("1")
 
     def test_classified_traversal_covers_pages_below_non_page_containers(self) -> None:
         current_target = target(
             root_page_id="1",
+            expected_page_count=5,
+            expected_non_page_count=1,
+            expected_content_count=6,
+            expected_classification_counts=PGE.ClassificationCounts(
+                direct_validated=3,
+                delegated=0,
+                disposition_excluded=2,
+            ),
+            expected_non_page_classification_counts=PGE.NonPageClassificationCounts(
+                direct=1,
+                delegated=0,
+                disposition_excluded=0,
+            ),
             excluded_subtree_root_ids=("3",),
             exclusion_authorities=(PGE.ExclusionAuthority("1", 1),),
         )
@@ -791,14 +850,31 @@ class TraversalTests(unittest.TestCase):
 
         self.assertEqual(["1", "2", "5"], [item.page_id for item in tree.pages])
         self.assertEqual(["3", "4"], [item.page_id for item in tree.excluded_pages])
+        self.assertEqual("direct", tree.ignored_content[0].classification)
         self.assertEqual({"3": 2}, tree.excluded_subtree_counts())
         self.assertEqual([mock.call("1"), mock.call("2"), mock.call("5")], fake.page.call_args_list)
         self.assertNotIn("tree.classification", {finding.code for finding in findings})
         self.assertEqual(5, report["targets"][0]["page_count"])
+        self.assertEqual(1, report["targets"][0]["non_page_count"])
+        self.assertEqual(6, report["targets"][0]["content_count"])
+        self.assertEqual(5, report["targets"][0]["expected_page_count"])
+        self.assertEqual(1, report["targets"][0]["expected_non_page_count"])
+        self.assertEqual(6, report["targets"][0]["expected_content_count"])
+        self.assertEqual(
+            {"direct": 1, "delegated": 0, "disposition_excluded": 0},
+            report["targets"][0]["non_page_classification_counts"],
+        )
         self.assertEqual(3, report["targets"][0]["included_page_count"])
         self.assertEqual(2, report["targets"][0]["excluded_page_count"])
         self.assertEqual(
-            [{"root_page_id": "3", "page_count": 2}],
+            [
+                {
+                    "root_page_id": "3",
+                    "page_count": 2,
+                    "non_page_count": 0,
+                    "content_count": 2,
+                }
+            ],
             report["targets"][0]["excluded_subtrees"],
         )
         self.assertRegex(report["targets"][0]["inventory_digest_sha256"], r"^[0-9a-f]{64}$")
@@ -842,7 +918,15 @@ class TraversalTests(unittest.TestCase):
                         "depth": 1,
                     },
                 ],
-                [],
+                [
+                    PGE.IgnoredContent(
+                        "9",
+                        "folder",
+                        "Delegated Folder",
+                        "2",
+                        depth=2,
+                    )
+                ],
             )
         )
 
@@ -858,6 +942,15 @@ class TraversalTests(unittest.TestCase):
                 page("2", "Delegated Root", product_metadata(), parent_id="1"),
                 page("3", "Delegated Child", product_metadata(), parent_id="2"),
             ],
+            ignored_content=[
+                PGE.IgnoredContent(
+                    "9",
+                    "folder",
+                    "Delegated Folder",
+                    "2",
+                    depth=1,
+                )
+            ],
         )
         report = PGE.build_report([source_tree, coverage_tree], [], redact_details=True)
         with tempfile.TemporaryDirectory() as directory:
@@ -870,6 +963,7 @@ class TraversalTests(unittest.TestCase):
 
         self.assertEqual([mock.call("1"), mock.call("4")], fake.page.call_args_list)
         self.assertEqual(["2", "3"], [page.page_id for page in source_tree.delegated_pages])
+        self.assertEqual("delegated", source_tree.ignored_content[0].classification)
         self.assertEqual([], PGE.validate_delegated_coverage([source_tree, coverage_tree]))
         self.assertEqual([], PGE.validate_delegated_coverage(snapshot_trees))
         missing = PGE.validate_delegated_coverage([source_tree])
@@ -883,6 +977,8 @@ class TraversalTests(unittest.TestCase):
                     "root_page_id": "2",
                     "target_name": "coverage-target",
                     "page_count": 2,
+                    "non_page_count": 1,
+                    "content_count": 3,
                 }
             ],
             report["targets"][0]["delegated_subtrees"],
@@ -894,6 +990,8 @@ class TraversalTests(unittest.TestCase):
                     "covering_target": "coverage-target",
                     "relationship": "delegated-coverage",
                     "overlap_page_count": 2,
+                    "overlap_non_page_count": 1,
+                    "overlap_content_count": 3,
                 }
             ],
             report["coverage_accounting"]["cross_target_overlaps"],
@@ -902,6 +1000,19 @@ class TraversalTests(unittest.TestCase):
     def test_nested_excluded_roots_use_the_most_specific_disposition(self) -> None:
         current_target = target(
             root_page_id="1",
+            expected_page_count=4,
+            expected_non_page_count=3,
+            expected_content_count=7,
+            expected_classification_counts=PGE.ClassificationCounts(
+                direct_validated=1,
+                delegated=0,
+                disposition_excluded=3,
+            ),
+            expected_non_page_classification_counts=PGE.NonPageClassificationCounts(
+                direct=1,
+                delegated=0,
+                disposition_excluded=2,
+            ),
             excluded_subtree_root_ids=("2", "3"),
             exclusion_authorities=(PGE.ExclusionAuthority("1", 1),),
         )
@@ -935,7 +1046,17 @@ class TraversalTests(unittest.TestCase):
                         "depth": 3,
                     },
                 ],
-                [],
+                [
+                    PGE.IgnoredContent("8", "folder", "Direct Folder", "1", depth=1),
+                    PGE.IgnoredContent("9", "folder", "Excluded Folder", "2", depth=2),
+                    PGE.IgnoredContent(
+                        "10",
+                        "folder",
+                        "Nested Excluded Folder",
+                        "3",
+                        depth=3,
+                    ),
+                ],
             )
         )
 
@@ -950,7 +1071,27 @@ class TraversalTests(unittest.TestCase):
             ],
         )
         self.assertEqual({"2": 1, "3": 2}, tree.excluded_subtree_counts())
+        self.assertEqual(
+            [
+                ("8", "direct", None),
+                ("9", "excluded", "2"),
+                ("10", "excluded", "3"),
+            ],
+            [
+                (
+                    item.content_id,
+                    item.classification,
+                    item.classified_subtree_root_id,
+                )
+                for item in tree.ignored_content
+            ],
+        )
+        self.assertEqual({"2": 1, "3": 1}, tree.excluded_non_page_subtree_counts())
         self.assertNotIn("tree.classification", {finding.code for finding in findings})
+        self.assertNotIn(
+            "tree.non-page-classification",
+            {finding.code for finding in findings},
+        )
 
     def test_expected_page_count_detects_incomplete_snapshot(self) -> None:
         current_target = target(expected_page_count=2)
@@ -958,6 +1099,54 @@ class TraversalTests(unittest.TestCase):
             PGE.Tree(current_target, [page("1", "Root", product_metadata())])
         )
         self.assertIn("tree.page-count", {finding.code for finding in findings})
+
+    def test_unexpected_additional_non_page_node_fails_exact_counts(self) -> None:
+        current_target = target(
+            expected_page_count=1,
+            expected_non_page_count=0,
+            expected_content_count=1,
+            expected_non_page_classification_counts=PGE.NonPageClassificationCounts(
+                direct=0,
+                delegated=0,
+                disposition_excluded=0,
+            ),
+        )
+        findings, _ = PGE.validate_tree(
+            PGE.Tree(
+                current_target,
+                [page("1", "Root", product_metadata())],
+                ignored_content=[PGE.IgnoredContent("9", "embed", "Embed", "1")],
+            )
+        )
+
+        codes = {finding.code for finding in findings}
+        self.assertIn("tree.non-page-count", codes)
+        self.assertIn("tree.content-count", codes)
+        self.assertIn("tree.non-page-classification-count", codes)
+
+    def test_expected_non_page_classification_detects_scope_drift(self) -> None:
+        current_target = target(
+            expected_page_count=1,
+            expected_non_page_count=1,
+            expected_content_count=2,
+            expected_non_page_classification_counts=PGE.NonPageClassificationCounts(
+                direct=0,
+                delegated=0,
+                disposition_excluded=1,
+            ),
+        )
+        findings, _ = PGE.validate_tree(
+            PGE.Tree(
+                current_target,
+                [page("1", "Root", product_metadata())],
+                ignored_content=[PGE.IgnoredContent("9", "embed", "Embed", "1")],
+            )
+        )
+
+        self.assertIn(
+            "tree.non-page-classification-count",
+            {finding.code for finding in findings},
+        )
 
     def test_expected_classification_counts_detect_disposition_drift(self) -> None:
         current_target = target(
@@ -1040,6 +1229,7 @@ class TraversalTests(unittest.TestCase):
         self.assertEqual(["2"], [str(item["id"]) for item in pages])
         self.assertEqual(["9"], [item.content_id for item in ignored])
         self.assertEqual("2", ignored[0].parent_id)
+        self.assertEqual(2, ignored[0].depth)
         self.assertEqual("next", client._get_json.call_args_list[1].args[1]["cursor"])
 
     def test_link_header_next_relation_is_supported(self) -> None:
@@ -1127,6 +1317,19 @@ class TraversalTests(unittest.TestCase):
                 }
             )
 
+    def test_target_mapping_requires_page_and_non_page_sum_to_content(self) -> None:
+        with self.assertRaisesRegex(PGE.ConformanceError, "sum to content count"):
+            PGE.target_from_mapping(
+                {
+                    "name": "test-target",
+                    "root_page_id": "1",
+                    "profile": "product",
+                    "expected_page_count": 1,
+                    "expected_non_page_count": 1,
+                    "expected_content_count": 3,
+                }
+            )
+
 
 class SnapshotAndReportTests(unittest.TestCase):
     def test_inventory_digest_binds_title_and_storage_body_without_disclosing_them(self) -> None:
@@ -1145,6 +1348,72 @@ class SnapshotAndReportTests(unittest.TestCase):
 
         self.assertNotEqual(original_digest, changed_digest)
         self.assertNotIn("Sensitive Internal Title", original_digest)
+
+    def test_inventory_digest_binds_non_page_identity_parent_and_classification(self) -> None:
+        current_target = target()
+        root = page("1", "Root", product_metadata())
+        original = PGE.Tree(
+            current_target,
+            [root],
+            ignored_content=[PGE.IgnoredContent("9", "embed", "Embed", "1")],
+        )
+        variants = (
+            PGE.IgnoredContent("10", "embed", "Embed", "1"),
+            PGE.IgnoredContent("9", "whiteboard", "Embed", "1"),
+            PGE.IgnoredContent("9", "embed", "Embed", "2"),
+            PGE.IgnoredContent(
+                "9",
+                "embed",
+                "Embed",
+                "2",
+                classification="excluded",
+                classified_subtree_root_id="2",
+            ),
+        )
+        original_digest = PGE.tree_inventory_digest(original)
+        original_report = PGE.build_report(
+            [original],
+            [],
+            redact_details=True,
+        )
+        original_report_digest = original_report["targets"][0][
+            "inventory_digest_sha256"
+        ]
+        report_core = {
+            key: value
+            for key, value in original_report.items()
+            if key != "evidence_digest_sha256"
+        }
+        canonical_report = json.dumps(
+            report_core,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.assertEqual(
+            original_report["evidence_digest_sha256"],
+            PGE.sha256(canonical_report.encode("utf-8")).hexdigest(),
+        )
+
+        for changed in variants:
+            with self.subTest(changed=changed):
+                replacement = PGE.Tree(
+                    current_target,
+                    [root],
+                    ignored_content=[changed],
+                )
+                self.assertNotEqual(
+                    original_digest,
+                    PGE.tree_inventory_digest(replacement),
+                )
+                self.assertNotEqual(
+                    original_report_digest,
+                    PGE.build_report(
+                        [replacement],
+                        [],
+                        redact_details=True,
+                    )["targets"][0]["inventory_digest_sha256"],
+                )
 
     def test_exclusion_authority_versions_are_enforced_live_and_from_snapshot(self) -> None:
         current_target = target(
@@ -1218,8 +1487,31 @@ class SnapshotAndReportTests(unittest.TestCase):
         current_tree = PGE.Tree(
             target=target(),
             pages=[page("1", "Sensitive Internal Title", product_metadata())],
+            ignored_content=[
+                PGE.IgnoredContent(
+                    "9",
+                    "embed",
+                    "Sensitive Embed Title",
+                    "1",
+                    depth=1,
+                )
+            ],
         )
         payload = PGE.snapshot_payload([current_tree], [])
+        self.assertEqual(2, payload["schema_version"])
+        self.assertEqual(
+            {
+                "id": "9",
+                "type": "embed",
+                "title": "Sensitive Embed Title",
+                "parent_id": "1",
+                "depth": 1,
+                "classification": "direct",
+                "classified_subtree_root_id": None,
+                "delegated_target_name": None,
+            },
+            payload["targets"][0]["ignored_content"][0],
+        )
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "snapshot.json"
             snapshot.write_text(json.dumps(payload), encoding="utf-8")
@@ -1236,9 +1528,12 @@ class SnapshotAndReportTests(unittest.TestCase):
         report = PGE.build_report(trees, [sensitive_finding], redact_details=True)
         encoded = json.dumps(report)
 
+        self.assertEqual(2, report["schema_version"])
         self.assertEqual([], alignments)
+        self.assertEqual(1, report["targets"][0]["non_page_count"])
         self.assertNotIn("body_storage", encoded)
         self.assertNotIn("Sensitive Internal Title", encoded)
+        self.assertNotIn("Sensitive Embed Title", encoded)
         self.assertNotIn("Sensitive finding detail", encoded)
         self.assertNotIn("sha256:", encoded)
         self.assertIsNone(report["findings"][0]["page_title"])

@@ -11,25 +11,30 @@ Confluence.
 The checked-in target inventory is
 [`inventories/pge/confluence-conformance.json`](../inventories/pge/confluence-conformance.json).
 It is the review boundary for the allowed Confluence origin, page roots,
-profiles, expected decision IDs, expected page counts, and governed subtree
+profiles, expected decision IDs, separate page, non-page, and content-node
+counts, and governed subtree
 exclusions and delegated coverage. The canonical PGE product target begins at
 page `2875654145` and classifies every current descendant as directly
 validated, delegated, or disposition-excluded. Its
 excluded subtree roots are justified by the version-pinned Content State and
 Disposition Manifest (`PGE-CONF-DISP-001`, page `2892759041`, Confluence
-version 12, document version 2.1) and Item Level Content Disposition Register
-(`PGE-CONF-DISP-001-R`, page `2892890133`, Confluence version 10, document
+version 13, document version 2.1) and Item Level Content Disposition Register
+(`PGE-CONF-DISP-001-R`, page `2892890133`, Confluence version 11, document
 version 2.1). A live or offline run fails if
 either authority page is absent from the included inventory or its Confluence
 version differs. The reviewed full scan fixes the canonical inventory at 792
-pages: 52 are validated directly under the product profile, 40 Product
+content nodes: 778 pages and 14 folders. Of the pages, 52 are validated
+directly under the product profile, 40 Product
 Decision pages are delegated to `pge-product-decisions`, 11 Template Library
-pages are delegated to `pge-template-library`, and 689 pages are below 69
-explicit disposition roots. The 69 item-level roots may nest; each page is
-assigned to its closest, most-specific configured root so the reported counts
-remain disjoint. Completeness requires that exact total plus an explicit
-classification for every returned page. Delegated page-ID inventories must
-exactly match their separately crawled covering targets.
+pages are delegated to `pge-template-library`, and 675 pages are below 69
+explicit disposition roots. All 14 folders are also below those roots, making
+689 disposition-excluded content nodes. The 69 item-level roots may nest;
+each page and non-page node is assigned from its exact ID and parent ancestry
+to the closest, most-specific configured root so the reported counts remain
+disjoint. Completeness requires exact page, non-page, and aggregate counts plus
+an explicit classification for every returned node. Delegated page and
+non-page ID inventories must exactly match their separately crawled covering
+targets.
 
 Traversal mode is also explicit. The Artifact Catalog is deliberately
 `page-only`: its Template Library is audited as a separate recursive target,
@@ -39,9 +44,11 @@ product and Product Decisions targets plus the coupled Template Library and
 Artifact Catalog targets, so delegated coverage cannot be omitted. The Catalog
 root remains directly validated in the canonical count and is also selected as
 the alignment source; the report does not count that second validation inside
-the 792-page canonical inventory. The LIT-PIS engagement target expects 389
-page objects; its nine current embeds are non-page content and are reported,
-not counted as pages. A
+the 792-node canonical inventory. The Product Decisions, Template Library, and
+Artifact Catalog targets respectively bind `40 + 0 = 40`, `11 + 0 = 11`, and
+`1 + 0 = 1` page/non-page/content counts. The LIT-PIS engagement target binds
+389 pages plus nine current embeds, for 398 content nodes. The embeds are
+inventoried and digested, not counted as pages. A
 root, traversal mode, count, exclusion, or authority-version change therefore
 requires the same pull request review as validator code.
 
@@ -52,19 +59,24 @@ Cloud REST API v2 direct-child relation. The canonical product target uses the
 bounded descendants inventory so pages below non-page containers remain
 visible. Pagination must finish without a repeated or missing cursor. Page and
 non-page IDs must be unique, parent chains must trace to the selected root, and
-every configured classified root must exist. Directly included page bodies are
+every configured classified root must exist. Page, non-page, and aggregate
+counts are checked separately. Directly included page bodies are
 validated under the canonical product profile. Delegated and excluded page
 bodies are not fetched by that target; delegated bodies are fetched and
 validated only by their named covering target, while excluded bodies are never
 fetched. Non-page children such as folders, embeds, or whiteboards are not
-treated as pages, but their type, identity, and parent are bound into the
-evidence inventory digest.
+treated as pages, but their type, identity, title, API-reported depth when
+available, parent, derived classification, and classified subtree are bound
+into the evidence inventory digest. Even `page-only` targets inventory direct
+non-page children while leaving child pages to their separately configured
+validation scope.
 
 The page-level rules require:
 
-- exactly one H1 equal to the Confluence title for product and template pages,
-  or to the readable content title without technical prefixes for engagement
-  pages;
+- exactly one H1 equal to the Confluence title for ordinary product and
+  template pages, or to the readable descriptor without technical prefixes,
+  inherited codes, or ordering numbers for engagement pages and technically
+  named `LIT-PGE-*` product pages;
 - `00 Inhaltsverzeichnis` as the exact first H2, associated with an expand
   macro that contains the native table-of-contents macro;
 - contiguous two-level numbering for H2 and H3 headings;
@@ -156,19 +168,26 @@ python3 .github/scripts/pge-confluence-conformance.py \
 ## Acceptance and Recovery
 
 A zero-error, zero-warning final run is necessary for documentation closure.
-The report records total, directly validated, delegated, disposition-excluded,
-and ignored counts; per-classified-root counts and covering target names; the
+The report records separate content-node, page, and non-page totals; separate
+page and non-page classifications; per-classified-root page/non-page counts
+and covering target names; the
 reviewed authority versions; and an inventory digest over the content
 identities, parent relations, titles, revisions, and included storage bodies.
 Only the aggregate digest is disclosed; individual title or body hashes are
-not emitted. Target rows are independent scopes and are
-not additive. A cross-target coverage section labels delegated coverage and
-additional validation overlaps, including the Catalog's second validation.
-The PGE Product Owner additionally
-confirms the selected roots, fixed page counts, canonical classifications,
-historical-content disposition, template/catalog alignment, and accepted
-exceptions. The Evidence Register and LI-140 then reference the report digest,
-workflow run, Git commit, reviewer, and acceptance decision.
+not emitted. Exact count guards make every added or removed non-page node fail
+the run. Exact non-page ID allowlists are not configured: a same-count
+replacement therefore does not fail on count alone, but its ID, type, parent
+chain, or classification changes the target inventory digest and consequently
+the evidence digest. Acceptance must compare those digests with the last
+accepted evidence record and explicitly approve or reject the changed
+inventory. Target rows are independent scopes and are not additive. A
+cross-target coverage section labels delegated coverage and additional
+validation overlaps, including the Catalog's second validation.
+The PGE Product Owner additionally confirms the selected roots, fixed
+page/non-page/content counts, canonical classifications, historical-content
+disposition, template/catalog alignment, and accepted exceptions. The Evidence
+Register and LI-140 then reference the report digest, workflow run, Git commit,
+reviewer, and acceptance decision.
 
 The validator is read-only, so stopping a failed run requires no Confluence
 rollback. If a report or snapshot is written to an unapproved location, stop

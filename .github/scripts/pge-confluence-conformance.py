@@ -27,8 +27,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-SNAPSHOT_SCHEMA_VERSION = 1
-REPORT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 2
 DEFAULT_MAX_PAGES = 5_000
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_ALLOWED_CONFLUENCE_ORIGIN = "https://wiki.cloud.l-it.io"
@@ -203,13 +203,21 @@ class IgnoredContent:
     content_type: str
     title: str
     parent_id: str
+    depth: int | None = None
+    classification: str = "direct"
+    classified_subtree_root_id: str | None = None
+    delegated_target_name: str | None = None
 
-    def snapshot(self) -> dict[str, str]:
+    def snapshot(self) -> dict[str, Any]:
         return {
             "id": self.content_id,
             "type": self.content_type,
             "title": self.title,
             "parent_id": self.parent_id,
+            "depth": self.depth,
+            "classification": self.classification,
+            "classified_subtree_root_id": self.classified_subtree_root_id,
+            "delegated_target_name": self.delegated_target_name,
         }
 
 
@@ -247,6 +255,24 @@ class ClassificationCounts:
     def snapshot(self) -> dict[str, int]:
         return {
             "direct_validated": self.direct_validated,
+            "delegated": self.delegated,
+            "disposition_excluded": self.disposition_excluded,
+        }
+
+
+@dataclass(frozen=True)
+class NonPageClassificationCounts:
+    direct: int
+    delegated: int
+    disposition_excluded: int
+
+    @property
+    def total(self) -> int:
+        return self.direct + self.delegated + self.disposition_excluded
+
+    def snapshot(self) -> dict[str, int]:
+        return {
+            "direct": self.direct,
             "delegated": self.delegated,
             "disposition_excluded": self.disposition_excluded,
         }
@@ -303,6 +329,8 @@ class Target:
     profile: str
     traversal: str = "recursive"
     expected_page_count: int | None = None
+    expected_non_page_count: int | None = None
+    expected_content_count: int | None = None
     expected_decision_set: str | None = None
     namespace: str | None = None
     scope: str | None = None
@@ -310,6 +338,7 @@ class Target:
     exclusion_authorities: tuple[ExclusionAuthority, ...] = ()
     delegated_subtrees: tuple[DelegatedSubtree, ...] = ()
     expected_classification_counts: ClassificationCounts | None = None
+    expected_non_page_classification_counts: NonPageClassificationCounts | None = None
 
     def validate(self) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,63}", self.name):
@@ -328,6 +357,32 @@ class Target:
             or self.expected_page_count < 1
         ):
             raise ConformanceError(f"{self.name}: expected_page_count must be positive")
+        if self.expected_non_page_count is not None and (
+            not isinstance(self.expected_non_page_count, int)
+            or isinstance(self.expected_non_page_count, bool)
+            or self.expected_non_page_count < 0
+        ):
+            raise ConformanceError(
+                f"{self.name}: expected_non_page_count must be non-negative"
+            )
+        if self.expected_content_count is not None and (
+            not isinstance(self.expected_content_count, int)
+            or isinstance(self.expected_content_count, bool)
+            or self.expected_content_count < 1
+        ):
+            raise ConformanceError(
+                f"{self.name}: expected_content_count must be positive"
+            )
+        if (
+            self.expected_page_count is not None
+            and self.expected_non_page_count is not None
+            and self.expected_content_count is not None
+            and self.expected_page_count + self.expected_non_page_count
+            != self.expected_content_count
+        ):
+            raise ConformanceError(
+                f"{self.name}: expected page and non-page counts must sum to content count"
+            )
         if len(self.excluded_subtree_root_ids) != len(set(self.excluded_subtree_root_ids)):
             raise ConformanceError(
                 f"{self.name}: excluded_subtree_root_ids must be unique"
@@ -404,6 +459,28 @@ class Target:
                 raise ConformanceError(
                     f"{self.name}: expected classification counts must sum to expected_page_count"
                 )
+        if self.expected_non_page_classification_counts is not None:
+            counts = self.expected_non_page_classification_counts
+            if any(
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+                for value in (
+                    counts.direct,
+                    counts.delegated,
+                    counts.disposition_excluded,
+                )
+            ):
+                raise ConformanceError(
+                    f"{self.name}: expected non-page classification counts must be non-negative integers"
+                )
+            if (
+                self.expected_non_page_count is None
+                or counts.total != self.expected_non_page_count
+            ):
+                raise ConformanceError(
+                    f"{self.name}: expected non-page classifications must sum to expected_non_page_count"
+                )
         if self.profile == "engagement":
             if not self.namespace or not self.scope:
                 raise ConformanceError(
@@ -420,6 +497,8 @@ class Target:
             "profile": self.profile,
             "traversal": self.traversal,
             "expected_page_count": self.expected_page_count,
+            "expected_non_page_count": self.expected_non_page_count,
+            "expected_content_count": self.expected_content_count,
             "expected_decision_set": self.expected_decision_set,
             "namespace": self.namespace,
             "scope": self.scope,
@@ -433,6 +512,11 @@ class Target:
             "expected_classification_counts": (
                 self.expected_classification_counts.snapshot()
                 if self.expected_classification_counts is not None
+                else None
+            ),
+            "expected_non_page_classification_counts": (
+                self.expected_non_page_classification_counts.snapshot()
+                if self.expected_non_page_classification_counts is not None
                 else None
             ),
         }
@@ -450,6 +534,31 @@ class Tree:
     def page_count(self) -> int:
         return len(self.pages) + len(self.excluded_pages) + len(self.delegated_pages)
 
+    @property
+    def non_page_count(self) -> int:
+        return len(self.ignored_content)
+
+    @property
+    def content_count(self) -> int:
+        return self.page_count + self.non_page_count
+
+    def non_page_classification_counts(self) -> NonPageClassificationCounts:
+        return NonPageClassificationCounts(
+            direct=sum(
+                1 for item in self.ignored_content if item.classification == "direct"
+            ),
+            delegated=sum(
+                1
+                for item in self.ignored_content
+                if item.classification == "delegated"
+            ),
+            disposition_excluded=sum(
+                1
+                for item in self.ignored_content
+                if item.classification == "excluded"
+            ),
+        )
+
     def excluded_subtree_counts(self) -> dict[str, int]:
         counts = {root_id: 0 for root_id in self.target.excluded_subtree_root_ids}
         for page in self.excluded_pages:
@@ -466,6 +575,35 @@ class Tree:
         for page in self.delegated_pages:
             key = (page.delegated_subtree_root_id, page.delegated_target_name)
             counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    def excluded_non_page_subtree_counts(self) -> dict[str, int]:
+        counts = {root_id: 0 for root_id in self.target.excluded_subtree_root_ids}
+        for item in self.ignored_content:
+            if (
+                item.classification == "excluded"
+                and item.classified_subtree_root_id is not None
+            ):
+                root_id = item.classified_subtree_root_id
+                counts[root_id] = counts.get(root_id, 0) + 1
+        return counts
+
+    def delegated_non_page_subtree_counts(self) -> dict[tuple[str, str], int]:
+        counts = {
+            (delegation.root_page_id, delegation.target_name): 0
+            for delegation in self.target.delegated_subtrees
+        }
+        for item in self.ignored_content:
+            if (
+                item.classification == "delegated"
+                and item.classified_subtree_root_id is not None
+                and item.delegated_target_name is not None
+            ):
+                key = (
+                    item.classified_subtree_root_id,
+                    item.delegated_target_name,
+                )
+                counts[key] = counts.get(key, 0) + 1
         return counts
 
     def snapshot(self) -> dict[str, Any]:
@@ -853,7 +991,19 @@ def readable_title_key(value: str) -> str:
     return " ".join(word for word in words if word not in {"and", "und"})
 
 
+def technical_product_descriptor(page: Page, target: Target) -> str | None:
+    if target.profile != "product":
+        return None
+    match = re.fullmatch(
+        r"LIT-PGE-(?:[A-Z0-9]+-)*\d{2,3}-(?P<descriptor>[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)",
+        page.title,
+    )
+    return match.group("descriptor") if match else None
+
+
 def expected_readable_heading(page: Page, target: Target) -> str | None:
+    if target.profile == "product":
+        return technical_product_descriptor(page, target) or page.title
     if target.profile != "engagement":
         return page.title
     if page.page_id == target.root_page_id:
@@ -882,7 +1032,8 @@ def validate_headings(
         )
     else:
         expected_heading = expected_readable_heading(page, target)
-        if target.profile == "engagement":
+        technical_product_title = technical_product_descriptor(page, target)
+        if target.profile == "engagement" or technical_product_title is not None:
             heading_matches = expected_heading is not None and (
                 readable_title_key(h1[0].title)
                 == readable_title_key(expected_heading.replace("-", " "))
@@ -899,6 +1050,7 @@ def validate_headings(
                     "The H1 must be the readable content title without namespace, "
                     "scope, inherited codes, or ordering number."
                     if target.profile == "engagement"
+                    or technical_product_title is not None
                     else "The H1 heading must exactly equal the Confluence page title."
                 ),
                 page,
@@ -1579,6 +1731,34 @@ def validate_tree(tree: Tree) -> tuple[list[Finding], dict[str, StorageParser]]:
             target,
             f"Expected {target.expected_page_count} pages but retrieved {tree.page_count}.",
         )
+    if (
+        target.expected_non_page_count is not None
+        and tree.non_page_count != target.expected_non_page_count
+    ):
+        add_finding(
+            findings,
+            "error",
+            "tree.non-page-count",
+            target,
+            (
+                f"Expected {target.expected_non_page_count} non-page nodes but "
+                f"retrieved {tree.non_page_count}."
+            ),
+        )
+    if (
+        target.expected_content_count is not None
+        and tree.content_count != target.expected_content_count
+    ):
+        add_finding(
+            findings,
+            "error",
+            "tree.content-count",
+            target,
+            (
+                f"Expected {target.expected_content_count} content nodes but "
+                f"retrieved {tree.content_count}."
+            ),
+        )
     if target.expected_classification_counts is not None:
         expected_counts = target.expected_classification_counts.snapshot()
         actual_counts = {
@@ -1598,14 +1778,30 @@ def validate_tree(tree: Tree) -> tuple[list[Finding], dict[str, StorageParser]]:
                         f"retrieved {actual_counts[classification]}."
                     ),
                 )
+    if target.expected_non_page_classification_counts is not None:
+        expected_counts = target.expected_non_page_classification_counts.snapshot()
+        actual_counts = tree.non_page_classification_counts().snapshot()
+        for classification, expected_count in expected_counts.items():
+            if actual_counts[classification] != expected_count:
+                add_finding(
+                    findings,
+                    "error",
+                    "tree.non-page-classification-count",
+                    target,
+                    (
+                        f"Expected {expected_count} {classification} non-page nodes "
+                        f"but retrieved {actual_counts[classification]}."
+                    ),
+                )
     for ignored in tree.ignored_content:
         findings.append(
             Finding(
                 severity="info",
-                code="tree.non-page-ignored",
+                code="tree.non-page-inventoried",
                 target=target.name,
                 message=(
-                    f"Ignored non-page child content of type {ignored.content_type!r}."
+                    f"Inventoried non-page content of type {ignored.content_type!r} "
+                    f"with classification {ignored.classification!r}."
                 ),
                 page_id=ignored.content_id,
                 page_title=ignored.title,
@@ -1659,21 +1855,27 @@ def validate_tree(tree: Tree) -> tuple[list[Finding], dict[str, StorageParser]]:
                 ),
                 authority_page,
             )
-    if tree.excluded_pages and not target.excluded_subtree_root_ids:
+    has_excluded_non_page = any(
+        item.classification == "excluded" for item in tree.ignored_content
+    )
+    has_delegated_non_page = any(
+        item.classification == "delegated" for item in tree.ignored_content
+    )
+    if (tree.excluded_pages or has_excluded_non_page) and not target.excluded_subtree_root_ids:
         add_finding(
             findings,
             "error",
             "tree.unconfigured-exclusion",
             target,
-            "The tree contains excluded pages without configured subtree roots.",
+            "The tree contains excluded content without configured subtree roots.",
         )
-    if tree.delegated_pages and not target.delegated_subtrees:
+    if (tree.delegated_pages or has_delegated_non_page) and not target.delegated_subtrees:
         add_finding(
             findings,
             "error",
             "tree.unconfigured-delegation",
             target,
-            "The tree contains delegated pages without configured subtree targets.",
+            "The tree contains delegated content without configured subtree targets.",
         )
     if target.excluded_subtree_root_ids or target.delegated_subtrees:
         parent_by_id = {
@@ -1793,6 +1995,46 @@ def validate_tree(tree: Tree) -> tuple[list[Finding], dict[str, StorageParser]]:
                     target,
                     "A delegated page is assigned to the wrong subtree target.",
                 )
+        for item in tree.ignored_content:
+            try:
+                classification = classified_subtree(
+                    item.content_id,
+                    parent_by_id,
+                    target,
+                )
+            except ConformanceError as exc:
+                findings.append(
+                    Finding(
+                        severity="error",
+                        code="tree.classification",
+                        target=target.name,
+                        message=str(exc),
+                        page_id=item.content_id,
+                        page_title=item.title,
+                    )
+                )
+                continue
+            expected = (
+                ("direct", None, None)
+                if classification is None
+                else classification
+            )
+            actual = (
+                item.classification,
+                item.classified_subtree_root_id,
+                item.delegated_target_name,
+            )
+            if actual != expected:
+                findings.append(
+                    Finding(
+                        severity="error",
+                        code="tree.non-page-classification",
+                        target=target.name,
+                        message="A non-page node is assigned to the wrong scope.",
+                        page_id=item.content_id,
+                        page_title=item.title,
+                    )
+                )
 
     parsers: dict[str, StorageParser] = {}
     metadata_by_page: dict[str, dict[str, str]] = {}
@@ -1863,7 +2105,20 @@ def validate_delegated_coverage(trees: Sequence[Tree]) -> list[Finding]:
                 *(page.page_id for page in coverage_tree.excluded_pages),
                 *(page.page_id for page in coverage_tree.delegated_pages),
             }
-            if delegated_ids != covered_ids:
+            delegated_non_page_ids = {
+                item.content_id
+                for item in source_tree.ignored_content
+                if item.classification == "delegated"
+                and item.classified_subtree_root_id == delegation.root_page_id
+                and item.delegated_target_name == delegation.target_name
+            }
+            covered_non_page_ids = {
+                item.content_id for item in coverage_tree.ignored_content
+            }
+            if (
+                delegated_ids != covered_ids
+                or delegated_non_page_ids != covered_non_page_ids
+            ):
                 add_finding(
                     findings,
                     "error",
@@ -1871,8 +2126,10 @@ def validate_delegated_coverage(trees: Sequence[Tree]) -> list[Finding]:
                     source_tree.target,
                     (
                         f"Delegated subtree {delegation.root_page_id} inventories "
-                        f"{len(delegated_ids)} pages, while target "
-                        f"{delegation.target_name} covers {len(covered_ids)}."
+                        f"{len(delegated_ids)} pages and "
+                        f"{len(delegated_non_page_ids)} non-page nodes, while target "
+                        f"{delegation.target_name} covers {len(covered_ids)} pages and "
+                        f"{len(covered_non_page_ids)} non-page nodes."
                     ),
                 )
     return findings
@@ -2376,6 +2633,7 @@ class ConfluenceClient:
                             content_type=content_type,
                             title=title,
                             parent_id=parent_id,
+                            depth=depth,
                         )
                     )
             cursor = self._next_cursor(payload)
@@ -2421,6 +2679,33 @@ def classified_subtree(
         )
         current = parent
     return None
+
+
+def classify_non_page_content(
+    item: IgnoredContent,
+    parent_by_id: dict[str, str],
+    target: Target,
+) -> IgnoredContent:
+    classification = classified_subtree(item.content_id, parent_by_id, target)
+    if classification is None:
+        return IgnoredContent(
+            content_id=item.content_id,
+            content_type=item.content_type,
+            title=item.title,
+            parent_id=item.parent_id,
+            depth=item.depth,
+        )
+    classification_type, subtree_root, delegated_target = classification
+    return IgnoredContent(
+        content_id=item.content_id,
+        content_type=item.content_type,
+        title=item.title,
+        parent_id=item.parent_id,
+        depth=item.depth,
+        classification=classification_type,
+        classified_subtree_root_id=subtree_root,
+        delegated_target_name=delegated_target,
+    )
 
 
 def crawl_classified_tree(
@@ -2498,10 +2783,13 @@ def crawl_classified_tree(
                 delegated_target_name=delegated_target,
             )
         )
+    classified_non_page = [
+        classify_non_page_content(item, parent_by_id, target) for item in ignored
+    ]
     return Tree(
         target=target,
         pages=pages,
-        ignored_content=ignored,
+        ignored_content=classified_non_page,
         excluded_pages=excluded_pages,
         delegated_pages=delegated_pages,
     )
@@ -2514,6 +2802,7 @@ def crawl_tree(client: ConfluenceClient, target: Target, max_pages: int) -> Tree
     pages = [root]
     ignored_content: list[IgnoredContent] = []
     if target.traversal == "page-only":
+        _, ignored_content = client.direct_children(root.page_id)
         return Tree(target=target, pages=pages, ignored_content=ignored_content)
     queue = [root]
     seen = {root.page_id}
@@ -2571,12 +2860,18 @@ def target_from_mapping(data: dict[str, Any]) -> Target:
         authorities.append(
             ExclusionAuthority(page_id=str(value["page_id"]), version=version)
         )
-    raw_expected_page_count = data.get("expected_page_count")
-    if raw_expected_page_count is not None and (
-        not isinstance(raw_expected_page_count, int)
-        or isinstance(raw_expected_page_count, bool)
+    raw_counts: dict[str, int | None] = {}
+    for count_name in (
+        "expected_page_count",
+        "expected_non_page_count",
+        "expected_content_count",
     ):
-        raise ConformanceError("expected_page_count must be an integer or null")
+        value = data.get(count_name)
+        if value is not None and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            raise ConformanceError(f"{count_name} must be an integer or null")
+        raw_counts[count_name] = value
     raw_classification_counts = data.get("expected_classification_counts")
     classification_counts: ClassificationCounts | None = None
     if raw_classification_counts is not None:
@@ -2601,6 +2896,35 @@ def target_from_mapping(data: dict[str, Any]) -> Target:
             direct_validated=raw_classification_counts["direct_validated"],
             delegated=raw_classification_counts["delegated"],
             disposition_excluded=raw_classification_counts["disposition_excluded"],
+        )
+    raw_non_page_classification_counts = data.get(
+        "expected_non_page_classification_counts"
+    )
+    non_page_classification_counts: NonPageClassificationCounts | None = None
+    if raw_non_page_classification_counts is not None:
+        required_non_page_keys = {
+            "direct",
+            "delegated",
+            "disposition_excluded",
+        }
+        if (
+            not isinstance(raw_non_page_classification_counts, dict)
+            or set(raw_non_page_classification_counts) != required_non_page_keys
+            or any(
+                not isinstance(raw_non_page_classification_counts[key], int)
+                or isinstance(raw_non_page_classification_counts[key], bool)
+                for key in required_non_page_keys
+            )
+        ):
+            raise ConformanceError(
+                "expected_non_page_classification_counts must contain three integer counts"
+            )
+        non_page_classification_counts = NonPageClassificationCounts(
+            direct=raw_non_page_classification_counts["direct"],
+            delegated=raw_non_page_classification_counts["delegated"],
+            disposition_excluded=raw_non_page_classification_counts[
+                "disposition_excluded"
+            ],
         )
     raw_delegations = data.get("delegated_subtree_targets", [])
     if not isinstance(raw_delegations, list) or any(
@@ -2638,11 +2962,9 @@ def target_from_mapping(data: dict[str, Any]) -> Target:
         root_page_id=data["root_page_id"],
         profile=data["profile"],
         traversal=data.get("traversal", "recursive"),
-        expected_page_count=(
-            raw_expected_page_count
-            if raw_expected_page_count is not None
-            else None
-        ),
+        expected_page_count=raw_counts["expected_page_count"],
+        expected_non_page_count=raw_counts["expected_non_page_count"],
+        expected_content_count=raw_counts["expected_content_count"],
         expected_decision_set=(
             data["expected_decision_set"]
             if data.get("expected_decision_set") is not None
@@ -2654,6 +2976,7 @@ def target_from_mapping(data: dict[str, Any]) -> Target:
         exclusion_authorities=tuple(authorities),
         delegated_subtrees=tuple(delegations),
         expected_classification_counts=classification_counts,
+        expected_non_page_classification_counts=non_page_classification_counts,
     )
     target.validate()
     if target.expected_decision_set:
@@ -2887,6 +3210,8 @@ def read_snapshot(path: Path) -> tuple[list[Tree], list[Alignment]]:
             "profile",
             "traversal",
             "expected_page_count",
+            "expected_non_page_count",
+            "expected_content_count",
             "expected_decision_set",
             "namespace",
             "scope",
@@ -2894,6 +3219,7 @@ def read_snapshot(path: Path) -> tuple[list[Tree], list[Alignment]]:
             "exclusion_authorities",
             "delegated_subtree_targets",
             "expected_classification_counts",
+            "expected_non_page_classification_counts",
         }
         target = target_from_mapping(
             {key: raw_tree[key] for key in target_keys if key in raw_tree}
@@ -2932,10 +3258,24 @@ def read_snapshot(path: Path) -> tuple[list[Tree], list[Alignment]]:
             )
         ignored: list[IgnoredContent] = []
         for item in ignored_data:
-            if not isinstance(item, dict) or set(item) != {"id", "type", "title", "parent_id"}:
+            required_ignored_keys = {
+                "id",
+                "type",
+                "title",
+                "parent_id",
+                "depth",
+                "classification",
+                "classified_subtree_root_id",
+                "delegated_target_name",
+            }
+            if not isinstance(item, dict) or set(item) != required_ignored_keys:
                 raise ConformanceError(f"snapshot target {target.name} has invalid ignored content")
             content_id = item["id"]
             parent_id = item["parent_id"]
+            depth = item["depth"]
+            classification = item["classification"]
+            classified_root = item["classified_subtree_root_id"]
+            delegated_target = item["delegated_target_name"]
             if (
                 not isinstance(content_id, str)
                 or not content_id.isdigit()
@@ -2944,6 +3284,38 @@ def read_snapshot(path: Path) -> tuple[list[Tree], list[Alignment]]:
                 or not isinstance(item["type"], str)
                 or not item["type"]
                 or not isinstance(item["title"], str)
+                or (
+                    depth is not None
+                    and (
+                        not isinstance(depth, int)
+                        or isinstance(depth, bool)
+                        or depth < 1
+                    )
+                )
+                or classification not in {"direct", "excluded", "delegated"}
+                or (
+                    classification == "direct"
+                    and (classified_root is not None or delegated_target is not None)
+                )
+                or (
+                    classification == "excluded"
+                    and (
+                        not isinstance(classified_root, str)
+                        or not classified_root.isdigit()
+                        or delegated_target is not None
+                    )
+                )
+                or (
+                    classification == "delegated"
+                    and (
+                        not isinstance(classified_root, str)
+                        or not classified_root.isdigit()
+                        or not isinstance(delegated_target, str)
+                        or not re.fullmatch(
+                            r"[a-z0-9][a-z0-9-]{1,63}", delegated_target
+                        )
+                    )
+                )
             ):
                 raise ConformanceError(
                     f"snapshot target {target.name} has invalid ignored content values"
@@ -2954,6 +3326,10 @@ def read_snapshot(path: Path) -> tuple[list[Tree], list[Alignment]]:
                     content_type=item["type"],
                     title=item["title"],
                     parent_id=parent_id,
+                    depth=depth,
+                    classification=classification,
+                    classified_subtree_root_id=classified_root,
+                    delegated_target_name=delegated_target,
                 )
             )
         trees.append(
@@ -3089,6 +3465,10 @@ def tree_inventory_digest(tree: Tree) -> str:
                 item.parent_id,
                 item.content_type,
                 item.title,
+                item.depth,
+                item.classification,
+                item.classified_subtree_root_id,
+                item.delegated_target_name,
             )
             for item in tree.ignored_content
         ),
@@ -3102,19 +3482,28 @@ def cross_target_overlaps(trees: Sequence[Tree]) -> list[dict[str, Any]]:
 
     records: list[dict[str, Any]] = []
     for index, left in enumerate(trees):
-        left_ids = {
+        left_page_ids = {
             *(page.page_id for page in left.pages),
             *(page.page_id for page in left.excluded_pages),
             *(page.page_id for page in left.delegated_pages),
         }
+        left_non_page_ids = {
+            item.content_id for item in left.ignored_content
+        }
         for right in trees[index + 1 :]:
-            right_ids = {
+            right_page_ids = {
                 *(page.page_id for page in right.pages),
                 *(page.page_id for page in right.excluded_pages),
                 *(page.page_id for page in right.delegated_pages),
             }
-            overlap_count = len(left_ids.intersection(right_ids))
-            if overlap_count == 0:
+            right_non_page_ids = {
+                item.content_id for item in right.ignored_content
+            }
+            overlap_page_count = len(left_page_ids.intersection(right_page_ids))
+            overlap_non_page_count = len(
+                left_non_page_ids.intersection(right_non_page_ids)
+            )
+            if overlap_page_count == 0 and overlap_non_page_count == 0:
                 continue
             left_delegation = next(
                 (
@@ -3146,7 +3535,11 @@ def cross_target_overlaps(trees: Sequence[Tree]) -> list[dict[str, Any]]:
                     "primary_target": primary.target.name,
                     "covering_target": covering.target.name,
                     "relationship": relationship,
-                    "overlap_page_count": overlap_count,
+                    "overlap_page_count": overlap_page_count,
+                    "overlap_non_page_count": overlap_non_page_count,
+                    "overlap_content_count": (
+                        overlap_page_count + overlap_non_page_count
+                    ),
                 }
             )
     return records
@@ -3177,34 +3570,66 @@ def build_report(
                 "root_page_id": tree.target.root_page_id,
                 "profile": tree.target.profile,
                 "traversal": tree.target.traversal,
+                "content_count": tree.content_count,
                 "page_count": tree.page_count,
+                "non_page_count": tree.non_page_count,
                 "included_page_count": len(tree.pages) + len(tree.delegated_pages),
                 "direct_validated_page_count": len(tree.pages),
                 "delegated_page_count": len(tree.delegated_pages),
                 "excluded_page_count": len(tree.excluded_pages),
                 "expected_page_count": tree.target.expected_page_count,
+                "expected_non_page_count": tree.target.expected_non_page_count,
+                "expected_content_count": tree.target.expected_content_count,
                 "expected_classification_counts": (
                     tree.target.expected_classification_counts.snapshot()
                     if tree.target.expected_classification_counts is not None
                     else None
                 ),
-                "ignored_non_page_count": len(tree.ignored_content),
+                "non_page_classification_counts": (
+                    tree.non_page_classification_counts().snapshot()
+                ),
+                "expected_non_page_classification_counts": (
+                    tree.target.expected_non_page_classification_counts.snapshot()
+                    if tree.target.expected_non_page_classification_counts is not None
+                    else None
+                ),
                 "inventory_digest_sha256": tree_inventory_digest(tree),
                 "exclusion_authorities": [
                     authority.snapshot()
                     for authority in tree.target.exclusion_authorities
                 ],
                 "excluded_subtrees": [
-                    {"root_page_id": root_id, "page_count": count}
-                    for root_id, count in tree.excluded_subtree_counts().items()
+                    {
+                        "root_page_id": root_id,
+                        "page_count": page_count,
+                        "non_page_count": tree.excluded_non_page_subtree_counts()[
+                            root_id
+                        ],
+                        "content_count": (
+                            page_count
+                            + tree.excluded_non_page_subtree_counts()[root_id]
+                        ),
+                    }
+                    for root_id, page_count in tree.excluded_subtree_counts().items()
                 ],
                 "delegated_subtrees": [
                     {
                         "root_page_id": root_id,
                         "target_name": target_name,
-                        "page_count": count,
+                        "page_count": page_count,
+                        "non_page_count": (
+                            tree.delegated_non_page_subtree_counts()[
+                                (root_id, target_name)
+                            ]
+                        ),
+                        "content_count": (
+                            page_count
+                            + tree.delegated_non_page_subtree_counts()[
+                                (root_id, target_name)
+                            ]
+                        ),
                     }
-                    for (root_id, target_name), count in (
+                    for (root_id, target_name), page_count in (
                         tree.delegated_subtree_counts().items()
                     )
                 ],
@@ -3232,19 +3657,19 @@ def markdown_report(report: dict[str, Any]) -> str:
         "",
         "Target rows are independent validation scopes and must not be summed.",
         "",
-        "| Target | Profile | Traversal | Pages | Direct validated | Delegated | Disposition excluded | Expected | Ignored non-page content |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Target | Content nodes | Pages | Non-page | Direct pages | Delegated pages | Excluded pages | Expected content | Expected pages | Expected non-page |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     excluded_sections: list[str] = []
     for target in report["targets"]:
-        expected = target["expected_page_count"]
         lines.append(
-            f"| {target['name']} | {target['profile']} | {target['traversal']} | "
-            f"{target['page_count']} | "
+            f"| {target['name']} | {target['content_count']} | "
+            f"{target['page_count']} | {target['non_page_count']} | "
             f"{target['direct_validated_page_count']} | "
             f"{target['delegated_page_count']} | {target['excluded_page_count']} | "
-            f"{expected if expected is not None else 'n/a'} | "
-            f"{target['ignored_non_page_count']} |"
+            f"{target['expected_content_count'] if target['expected_content_count'] is not None else 'n/a'} | "
+            f"{target['expected_page_count'] if target['expected_page_count'] is not None else 'n/a'} | "
+            f"{target['expected_non_page_count'] if target['expected_non_page_count'] is not None else 'n/a'} |"
         )
         if target["excluded_subtrees"]:
             excluded_sections.extend(
@@ -3252,10 +3677,11 @@ def markdown_report(report: dict[str, Any]) -> str:
                     "",
                     f"### Excluded subtrees: {target['name']}",
                     "",
-                    "| Root page ID | Pages |",
-                    "| --- | ---: |",
+                    "| Root page ID | Content nodes | Pages | Non-page |",
+                    "| --- | ---: | ---: | ---: |",
                     *(
-                        f"| {item['root_page_id']} | {item['page_count']} |"
+                        f"| {item['root_page_id']} | {item['content_count']} | "
+                        f"{item['page_count']} | {item['non_page_count']} |"
                         for item in target["excluded_subtrees"]
                     ),
                 ]
@@ -3266,14 +3692,33 @@ def markdown_report(report: dict[str, Any]) -> str:
                     "",
                     f"### Delegated subtrees: {target['name']}",
                     "",
-                    "| Root page ID | Covering target | Pages |",
-                    "| --- | --- | ---: |",
+                    "| Root page ID | Covering target | Content nodes | Pages | Non-page |",
+                    "| --- | --- | ---: | ---: | ---: |",
                     *(
-                        f"| {item['root_page_id']} | {item['target_name']} | {item['page_count']} |"
+                        f"| {item['root_page_id']} | {item['target_name']} | "
+                        f"{item['content_count']} | {item['page_count']} | "
+                        f"{item['non_page_count']} |"
                         for item in target["delegated_subtrees"]
                     ),
                 ]
             )
+    lines.extend(
+        [
+            "",
+            "## Non-page classification",
+            "",
+            "| Target | Direct | Delegated | Disposition excluded | Total |",
+            "| --- | ---: | ---: | ---: | ---: |",
+            *(
+                f"| {target['name']} | "
+                f"{target['non_page_classification_counts']['direct']} | "
+                f"{target['non_page_classification_counts']['delegated']} | "
+                f"{target['non_page_classification_counts']['disposition_excluded']} | "
+                f"{target['non_page_count']} |"
+                for target in report["targets"]
+            ),
+        ]
+    )
     lines.extend(excluded_sections)
     overlaps = report["coverage_accounting"]["cross_target_overlaps"]
     if overlaps:
@@ -3282,11 +3727,13 @@ def markdown_report(report: dict[str, Any]) -> str:
                 "",
                 "## Cross-target coverage",
                 "",
-                "| Primary target | Covering target | Relationship | Overlapping pages |",
-                "| --- | --- | --- | ---: |",
+                "| Primary target | Covering target | Relationship | Overlapping content | Overlapping pages | Overlapping non-page |",
+                "| --- | --- | --- | ---: | ---: | ---: |",
                 *(
                     f"| {item['primary_target']} | {item['covering_target']} | "
-                    f"{item['relationship']} | {item['overlap_page_count']} |"
+                    f"{item['relationship']} | {item['overlap_content_count']} | "
+                    f"{item['overlap_page_count']} | "
+                    f"{item['overlap_non_page_count']} |"
                     for item in overlaps
                 ),
             ]
@@ -3320,6 +3767,8 @@ def arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", action="append", default=[], help="configured target name")
     parser.add_argument("--profile", choices=sorted(ALLOWED_PROFILES))
     parser.add_argument("--expected-page-count", type=int)
+    parser.add_argument("--expected-non-page-count", type=int)
+    parser.add_argument("--expected-content-count", type=int)
     parser.add_argument("--expected-decision-set")
     parser.add_argument("--namespace")
     parser.add_argument("--scope")
@@ -3388,6 +3837,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 profile=args.profile,
                 traversal="recursive",
                 expected_page_count=args.expected_page_count,
+                expected_non_page_count=args.expected_non_page_count,
+                expected_content_count=args.expected_content_count,
                 expected_decision_set=args.expected_decision_set,
                 namespace=args.namespace,
                 scope=args.scope,

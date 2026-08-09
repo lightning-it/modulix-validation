@@ -7,11 +7,18 @@
       "root_page_id": "2875654145",
       "profile": "product",
       "traversal": "recursive",
-      "expected_page_count": 792,
+      "expected_page_count": 778,
+      "expected_non_page_count": 14,
+      "expected_content_count": 792,
       "expected_classification_counts": {
         "direct_validated": 52,
         "delegated": 51,
-        "disposition_excluded": 689
+        "disposition_excluded": 675
+      },
+      "expected_non_page_classification_counts": {
+        "direct": 0,
+        "delegated": 0,
+        "disposition_excluded": 14
       },
       "delegated_subtree_targets": [
         {
@@ -26,11 +33,11 @@
       "exclusion_authorities": [
         {
           "page_id": "2892759041",
-          "version": 12
+          "version": 13
         },
         {
           "page_id": "2892890133",
-          "version": 10
+          "version": 11
         }
       ],
       "excluded_subtree_root_ids": [
@@ -111,6 +118,13 @@
       "profile": "product",
       "traversal": "recursive",
       "expected_page_count": 40,
+      "expected_non_page_count": 0,
+      "expected_content_count": 40,
+      "expected_non_page_classification_counts": {
+        "direct": 0,
+        "delegated": 0,
+        "disposition_excluded": 0
+      },
       "expected_decision_set": "001-036"
     },
     {
@@ -118,14 +132,28 @@
       "root_page_id": "2891710468",
       "profile": "template",
       "traversal": "recursive",
-      "expected_page_count": 11
+      "expected_page_count": 11,
+      "expected_non_page_count": 0,
+      "expected_content_count": 11,
+      "expected_non_page_classification_counts": {
+        "direct": 0,
+        "delegated": 0,
+        "disposition_excluded": 0
+      }
     },
     {
       "name": "pge-artifact-catalog",
       "root_page_id": "2887057409",
       "profile": "product",
       "traversal": "page-only",
-      "expected_page_count": 1
+      "expected_page_count": 1,
+      "expected_non_page_count": 0,
+      "expected_content_count": 1,
+      "expected_non_page_classification_counts": {
+        "direct": 0,
+        "delegated": 0,
+        "disposition_excluded": 0
+      }
     },
     {
       "name": "lit-pis-engagement",
@@ -133,6 +161,13 @@
       "profile": "engagement",
       "traversal": "recursive",
       "expected_page_count": 389,
+      "expected_non_page_count": 9,
+      "expected_content_count": 398,
+      "expected_non_page_classification_counts": {
+        "direct": 9,
+        "delegated": 0,
+        "disposition_excluded": 0
+      },
       "namespace": "LIT",
       "scope": "PIS"
     }

@@ -560,14 +560,29 @@ def check_pge_confluence_conformance_assets() -> None:
         profile = target.get("profile")
         traversal = target.get("traversal")
         expected_page_count = target.get("expected_page_count")
+        expected_non_page_count = target.get("expected_non_page_count")
+        expected_content_count = target.get("expected_content_count")
         excluded_roots = target.get("excluded_subtree_root_ids", [])
         exclusion_authorities = target.get("exclusion_authorities", [])
         delegated_subtrees = target.get("delegated_subtree_targets", [])
         classification_counts = target.get("expected_classification_counts")
-        expected_count_is_valid = expected_page_count is None or (
+        non_page_classification_counts = target.get(
+            "expected_non_page_classification_counts"
+        )
+        expected_page_count_is_valid = (
             isinstance(expected_page_count, int)
             and not isinstance(expected_page_count, bool)
             and expected_page_count > 0
+        )
+        expected_non_page_count_is_valid = (
+            isinstance(expected_non_page_count, int)
+            and not isinstance(expected_non_page_count, bool)
+            and expected_non_page_count >= 0
+        )
+        expected_content_count_is_valid = (
+            isinstance(expected_content_count, int)
+            and not isinstance(expected_content_count, bool)
+            and expected_content_count > 0
         )
         excluded_roots_are_valid = (
             isinstance(excluded_roots, list)
@@ -628,6 +643,20 @@ def check_pge_confluence_conformance_assets() -> None:
             and expected_page_count is not None
             and sum(classification_counts.values()) == expected_page_count
         )
+        non_page_classification_counts_are_valid = (
+            isinstance(non_page_classification_counts, dict)
+            and set(non_page_classification_counts)
+            == {"direct", "delegated", "disposition_excluded"}
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                for value in non_page_classification_counts.values()
+            )
+            and expected_non_page_count_is_valid
+            and sum(non_page_classification_counts.values())
+            == expected_non_page_count
+        )
         if (
             not isinstance(name, str)
             or not name
@@ -637,18 +666,22 @@ def check_pge_confluence_conformance_assets() -> None:
             or root_page_id in roots
             or profile not in {"product", "template", "engagement"}
             or traversal not in {"recursive", "page-only"}
-            or not expected_count_is_valid
+            or not expected_page_count_is_valid
+            or not expected_non_page_count_is_valid
+            or not expected_content_count_is_valid
+            or expected_page_count + expected_non_page_count
+            != expected_content_count
             or not excluded_roots_are_valid
             or not exclusion_authorities_are_valid
             or not delegated_subtrees_are_valid
             or not classification_counts_are_valid
+            or not non_page_classification_counts_are_valid
             or bool(excluded_roots) != bool(exclusion_authorities)
             or (excluded_roots and traversal != "recursive")
             or (delegated_subtrees and traversal != "recursive")
             or any(authority_id in excluded_roots for authority_id in authority_ids)
             or root_page_id in delegated_roots
             or any(root_id in excluded_roots for root_id in delegated_roots)
-            or (expected_page_count is None and not excluded_roots)
         ):
             raise AssertionError("PGE Confluence target inventory contains an invalid target")
         names.add(name)
@@ -672,19 +705,27 @@ def check_pge_confluence_conformance_assets() -> None:
     canonical = canonical_targets[0]
     if (
         canonical.get("root_page_id") != "2875654145"
-        or canonical.get("expected_page_count") != 792
+        or canonical.get("expected_page_count") != 778
+        or canonical.get("expected_non_page_count") != 14
+        or canonical.get("expected_content_count") != 792
         or len(canonical.get("excluded_subtree_root_ids", [])) != 69
         or canonical.get("expected_classification_counts")
         != {
             "direct_validated": 52,
             "delegated": 51,
-            "disposition_excluded": 689,
+            "disposition_excluded": 675,
+        }
+        or canonical.get("expected_non_page_classification_counts")
+        != {
+            "direct": 0,
+            "delegated": 0,
+            "disposition_excluded": 14,
         }
         or {
             (authority.get("page_id"), authority.get("version"))
             for authority in canonical.get("exclusion_authorities", [])
         }
-        != {("2892759041", 12), ("2892890133", 10)}
+        != {("2892759041", 13), ("2892890133", 11)}
         or canonical.get("delegated_subtree_targets")
         != [
             {
@@ -699,6 +740,25 @@ def check_pge_confluence_conformance_assets() -> None:
     ):
         raise AssertionError(
             "PGE canonical product scope or exclusion authority versions changed"
+        )
+    expected_target_counts = {
+        "pge-canonical-product": (778, 14, 792),
+        "pge-product-decisions": (40, 0, 40),
+        "pge-template-library": (11, 0, 11),
+        "pge-artifact-catalog": (1, 0, 1),
+        "lit-pis-engagement": (389, 9, 398),
+    }
+    actual_target_counts = {
+        name: (
+            target.get("expected_page_count"),
+            target.get("expected_non_page_count"),
+            target.get("expected_content_count"),
+        )
+        for name, target in targets_by_name.items()
+    }
+    if actual_target_counts != expected_target_counts:
+        raise AssertionError(
+            "PGE Confluence target page, non-page, or content counts changed"
         )
     for alignment in config.get("alignments", []):
         product_sources = (

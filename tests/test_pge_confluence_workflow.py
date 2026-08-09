@@ -200,25 +200,39 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
         self.assertEqual("001-036", targets["pge-product-decisions"]["expected_decision_set"])
         for current in targets.values():
             self.assertIn(current["traversal"], {"recursive", "page-only"})
-            if "expected_page_count" in current:
-                self.assertGreater(current["expected_page_count"], 0)
+            self.assertGreater(current["expected_page_count"], 0)
+            self.assertGreaterEqual(current["expected_non_page_count"], 0)
+            self.assertEqual(
+                current["expected_page_count"] + current["expected_non_page_count"],
+                current["expected_content_count"],
+            )
         canonical = targets["pge-canonical-product"]
         self.assertEqual("2875654145", canonical["root_page_id"])
-        self.assertEqual(792, canonical["expected_page_count"])
+        self.assertEqual(778, canonical["expected_page_count"])
+        self.assertEqual(14, canonical["expected_non_page_count"])
+        self.assertEqual(792, canonical["expected_content_count"])
         self.assertEqual(
             {
                 "direct_validated": 52,
                 "delegated": 51,
-                "disposition_excluded": 689,
+                "disposition_excluded": 675,
             },
             canonical["expected_classification_counts"],
+        )
+        self.assertEqual(
+            {
+                "direct": 0,
+                "delegated": 0,
+                "disposition_excluded": 14,
+            },
+            canonical["expected_non_page_classification_counts"],
         )
         self.assertEqual(
             CANONICAL_EXCLUDED_ROOTS,
             tuple(canonical["excluded_subtree_root_ids"]),
         )
         self.assertEqual(
-            {("2892759041", 12), ("2892890133", 10)},
+            {("2892759041", 13), ("2892890133", 11)},
             {
                 (authority["page_id"], authority["version"])
                 for authority in canonical["exclusion_authorities"]
@@ -237,11 +251,61 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
             ],
             canonical["delegated_subtree_targets"],
         )
-        self.assertEqual(40, targets["pge-product-decisions"]["expected_page_count"])
-        self.assertEqual(11, targets["pge-template-library"]["expected_page_count"])
-        self.assertEqual(1, targets["pge-artifact-catalog"]["expected_page_count"])
+        self.assertEqual(
+            (40, 0, 40),
+            tuple(
+                targets["pge-product-decisions"][key]
+                for key in (
+                    "expected_page_count",
+                    "expected_non_page_count",
+                    "expected_content_count",
+                )
+            ),
+        )
+        self.assertEqual(
+            (11, 0, 11),
+            tuple(
+                targets["pge-template-library"][key]
+                for key in (
+                    "expected_page_count",
+                    "expected_non_page_count",
+                    "expected_content_count",
+                )
+            ),
+        )
+        self.assertEqual(
+            (1, 0, 1),
+            tuple(
+                targets["pge-artifact-catalog"][key]
+                for key in (
+                    "expected_page_count",
+                    "expected_non_page_count",
+                    "expected_content_count",
+                )
+            ),
+        )
         self.assertEqual("page-only", targets["pge-artifact-catalog"]["traversal"])
-        self.assertEqual(389, targets["lit-pis-engagement"]["expected_page_count"])
+        self.assertEqual(
+            (389, 9, 398),
+            tuple(
+                targets["lit-pis-engagement"][key]
+                for key in (
+                    "expected_page_count",
+                    "expected_non_page_count",
+                    "expected_content_count",
+                )
+            ),
+        )
+        self.assertEqual(
+            {
+                "direct": 9,
+                "delegated": 0,
+                "disposition_excluded": 0,
+            },
+            targets["lit-pis-engagement"][
+                "expected_non_page_classification_counts"
+            ],
+        )
         self.assertEqual(1, len(config["alignments"]))
         alignment = config["alignments"][0]
         self.assertEqual("pge-artifact-template-alignment", alignment["name"])
