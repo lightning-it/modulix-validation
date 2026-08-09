@@ -38,7 +38,10 @@ profiles receive the same workflow artifact containing that candidate.
 Heavy and Application Acceptance run independently in parallel after the
 readback. The receipt remains dependent on successful completion of both,
 which bounds the controller path to 255 minutes under the declared job
-timeouts.
+timeouts: 15 minutes for request validation, 45 for Nexus readback, 5 for the
+delegated profile contract, 180 for the longest profile cell, and 10 for the
+signed receipt. The Producer waits up to 270 minutes, leaving a fail-closed
+15-minute dispatch and scheduling margin.
 
 The profile matrices are generated from the exact Producer commit's
 authoritative `meta/role-coverage.yml`. For the Golden Path they must contain a

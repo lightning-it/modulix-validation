@@ -443,6 +443,28 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
             set(jobs["receipt"]["needs"]),
         )
 
+    def test_controller_critical_path_is_bounded_to_255_minutes(self):
+        jobs = self.workflow["jobs"]
+        delegated_workflow = yaml.safe_load(
+            (
+                ROOT
+                / ".github"
+                / "workflows"
+                / "collection-quality-profile.yml"
+            ).read_text(encoding="utf-8")
+        )
+        delegated_jobs = delegated_workflow["jobs"]
+        critical_path_minutes = sum(
+            (
+                jobs["validate"]["timeout-minutes"],
+                jobs["nexus-readback"]["timeout-minutes"],
+                delegated_jobs["validate-inputs"]["timeout-minutes"],
+                delegated_jobs["profile-cells"]["timeout-minutes"],
+                jobs["receipt"]["timeout-minutes"],
+            )
+        )
+        self.assertEqual(255, critical_path_minutes)
+
     def test_no_transition_bypass_force_or_human_approval_path(self):
         for forbidden in (
             "collection-release-transition",

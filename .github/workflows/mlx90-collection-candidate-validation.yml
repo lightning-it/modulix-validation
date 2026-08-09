@@ -346,7 +346,7 @@ jobs:
     name: Sign validation receipt
     needs: [validate, nexus-readback, heavy, application-acceptance]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     environment:
       name: mlx90-security-candidate-validation
     permissions:
