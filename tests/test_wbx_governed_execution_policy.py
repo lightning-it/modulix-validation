@@ -1,4 +1,4 @@
-"""Static tests for the Wunderbox Recorder-v2 execution binding.
+"""Static tests for the Wunderbox Recorder-v3 execution binding.
 
 These tests do not invoke Ansible, a provider, an inventory plugin, or a host.
 """
@@ -87,10 +87,10 @@ class WunderboxPolicyTests(unittest.TestCase):
         )
         cls.rendered = RENDERER.render()
 
-    def test_policy_is_exact_recorder_v2_schema(self):
+    def test_policy_is_exact_recorder_v3_schema(self):
         self.assertEqual(set(self.policy), POLICY_KEYS)
         self.assertEqual(self.policy["schema_version"], 2)
-        self.assertEqual(self.policy["policy_id"], "wunderbox-root-of-trust-v2")
+        self.assertEqual(self.policy["policy_id"], "wunderbox-root-of-trust-v3")
         self.assertNotIn("signing", self.policy)
         self.assertEqual(
             self.policy["collection_repositories"],
@@ -122,6 +122,7 @@ class WunderboxPolicyTests(unittest.TestCase):
                 "policy",
                 "execution_anchor",
                 "replay_broker",
+                "process_supervisor",
                 "container_engine",
                 "manifest_signature",
                 "runtime_attestation_signature",
@@ -131,6 +132,10 @@ class WunderboxPolicyTests(unittest.TestCase):
         self.assertEqual(
             self.trust_template["replay_broker"]["kind"],
             "root-brokered-append-only-v1",
+        )
+        self.assertEqual(
+            self.trust_template["process_supervisor"]["kind"],
+            "root-brokered-process-domain-v1",
         )
         self.assertEqual(self.anchor_template["status"], "NOT_ACCEPTED")
         self.assertFalse(self.anchor_template["negative_replay_test"])
@@ -197,6 +202,14 @@ class WunderboxPolicyTests(unittest.TestCase):
                 "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
                 "hetzner_baremetal_robot_firewall_hardened_input_rules",
                 "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+                "hetzner_installimage_layout.ipv4_only",
+                "ubtu24cis_ipv6_required",
+                "ubtu24cis_ipv6_disable",
+                "netplan_ethernets",
+                "netplan_vlans",
+                "wunderbox_inventory_contract.ipv4_only_baseline",
+                "hetzner_baremetal_robot_firewall.enabled",
+                "hetzner_baremetal_robot_firewall.filter_ipv6",
             ],
         )
 

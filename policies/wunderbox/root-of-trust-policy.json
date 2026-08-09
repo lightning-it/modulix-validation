@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "policy_id": "wunderbox-root-of-trust-v2",
+  "policy_id": "wunderbox-root-of-trust-v3",
   "required_repositories": [
     "automation",
     "inventory",
@@ -43,7 +43,15 @@
         "host_firewall_recovery_source_cidrs",
         "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
         "hetzner_baremetal_robot_firewall_hardened_input_rules",
-        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules"
+        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+        "hetzner_installimage_layout.ipv4_only",
+        "ubtu24cis_ipv6_required",
+        "ubtu24cis_ipv6_disable",
+        "netplan_ethernets",
+        "netplan_vlans",
+        "wunderbox_inventory_contract.ipv4_only_baseline",
+        "hetzner_baremetal_robot_firewall.enabled",
+        "hetzner_baremetal_robot_firewall.filter_ipv6"
       ],
       "required_evidence_references": ["test_ref"],
       "timeout_seconds": 300,
@@ -308,6 +316,7 @@
       "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
       "impact": "security_relevant",
       "mode": "playbook",
+      "requires_ssh_private_key": false,
       "requires_ssh_agent": true,
       "playbook": "runbooks/30-operating-systems/ubuntu/24/09-prepare-installimage.yml",
       "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
@@ -353,6 +362,7 @@
       "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
       "impact": "security_relevant",
       "mode": "playbook",
+      "requires_ssh_private_key": false,
       "requires_ssh_agent": true,
       "playbook": "runbooks/30-operating-systems/ubuntu/24/09-prepare-installimage.yml",
       "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],

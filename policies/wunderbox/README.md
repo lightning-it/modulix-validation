@@ -1,6 +1,6 @@
 # Wunderbox governed execution binding
 
-`root-of-trust-policy.json` is the public, environment-neutral Recorder-v2
+`root-of-trust-policy.json` is the public, environment-neutral Recorder-v3
 action contract for one Wunderbox Root-of-Trust build. Its top-level schema is
 exact: it declares the policy identity, required repositories and collections,
 the collection-to-repository mapping, target contract and action matrix. It no
@@ -14,12 +14,14 @@ The adapter executes only the fixed root-owned launcher at
 `/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec`.
 That launcher must enter the root-owned, digest-pinned installed recorder with
 the pinned absolute Python interpreter in isolated safe-path mode. The same
-descriptor pins the Podman client and the normalized, stable backend identity
-(URI, client, host, remote socket, storage roots and version), and a
-root-brokered, append-only replay client and store ID. Volatile counters,
+descriptor pins the Podman client, a root-owned local Unix socket by
+device/inode, owner, group and mode, the normalized stable backend identity,
+and a root-brokered append-only replay client and store ID. It also pins a
+root-brokered process supervisor that owns every execution domain and must kill
+escaped descendants as well as close inherited pipes at timeout. Volatile counters,
 capacity and uptime from `podman info` are deliberately not identity fields. A
-root-owned acceptance receipt must
-prove controller readback and a negative replay test. Until those external
+root-owned acceptance receipt must prove controller readback, a negative replay
+test, bounded output and an escaped-descendant termination test. Until those external
 anchors are installed and independently accepted, the adapter fails closed.
 
 Each action fixes its record prefix, gate, impact, playbook or projection mode,
@@ -29,11 +31,15 @@ projected field and binds target identity fields to the signed manifest. The
 adapter `scripts/wbx-governed-exec.py` exposes no policy, allowed-signers,
 target, inventory, playbook, gate, impact or arbitrary command option.
 
-The WBX-G0 inventory projection uses payload schema version 2. In addition to
+The WBX-G0 inventory projection uses payload schema version 3. In addition to
 target, controller, identity and lifecycle, it carries the fully resolved,
 secret-free effective-access contract: TCP 22/1905/2222 by function, mode and
 source, matching provider and host-firewall semantics, Tang TCP/80 sources and
-empty legacy aggregate lists. The record also binds the exact absolute
+empty legacy aggregate lists. It also binds ADR-WBX-016 and WBX-EV-032: the
+Installimage IPv4-only flag, CIS GRUB disable mode, IPv4-only Netplan render,
+empty IPv6 sources/destinations and DNS AAAA set, active provider filtering,
+no IPv6 provider rule and the assigned-but-unconfigured Hetzner `/64`. The
+record also binds the exact absolute
 snapshot `ansible-nav` path and its SHA-256; a consumer must compare both
 against independently supplied pins and must not accept a matching suffix.
 
@@ -73,11 +79,11 @@ Signed approvals used by an Ansible consumer are a separate trust event. The
 manifest contains only `consumer_approval_contracts[variable]` with the exact
 operation, target and consumer binding. The corresponding signed transport is
 supplied only through that action's owner-only extra-vars input. It uses a
-different nonce and replay identity from the recorder execution approval; the
-recorder verifies it before execution but leaves its one-time claim to the
-pinned Foundational consumer immediately before the secret-bearing operation.
-Successful execution is accepted only after the recorder verifies that the
-consumer created the expected canonical replay marker.
+different nonce and replay identity from the recorder execution approval. The
+recorder verifies and claims every consumer approval through the pinned root
+broker immediately before payload execution and then independently reads each
+claim back through the broker. Local markers and consumer-only assertions are
+not accepted as authorization evidence.
 
 Run the renderer to produce the complete non-approved skeleton:
 

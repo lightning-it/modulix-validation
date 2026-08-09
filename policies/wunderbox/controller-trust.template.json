@@ -28,12 +28,26 @@
     "sha256": "REPLACE_WITH_64_HEX",
     "store_id": "REPLACE_WITH_CANONICAL_STORE_ID"
   },
+  "process_supervisor": {
+    "kind": "root-brokered-process-domain-v1",
+    "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/process-supervisor",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "backend": "launchd-job",
+    "profile_id": "REPLACE_WITH_ACCEPTED_PROCESS_DOMAIN"
+  },
   "container_engine": {
     "kind": "podman",
     "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/podman",
     "sha256": "REPLACE_WITH_64_HEX",
     "backend_uri": "unix:///REPLACE/WITH/PINNED/PODMAN/API.sock",
-    "backend_identity_sha256": "REPLACE_WITH_64_HEX"
+    "backend_identity_sha256": "REPLACE_WITH_64_HEX",
+    "backend_transport": "local-root-unix-v1",
+    "backend_socket_path": "/REPLACE/WITH/ROOT_OWNED/PODMAN/API.sock",
+    "backend_socket_owner_uid": 0,
+    "backend_socket_owner_gid": 0,
+    "backend_socket_mode": 384,
+    "backend_socket_device": 1,
+    "backend_socket_inode": 1
   },
   "manifest_signature": {
     "identity": "REPLACE_WITH_IDENTITY",

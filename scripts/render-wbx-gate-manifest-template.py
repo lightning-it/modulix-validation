@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a complete, deliberately non-approved Recorder-v2 manifest."""
+"""Render a complete, deliberately non-approved Recorder-v3 manifest."""
 
 from __future__ import annotations
 
