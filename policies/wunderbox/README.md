@@ -10,6 +10,18 @@ root/admin-owned controller trust descriptor at
 `/Library/Application Support/Lightning IT/Governed Ansible/controller-trust.json`;
 an adapter caller cannot replace them.
 
+The adapter executes only the fixed root-owned launcher at
+`/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec`.
+That launcher must enter the root-owned, digest-pinned installed recorder with
+the pinned absolute Python interpreter in isolated safe-path mode. The same
+descriptor pins the Podman client and the normalized, stable backend identity
+(URI, client, host, remote socket, storage roots and version), and a
+root-brokered, append-only replay client and store ID. Volatile counters,
+capacity and uptime from `podman info` are deliberately not identity fields. A
+root-owned acceptance receipt must
+prove controller readback and a negative replay test. Until those external
+anchors are installed and independently accepted, the adapter fails closed.
+
 Each action fixes its record prefix, gate, impact, playbook or projection mode,
 timeout, output bound, extra-variable contract and evidence prerequisites. Every
 callback artifact that may be persisted has an exact schema which types every
@@ -24,6 +36,11 @@ attestation. That signed attestation records the source commits and measured
 installed collection trees. Collection metadata stated only by the manifest is
 not accepted as runtime provenance.
 
+Both signed runtime-attestation roles also bind the effective Ansible loader:
+only the two system collection roots are allowed and Python `sys.path`
+collection scanning is disabled. Runtime probes read this effective loader
+configuration inside the toolbox and run-EE before and after execution.
+
 A real engagement manifest is created outside Git in an owner-only directory.
 It binds the exact target/controller identity, all six frozen repository
 commits, runtime attestation, gate states and one exact authorization entry for
@@ -31,8 +48,18 @@ every action. Unselected and blocked actions remain `NOT_APPROVED`. A selected
 action additionally needs a time-bounded outer authorization and a separate,
 cryptographically signed Foundational execution approval. The execution
 approval binds the exact recorder execution ID, repository commits, target,
-controller, action, policy, runtime and outer approval and is consumed once by
-the recorder before Ansible starts.
+controller, action, policy, runtime and outer approval. Before Ansible starts,
+the recorder must claim it through the descriptor-pinned root-brokered,
+append-only replay store; the caller-controlled evidence directory is never an
+authorization store.
+
+The controller SSH contract binds one exact private-key digest and one
+dedicated `known_hosts` digest. The recorder seals only those two files into
+its private runtime tree, verifies them again at each phase boundary and passes
+both expected digests through the outer wrapper and Navigator. Every staging
+copy is checked before and after copying, and strict host-key checking plus
+`IdentitiesOnly` is forced; the full SSH directory and agent are not accepted
+as substitutes.
 
 Signed approvals used by an Ansible consumer are a separate trust event. The
 manifest contains only `consumer_approval_contracts[variable]` with the exact
@@ -49,6 +76,12 @@ Run the renderer to produce the complete non-approved skeleton:
 ```bash
 python3 scripts/render-wbx-gate-manifest-template.py
 ```
+
+`controller-trust.template.json`, `runtime-attestation.template.json` and
+`execution-anchor-acceptance.template.json` define the other exact external
+contracts. They are deliberately non-accepted placeholders and must be
+installed under root ownership, read back and independently accepted before
+their digests are copied into the live descriptor or manifest.
 
 The renderer adds exactly the evidence and authorization fields required by
 each policy action. It gives every action a distinct placeholder execution ID

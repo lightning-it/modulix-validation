@@ -16,6 +16,15 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "policies" / "wunderbox" / "root-of-trust-policy.json"
 TEMPLATE_PATH = ROOT / "policies" / "wunderbox" / "gate-manifest.template.json"
+TRUST_TEMPLATE_PATH = (
+    ROOT / "policies" / "wunderbox" / "controller-trust.template.json"
+)
+RUNTIME_TEMPLATE_PATH = (
+    ROOT / "policies" / "wunderbox" / "runtime-attestation.template.json"
+)
+ANCHOR_TEMPLATE_PATH = (
+    ROOT / "policies" / "wunderbox" / "execution-anchor-acceptance.template.json"
+)
 ADAPTER_PATH = ROOT / "scripts" / "wbx-governed-exec.py"
 SPEC = importlib.util.spec_from_file_location("wbx_governed_exec", ADAPTER_PATH)
 assert SPEC and SPEC.loader
@@ -71,6 +80,15 @@ class WunderboxPolicyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
         cls.template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+        cls.trust_template = json.loads(
+            TRUST_TEMPLATE_PATH.read_text(encoding="utf-8")
+        )
+        cls.runtime_template = json.loads(
+            RUNTIME_TEMPLATE_PATH.read_text(encoding="utf-8")
+        )
+        cls.anchor_template = json.loads(
+            ANCHOR_TEMPLATE_PATH.read_text(encoding="utf-8")
+        )
         cls.rendered = RENDERER.render()
 
     def test_policy_is_exact_recorder_v2_schema(self):
@@ -89,6 +107,48 @@ class WunderboxPolicyTests(unittest.TestCase):
         self.assertNotIn("collections", self.template["runtime"])
         for field in ("attestation_path", "attestation_signature_path"):
             self.assertTrue(self.template["runtime"][field].startswith("/"))
+        self.assertEqual(
+            set(self.template["controller"]["ssh"]),
+            {
+                "source_directory",
+                "private_key_name",
+                "private_key_sha256",
+                "known_hosts_name",
+                "known_hosts_sha256",
+            },
+        )
+
+    def test_external_trust_templates_are_exact_and_nonaccepted(self):
+        self.assertEqual(
+            set(self.trust_template),
+            {
+                "schema_version",
+                "policy",
+                "execution_anchor",
+                "replay_broker",
+                "container_engine",
+                "manifest_signature",
+                "runtime_attestation_signature",
+                "approval_authority",
+            },
+        )
+        self.assertEqual(
+            self.trust_template["replay_broker"]["kind"],
+            "root-brokered-append-only-v1",
+        )
+        self.assertEqual(self.anchor_template["status"], "NOT_ACCEPTED")
+        self.assertFalse(self.anchor_template["negative_replay_test"])
+        for role in ("toolbox", "run_ee"):
+            self.assertEqual(
+                self.runtime_template[role]["loader"],
+                {
+                    "collection_paths": [
+                        "/usr/share/ansible/collections",
+                        "/usr/share/automation-controller/collections",
+                    ],
+                    "scan_sys_path": False,
+                },
+            )
 
     def test_action_and_attempt_are_the_only_execution_selectors(self):
         option_strings = {
@@ -317,6 +377,8 @@ class WunderboxPolicyTests(unittest.TestCase):
                 evidence_dir=root / "evidence",
             )
             command = ADAPTER.build_core_command(args)
+        self.assertEqual(command[0], str(ADAPTER.ROOT_OWNED_LAUNCHER))
+        self.assertNotIn("governed-ansible-exec.py", command[:2])
         repo_values = [
             command[index + 1]
             for index, value in enumerate(command)

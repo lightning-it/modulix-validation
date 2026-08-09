@@ -15,7 +15,9 @@
     "ssh": {
       "source_directory": "/REPLACE/WITH/OWNER_ONLY/SSH/DIRECTORY",
       "private_key_name": "REPLACE_WITH_PRIVATE_KEY_FILENAME",
-      "private_key_sha256": "REPLACE_WITH_64_HEX"
+      "private_key_sha256": "REPLACE_WITH_64_HEX",
+      "known_hosts_name": "REPLACE_WITH_DEDICATED_KNOWN_HOSTS_FILENAME",
+      "known_hosts_sha256": "REPLACE_WITH_64_HEX"
     }
   },
   "runtime": {

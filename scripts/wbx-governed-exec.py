@@ -13,10 +13,12 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+ROOT_OWNED_LAUNCHER = Path(
+    "/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,12 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_core_command(args: argparse.Namespace) -> list[str]:
     automation_repo = args.automation_repo.expanduser().resolve()
-    core = automation_repo / "scripts" / "governed-ansible-exec.py"
-    if not core.is_file():
-        raise SystemExit(f"generic recorder is missing: {core}")
     command = [
-        sys.executable,
-        str(core),
+        str(ROOT_OWNED_LAUNCHER),
         "--gate-manifest",
         str(args.gate_manifest),
         "--gate-signature",
@@ -86,7 +84,7 @@ def build_core_command(args: argparse.Namespace) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     command = build_core_command(args)
-    os.execv(sys.executable, command)
+    os.execv(str(ROOT_OWNED_LAUNCHER), command)
     return 127
 
 
