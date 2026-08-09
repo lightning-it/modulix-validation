@@ -145,7 +145,11 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
         )
 
     def test_workflow_has_no_arbitrary_root_or_snapshot_and_uploads_redacted_reports(self) -> None:
-        inputs = self.workflow[True]["workflow_dispatch"]["inputs"]
+        workflow_trigger = self.workflow.get("on")
+        if workflow_trigger is None:
+            workflow_trigger = self.workflow.get(True)
+        self.assertIsInstance(workflow_trigger, dict)
+        inputs = workflow_trigger["workflow_dispatch"]["inputs"]
         self.assertEqual({"audit_scope", "warnings_as_errors"}, set(inputs))
         self.assertEqual(
             [

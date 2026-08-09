@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -2804,10 +2805,10 @@ def crawl_tree(client: ConfluenceClient, target: Target, max_pages: int) -> Tree
     if target.traversal == "page-only":
         _, ignored_content = client.direct_children(root.page_id)
         return Tree(target=target, pages=pages, ignored_content=ignored_content)
-    queue = [root]
+    queue = deque([root])
     seen = {root.page_id}
     while queue:
-        parent = queue.pop(0)
+        parent = queue.popleft()
         children, ignored = client.direct_children(parent.page_id)
         ignored_content.extend(ignored)
         for child_summary in children:
