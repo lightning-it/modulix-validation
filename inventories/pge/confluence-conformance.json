@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "allowed_confluence_origin": "https://wiki.cloud.l-it.io",
+  "targets": [
+    {
+      "name": "pge-canonical-product",
+      "root_page_id": "2875654145",
+      "profile": "product",
+      "traversal": "recursive",
+      "expected_page_count": 792,
+      "expected_classification_counts": {
+        "direct_validated": 52,
+        "delegated": 51,
+        "disposition_excluded": 689
+      },
+      "delegated_subtree_targets": [
+        {
+          "root_page_id": "2882765966",
+          "target_name": "pge-product-decisions"
+        },
+        {
+          "root_page_id": "2891710468",
+          "target_name": "pge-template-library"
+        }
+      ],
+      "exclusion_authorities": [
+        {
+          "page_id": "2892759041",
+          "version": 12
+        },
+        {
+          "page_id": "2892890133",
+          "version": 10
+        }
+      ],
+      "excluded_subtree_root_ids": [
+        "2466709560",
+        "2466709570",
+        "2466742273",
+        "2529591386",
+        "2555117613",
+        "2582740996",
+        "2583199745",
+        "2592931842",
+        "2592997395",
+        "2643886387",
+        "2654437655",
+        "2657157546",
+        "2643918897",
+        "2644181060",
+        "2644279357",
+        "2655617036",
+        "2655191041",
+        "2657124644",
+        "2657124745",
+        "2657190262",
+        "2657222989",
+        "2654863391",
+        "2583036012",
+        "2654863375",
+        "2583166998",
+        "2583494733",
+        "2544861185",
+        "2582872140",
+        "2583035993",
+        "2659024919",
+        "2659024935",
+        "2659024951",
+        "2659024960",
+        "2657157163",
+        "2657157144",
+        "2657157153",
+        "2657124419",
+        "2657878257",
+        "2657681868",
+        "2657124373",
+        "2657910852",
+        "2654372249",
+        "2654928926",
+        "2657616382",
+        "2657682098",
+        "2654765182",
+        "2657682038",
+        "2467103857",
+        "2654961748",
+        "2655649794",
+        "2655060068",
+        "2654437866",
+        "2654437893",
+        "2655027208",
+        "2654699537",
+        "2654765058",
+        "2472181762",
+        "2654994466",
+        "2655060032",
+        "2588999722",
+        "2589261876",
+        "2589229119",
+        "2589229157",
+        "2589327361",
+        "2589261965",
+        "2589261975",
+        "2883092927",
+        "2886992029",
+        "2589294593"
+      ]
+    },
+    {
+      "name": "pge-product-decisions",
+      "root_page_id": "2882765966",
+      "profile": "product",
+      "traversal": "recursive",
+      "expected_page_count": 40,
+      "expected_decision_set": "001-036"
+    },
+    {
+      "name": "pge-template-library",
+      "root_page_id": "2891710468",
+      "profile": "template",
+      "traversal": "recursive",
+      "expected_page_count": 11
+    },
+    {
+      "name": "pge-artifact-catalog",
+      "root_page_id": "2887057409",
+      "profile": "product",
+      "traversal": "page-only",
+      "expected_page_count": 1
+    },
+    {
+      "name": "lit-pis-engagement",
+      "root_page_id": "2651357331",
+      "profile": "engagement",
+      "traversal": "recursive",
+      "expected_page_count": 389,
+      "namespace": "LIT",
+      "scope": "PIS"
+    }
+  ],
+  "alignments": [
+    {
+      "name": "pge-artifact-template-alignment",
+      "template_target": "pge-template-library",
+      "catalog_target": "pge-artifact-catalog",
+      "product_source_artifacts": [
+        "PGE Documentation Naming and Page Structure Standard",
+        "Inherited and External Decision Register"
+      ]
+    }
+  ]
+}

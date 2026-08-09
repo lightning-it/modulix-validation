@@ -1,2 +1,8 @@
 __pycache__/
 *.py[cod]
+.pge-conformance/
+evidence/
+snapshots/
+*-conformance-report.json
+*-conformance-report.md
+*-confluence-snapshot.json
