@@ -3,8 +3,17 @@
 `root-of-trust-policy.json` is the public, environment-neutral Recorder-v3
 action contract for one Wunderbox Root-of-Trust build. Its top-level schema is
 exact: it declares the policy identity, required repositories and collections,
-the collection-to-repository mapping, target contract and action matrix. It no
-longer contains signing configuration. The policy path, policy digest, manifest
+the collection-to-repository mapping, target contract, projection-contract
+descriptor and action matrix. It no longer contains signing configuration or
+environment-specific topology. The projection descriptor contains only the
+authorized inventory repository, a canonical relative path and an exact
+SHA-256. The recorder loads the corresponding private contract exclusively
+from the authorized read-only inventory snapshot, validates its closed schema,
+requires its target and controller to match the signed manifest and rechecks
+the exact bytes before every projection use. Policy action paths and contract
+projection paths must match exactly.
+
+The policy path, policy digest, manifest
 signer, runtime-attestation signer and approval authority are pinned by the
 root/admin-owned controller trust descriptor at
 `/Library/Application Support/Lightning IT/Governed Ansible/controller-trust.json`;
