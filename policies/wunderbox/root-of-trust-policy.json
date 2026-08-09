@@ -35,7 +35,15 @@
         "hetzner_baremetal_root_of_trust.inventory_hostname",
         "hetzner_baremetal_root_of_trust.controller_ipv4_cidr",
         "hetzner_baremetal_root_of_trust.server_lifecycle.status",
-        "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled"
+        "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
+        "wunderbox_inventory_contract.controller_access.management_services",
+        "host_firewall_management_access",
+        "host_firewall_tang_access",
+        "host_firewall_controller_source_cidrs",
+        "host_firewall_recovery_source_cidrs",
+        "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
+        "hetzner_baremetal_robot_firewall_hardened_input_rules",
+        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules"
       ],
       "required_evidence_references": ["test_ref"],
       "timeout_seconds": 300,

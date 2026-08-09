@@ -29,6 +29,14 @@ projected field and binds target identity fields to the signed manifest. The
 adapter `scripts/wbx-governed-exec.py` exposes no policy, allowed-signers,
 target, inventory, playbook, gate, impact or arbitrary command option.
 
+The WBX-G0 inventory projection uses payload schema version 2. In addition to
+target, controller, identity and lifecycle, it carries the fully resolved,
+secret-free effective-access contract: TCP 22/1905/2222 by function, mode and
+source, matching provider and host-firewall semantics, Tang TCP/80 sources and
+empty legacy aggregate lists. The record also binds the exact absolute
+snapshot `ansible-nav` path and its SHA-256; a consumer must compare both
+against independently supplied pins and must not accept a matching suffix.
+
 `gate-manifest.template.json` and the renderer use manifest schema version 2.
 The runtime section binds only digest-pinned toolbox and run-EE images plus the
 absolute path, SHA-256 and detached signature path of the separate runtime

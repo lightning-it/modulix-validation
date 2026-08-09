@@ -16,9 +16,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "policies" / "wunderbox" / "root-of-trust-policy.json"
 TEMPLATE_PATH = ROOT / "policies" / "wunderbox" / "gate-manifest.template.json"
-TRUST_TEMPLATE_PATH = (
-    ROOT / "policies" / "wunderbox" / "controller-trust.template.json"
-)
+TRUST_TEMPLATE_PATH = ROOT / "policies" / "wunderbox" / "controller-trust.template.json"
 RUNTIME_TEMPLATE_PATH = (
     ROOT / "policies" / "wunderbox" / "runtime-attestation.template.json"
 )
@@ -80,9 +78,7 @@ class WunderboxPolicyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
         cls.template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
-        cls.trust_template = json.loads(
-            TRUST_TEMPLATE_PATH.read_text(encoding="utf-8")
-        )
+        cls.trust_template = json.loads(TRUST_TEMPLATE_PATH.read_text(encoding="utf-8"))
         cls.runtime_template = json.loads(
             RUNTIME_TEMPLATE_PATH.read_text(encoding="utf-8")
         )
@@ -180,6 +176,30 @@ class WunderboxPolicyTests(unittest.TestCase):
             required = set(action.get("required_extra_vars", []))
             self.assertEqual(required, set(action.get("extra_var_bindings", {})))
 
+    def test_inventory_projection_pins_complete_effective_access_sources(self):
+        self.assertEqual(
+            self.policy["actions"]["target_inventory_projection"]["projection_paths"],
+            [
+                "hostname_fqdn",
+                "hostname_etc_hosts_ip",
+                "hetzner_robot_server_number",
+                "hetzner_baremetal_root_of_trust.schema_version",
+                "hetzner_baremetal_root_of_trust.selection_scope",
+                "hetzner_baremetal_root_of_trust.inventory_hostname",
+                "hetzner_baremetal_root_of_trust.controller_ipv4_cidr",
+                "hetzner_baremetal_root_of_trust.server_lifecycle.status",
+                "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
+                "wunderbox_inventory_contract.controller_access.management_services",
+                "host_firewall_management_access",
+                "host_firewall_tang_access",
+                "host_firewall_controller_source_cidrs",
+                "host_firewall_recovery_source_cidrs",
+                "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
+                "hetzner_baremetal_robot_firewall_hardened_input_rules",
+                "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+            ],
+        )
+
     def test_known_side_effecting_actions_are_not_classified_as_read_only(self):
         expected = {
             "prepare_installimage_plan": "security_relevant",
@@ -246,9 +266,7 @@ class WunderboxPolicyTests(unittest.TestCase):
             )
             for field in schema["fields"].values():
                 self.assertIn("type", field)
-                self.assertLessEqual(
-                    set(field), {"type", "binding", "allowed_values"}
-                )
+                self.assertLessEqual(set(field), {"type", "binding", "allowed_values"})
         for action_id in (
             "installimage_plan",
             "installimage_apply",
@@ -295,9 +313,7 @@ class WunderboxPolicyTests(unittest.TestCase):
         ]
         self.assertEqual(len(approvals), 34)
         self.assertEqual(len({approval["nonce"] for approval in approvals}), 34)
-        self.assertEqual(
-            len({approval["execution_id"] for approval in approvals}), 34
-        )
+        self.assertEqual(len({approval["execution_id"] for approval in approvals}), 34)
         for approval in approvals:
             self.assertEqual(set(approval), SIGNED_APPROVAL_KEYS)
             self.assertEqual(approval["schema_version"], 1)
@@ -343,9 +359,7 @@ class WunderboxPolicyTests(unittest.TestCase):
     def test_manifest_template_is_deliberately_non_executable(self):
         self.assertEqual(self.template["manifest_status"], "TEMPLATE")
         self.assertTrue(self.template["safety_hold"])
-        generic = self.template["authorizations"][
-            "REPLACE_WITH_EACH_POLICY_ACTION_ID"
-        ]
+        generic = self.template["authorizations"]["REPLACE_WITH_EACH_POLICY_ACTION_ID"]
         self.assertEqual(generic["status"], "NOT_APPROVED")
         self.assertNotIn(
             "BEGIN SSH SIGNATURE", generic["execution_approval"]["signature"]
