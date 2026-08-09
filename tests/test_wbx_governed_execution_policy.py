@@ -101,9 +101,7 @@ class WunderboxPolicyTests(unittest.TestCase):
             set(self.policy["projection_contract"]),
             {"repository", "path", "sha256"},
         )
-        self.assertEqual(
-            self.policy["projection_contract"]["repository"], "inventory"
-        )
+        self.assertEqual(self.policy["projection_contract"]["repository"], "inventory")
         self.assertEqual(
             self.policy["projection_contract"]["path"],
             "contracts/inventory-projection.json",
