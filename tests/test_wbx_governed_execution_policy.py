@@ -43,6 +43,7 @@ POLICY_KEYS = {
     "required_collections",
     "collection_repositories",
     "target_contract",
+    "projection_contract",
     "actions",
 }
 RUNTIME_KEYS = {
@@ -95,6 +96,20 @@ class WunderboxPolicyTests(unittest.TestCase):
         self.assertEqual(
             self.policy["collection_repositories"],
             {"foundational": "foundational", "ubuntu": "ubuntu"},
+        )
+        self.assertEqual(
+            set(self.policy["projection_contract"]),
+            {"repository", "path", "sha256"},
+        )
+        self.assertEqual(
+            self.policy["projection_contract"]["repository"], "inventory"
+        )
+        self.assertEqual(
+            self.policy["projection_contract"]["path"],
+            "contracts/inventory-projection.json",
+        )
+        self.assertRegex(
+            self.policy["projection_contract"]["sha256"], r"^[0-9a-f]{64}$"
         )
 
     def test_manifest_template_uses_exact_recorder_v2_runtime_schema(self):
@@ -182,6 +197,14 @@ class WunderboxPolicyTests(unittest.TestCase):
             self.assertEqual(required, set(action.get("extra_var_bindings", {})))
 
     def test_inventory_projection_pins_complete_firewall_and_ipv4_contract(self):
+        self.assertEqual(
+            len(
+                self.policy["actions"]["target_inventory_projection"][
+                    "projection_paths"
+                ]
+            ),
+            54,
+        )
         self.assertEqual(
             self.policy["actions"]["target_inventory_projection"]["projection_paths"],
             [
