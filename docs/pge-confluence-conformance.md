@@ -47,7 +47,7 @@ the alignment source; the report does not count that second validation inside
 the 793-node canonical inventory. The Product Decisions, Template Library, and
 Artifact Catalog targets respectively bind `40 + 0 = 40`, `11 + 0 = 11`, and
 `1 + 0 = 1` page/non-page/content counts. The LIT-PIS engagement target binds
-389 pages plus nine current embeds, for 398 content nodes. The embeds are
+390 pages plus nine current embeds, for 399 content nodes. The embeds are
 inventoried and digested, not counted as pages. A
 root, traversal mode, count, exclusion, or authority-version change therefore
 requires the same pull request review as validator code.

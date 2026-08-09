@@ -290,7 +290,7 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
         )
         self.assertEqual("page-only", targets["pge-artifact-catalog"]["traversal"])
         self.assertEqual(
-            (389, 9, 398),
+            (390, 9, 399),
             tuple(
                 targets["lit-pis-engagement"][key]
                 for key in (

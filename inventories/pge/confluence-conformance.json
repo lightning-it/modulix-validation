@@ -160,9 +160,9 @@
       "root_page_id": "2651357331",
       "profile": "engagement",
       "traversal": "recursive",
-      "expected_page_count": 389,
+      "expected_page_count": 390,
       "expected_non_page_count": 9,
-      "expected_content_count": 398,
+      "expected_content_count": 399,
       "expected_non_page_classification_counts": {
         "direct": 9,
         "delegated": 0,

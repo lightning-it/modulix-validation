@@ -746,7 +746,7 @@ def check_pge_confluence_conformance_assets() -> None:
         "pge-product-decisions": (40, 0, 40),
         "pge-template-library": (11, 0, 11),
         "pge-artifact-catalog": (1, 0, 1),
-        "lit-pis-engagement": (389, 9, 398),
+        "lit-pis-engagement": (390, 9, 399),
     }
     actual_target_counts = {
         name: (
