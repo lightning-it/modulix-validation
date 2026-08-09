@@ -705,13 +705,13 @@ def check_pge_confluence_conformance_assets() -> None:
     canonical = canonical_targets[0]
     if (
         canonical.get("root_page_id") != "2875654145"
-        or canonical.get("expected_page_count") != 778
+        or canonical.get("expected_page_count") != 779
         or canonical.get("expected_non_page_count") != 14
-        or canonical.get("expected_content_count") != 792
+        or canonical.get("expected_content_count") != 793
         or len(canonical.get("excluded_subtree_root_ids", [])) != 69
         or canonical.get("expected_classification_counts")
         != {
-            "direct_validated": 52,
+            "direct_validated": 53,
             "delegated": 51,
             "disposition_excluded": 675,
         }
@@ -725,7 +725,7 @@ def check_pge_confluence_conformance_assets() -> None:
             (authority.get("page_id"), authority.get("version"))
             for authority in canonical.get("exclusion_authorities", [])
         }
-        != {("2892759041", 13), ("2892890133", 11)}
+        != {("2892759041", 14), ("2892890133", 12)}
         or canonical.get("delegated_subtree_targets")
         != [
             {
@@ -742,7 +742,7 @@ def check_pge_confluence_conformance_assets() -> None:
             "PGE canonical product scope or exclusion authority versions changed"
         )
     expected_target_counts = {
-        "pge-canonical-product": (778, 14, 792),
+        "pge-canonical-product": (779, 14, 793),
         "pge-product-decisions": (40, 0, 40),
         "pge-template-library": (11, 0, 11),
         "pge-artifact-catalog": (1, 0, 1),

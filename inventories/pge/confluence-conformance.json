@@ -7,11 +7,11 @@
       "root_page_id": "2875654145",
       "profile": "product",
       "traversal": "recursive",
-      "expected_page_count": 778,
+      "expected_page_count": 779,
       "expected_non_page_count": 14,
-      "expected_content_count": 792,
+      "expected_content_count": 793,
       "expected_classification_counts": {
-        "direct_validated": 52,
+        "direct_validated": 53,
         "delegated": 51,
         "disposition_excluded": 675
       },
@@ -33,11 +33,11 @@
       "exclusion_authorities": [
         {
           "page_id": "2892759041",
-          "version": 13
+          "version": 14
         },
         {
           "page_id": "2892890133",
-          "version": 11
+          "version": 12
         }
       ],
       "excluded_subtree_root_ids": [
