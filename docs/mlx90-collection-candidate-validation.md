@@ -24,7 +24,8 @@ flowchart LR
     P[Producer exact candidate] --> N[Nexus ansiblegalaxy hosted]
     N --> R[Independent Nexus readback]
     R --> H[Real Heavy profile]
-    H --> A[Real Application Acceptance]
+    R --> A[Real Application Acceptance]
+    H --> S[OIDC-signed v2 receipt]
     A --> S[OIDC-signed v2 receipt]
     S --> G[Producer publishes identical bytes to Galaxy]
 ```
@@ -34,6 +35,10 @@ native Galaxy-v3 artifact URL, rejects redirects, verifies the expected byte
 count and SHA-256, checks the bounded collection archive and `MANIFEST.json`,
 and proves that dependency preparation did not change the candidate. Both
 profiles receive the same workflow artifact containing that candidate.
+Heavy and Application Acceptance run independently in parallel after the
+readback. The receipt remains dependent on successful completion of both,
+which bounds the controller path to 255 minutes under the declared job
+timeouts.
 
 The profile matrices are generated from the exact Producer commit's
 authoritative `meta/role-coverage.yml`. For the Golden Path they must contain a

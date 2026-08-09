@@ -17,6 +17,12 @@ SCRIPT_PATH = ROOT / "scripts" / "mlx90-collection-candidate-validation.py"
 WORKFLOW_PATH = (
     ROOT / ".github" / "workflows" / "mlx90-collection-candidate-validation.yml"
 )
+PRODUCER_REQUEST_FIXTURE_PATH = (
+    ROOT / "tests" / "fixtures" / "mlx90-producer-collection-validation-request-v2.json"
+)
+PRODUCER_REQUEST_FIXTURE_ID = (
+    "f4401218fce1a5806ccaf4ebc0aa0c274b38da1a9139f8aa81dafd4ad35f7292"
+)
 SPEC = importlib.util.spec_from_file_location("mlx90_candidate_validation", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -36,11 +42,16 @@ def request_fixture():
         "apiVersion": MODULE.REQUEST_API_VERSION,
         "kind": MODULE.REQUEST_KIND,
         "source": {
+            "actor": MODULE.APP_ACTOR,
+            "actorId": MODULE.APP_ACTOR_ID,
+            "actorType": "Bot",
+            "event": "workflow_dispatch",
+            "ref": "refs/heads/main",
             "repository": MODULE.SOURCE_REPOSITORY,
-            "workflow": MODULE.SOURCE_WORKFLOW,
-            "sha": "b" * 40,
-            "runId": 123456,
             "runAttempt": 1,
+            "runId": 123456,
+            "sha": "b" * 40,
+            "workflow": MODULE.SOURCE_WORKFLOW,
         },
         "security": {"evidenceId": "MLX90-SECURITY-001", "humanActions": 0},
         "candidate": {
@@ -127,6 +138,74 @@ class CandidateValidationUnitTests(unittest.TestCase):
         MODULE.validate_controller_run(
             run_fixture(controller=True), validated, run_id=777, run_attempt=2
         )
+
+    def test_canonical_producer_v2_fixture_passes_and_round_trips_in_receipt(self):
+        fixture_bytes = PRODUCER_REQUEST_FIXTURE_PATH.read_text(encoding="utf-8")
+        request = json.loads(fixture_bytes)
+        self.assertEqual(MODULE.canonical_pretty(request), fixture_bytes)
+        payload = MODULE.canonical_compact(request)
+        request_id = hashlib.sha256(payload.encode()).hexdigest()
+        self.assertEqual(PRODUCER_REQUEST_FIXTURE_ID, request_id)
+
+        validated = MODULE.validate_request(
+            payload,
+            request_id,
+            controller_sha=request["controller"]["sha"],
+            repository=MODULE.CONTROLLER_REPOSITORY,
+            ref=MODULE.CONTROLLER_REF,
+            actor=MODULE.APP_ACTOR,
+            actor_id=MODULE.APP_ACTOR_ID,
+            triggering_actor=MODULE.APP_ACTOR,
+        )
+        receipt = MODULE.build_receipt(
+            validated,
+            request_id,
+            run_id=777,
+            run_attempt=2,
+            controller_sha=request["controller"]["sha"],
+            actor=MODULE.APP_ACTOR,
+            actor_id=MODULE.APP_ACTOR_ID,
+        )
+
+        self.assertEqual(
+            request["source"],
+            receipt["validation"]["observations"]["sourceRun"],
+        )
+        self.assertEqual(
+            "https://nexus.example.invalid/nexus/service/repository/"
+            "mlx90-security-candidates",
+            request["candidate"]["nexus"]["repositoryUrl"],
+        )
+
+    def test_source_identity_is_exactly_the_producer_v2_contract(self):
+        request, _payload, _request_id = self.canonical_request()
+        mutations = {
+            "actor": "someone-else[bot]",
+            "actorId": 1,
+            "actorType": "User",
+            "event": "push",
+            "ref": "refs/heads/develop",
+            "repository": MODULE.CONTROLLER_REPOSITORY,
+            "workflow": MODULE.CONTROLLER_WORKFLOW,
+        }
+        for key, replacement in mutations.items():
+            candidate = json.loads(json.dumps(request))
+            candidate["source"][key] = replacement
+            payload = MODULE.canonical_compact(candidate)
+            request_id = hashlib.sha256(payload.encode()).hexdigest()
+            with self.subTest(field=key), self.assertRaisesRegex(
+                MODULE.ContractError, "source identity"
+            ):
+                MODULE.validate_request(
+                    payload,
+                    request_id,
+                    controller_sha=request["controller"]["sha"],
+                    repository=MODULE.CONTROLLER_REPOSITORY,
+                    ref=MODULE.CONTROLLER_REF,
+                    actor=MODULE.APP_ACTOR,
+                    actor_id=MODULE.APP_ACTOR_ID,
+                    triggering_actor=MODULE.APP_ACTOR,
+                )
 
     def test_noncanonical_or_tampered_request_is_rejected(self):
         request, payload, request_id = self.canonical_request()
@@ -350,6 +429,19 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
             self.assertEqual(
                 "release-automation-app", jobs[job]["with"]["source-token-mode"]
             )
+
+    def test_heavy_and_application_run_in_parallel_after_nexus(self):
+        jobs = self.workflow["jobs"]
+        expected_profile_needs = {"validate", "nexus-readback"}
+        self.assertEqual(expected_profile_needs, set(jobs["heavy"]["needs"]))
+        self.assertEqual(
+            expected_profile_needs,
+            set(jobs["application-acceptance"]["needs"]),
+        )
+        self.assertEqual(
+            {"validate", "nexus-readback", "heavy", "application-acceptance"},
+            set(jobs["receipt"]["needs"]),
+        )
 
     def test_no_transition_bypass_force_or_human_approval_path(self):
         for forbidden in (

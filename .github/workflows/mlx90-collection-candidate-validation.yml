@@ -327,7 +327,7 @@ jobs:
 
   application-acceptance:
     name: Application Acceptance / exact Nexus candidate
-    needs: [validate, nexus-readback, heavy]
+    needs: [validate, nexus-readback]
     permissions:
       contents: read
     uses: ./.github/workflows/collection-quality-profile.yml

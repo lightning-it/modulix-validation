@@ -154,6 +154,8 @@ def _validate_url_contract(candidate: Mapping[str, Any]) -> None:
         fail("request Nexus URLs must be strings")
     base = urllib.parse.urlsplit(repository_url)
     artifact = urllib.parse.urlsplit(artifact_url)
+    decoded_base_path = urllib.parse.unquote(base.path)
+    repository_suffix = f"/repository/{repository}"
     if (
         base.scheme != "https"
         or not base.hostname
@@ -161,7 +163,12 @@ def _validate_url_contract(candidate: Mapping[str, Any]) -> None:
         or base.password is not None
         or base.query
         or base.fragment
-        or base.path != f"/repository/{repository}"
+        or decoded_base_path != base.path
+        or "//" in base.path
+        or "\\" in base.path
+        or any(part in {".", ".."} for part in base.path.split("/"))
+        or base.path.rstrip("/") != base.path
+        or not base.path.endswith(repository_suffix)
     ):
         fail("request Nexus repository URL is not a credential-free native endpoint")
     expected_artifact_url = (
@@ -218,11 +225,27 @@ def validate_request(
 
     source = exact_keys(
         request.get("source"),
-        {"repository", "workflow", "sha", "runId", "runAttempt"},
+        {
+            "actor",
+            "actorId",
+            "actorType",
+            "event",
+            "ref",
+            "repository",
+            "runAttempt",
+            "runId",
+            "sha",
+            "workflow",
+        },
         "request.source",
     )
     if (
-        source.get("repository") != SOURCE_REPOSITORY
+        source.get("actor") != APP_ACTOR
+        or source.get("actorId") != APP_ACTOR_ID
+        or source.get("actorType") != "Bot"
+        or source.get("event") != "workflow_dispatch"
+        or source.get("ref") != "refs/heads/main"
+        or source.get("repository") != SOURCE_REPOSITORY
         or source.get("workflow") != SOURCE_WORKFLOW
         or not isinstance(source.get("sha"), str)
         or SHA.fullmatch(source["sha"]) is None
@@ -513,13 +536,7 @@ def build_receipt(
                 "candidateDigest": digest,
                 "heavy": "passed",
                 "nexusReadback": digest,
-                "sourceRun": {
-                    "repository": request["source"]["repository"],
-                    "runAttempt": request["source"]["runAttempt"],
-                    "runId": request["source"]["runId"],
-                    "sha": request["source"]["sha"],
-                    "workflow": request["source"]["workflow"],
-                },
+                "sourceRun": dict(request["source"]),
             },
             "receiptArtifact": f"{ARTIFACT_PREFIX}{request_id}",
             "ref": CONTROLLER_REF,

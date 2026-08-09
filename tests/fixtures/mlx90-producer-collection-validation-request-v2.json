@@ -1,0 +1,37 @@
+{
+  "apiVersion": "lit.mlx90.collection-validation-request/v2",
+  "candidate": {
+    "name": "lit-supplementary-3.2.4.tar.gz",
+    "nexus": {
+      "repository": "mlx90-security-candidates",
+      "repositoryUrl": "https://nexus.example.invalid/nexus/service/repository/mlx90-security-candidates",
+      "url": "https://nexus.example.invalid/nexus/service/repository/mlx90-security-candidates/api/v3/plugin/ansible/content/published/collections/artifacts/lit-supplementary-3.2.4.tar.gz"
+    },
+    "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "size": 4096,
+    "version": "3.2.4"
+  },
+  "controller": {
+    "ref": "refs/heads/main",
+    "repository": "lightning-it/modulix-validation",
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workflow": ".github/workflows/mlx90-collection-candidate-validation.yml"
+  },
+  "kind": "CollectionValidationRequest",
+  "security": {
+    "evidenceId": "MLX90-GHSA-VJJF-WC74-GP86-3.2.4",
+    "humanActions": 0
+  },
+  "source": {
+    "actor": "lightning-it-release-automation[bot]",
+    "actorId": 307565056,
+    "actorType": "Bot",
+    "event": "workflow_dispatch",
+    "ref": "refs/heads/main",
+    "repository": "lightning-it/ansible-collection-supplementary",
+    "runAttempt": 2,
+    "runId": 123456789,
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "workflow": ".github/workflows/collection-publish.yml"
+  }
+}
