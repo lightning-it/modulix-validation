@@ -1,3 +1,4 @@
+# yamllint disable rule:line-length
 # yamllint disable rule:truthy
 ---
 name: Collection infrastructure quality profile
@@ -26,6 +27,11 @@ on:
         required: false
         default: ""
         type: string
+      source-token-mode:
+        description: Token source for an explicitly cross-repository checkout.
+        required: false
+        default: legacy
+        type: string
       environment-name:
         description: Protected GitHub Environment containing runtime policy and secrets.
         required: true
@@ -45,6 +51,11 @@ on:
         required: false
         default: 24GiB
         type: string
+    secrets:
+      LIT_REPOSITORY_READ_TOKEN:
+        required: false
+      RELEASE_AUTOMATION_APP_PRIVATE_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -63,6 +74,7 @@ jobs:
           MATRIX_JSON: ${{ inputs['matrix-json'] }}
           CALLER_REPOSITORY: ${{ github.repository }}
           SOURCE_REPOSITORY: ${{ inputs['source-repository'] || github.repository }}
+          SOURCE_TOKEN_MODE: ${{ inputs['source-token-mode'] }}
           SOURCE_SHA: ${{ inputs['source-sha'] }}
         run: |
           set -euo pipefail
@@ -78,6 +90,13 @@ jobs:
             echo "source-repository is not allowlisted" >&2
             exit 1
           }
+          case "$SOURCE_TOKEN_MODE" in
+            legacy) ;;
+            release-automation-app)
+              test "$SOURCE_REPOSITORY" = "lightning-it/ansible-collection-supplementary"
+              ;;
+            *) echo "unsupported source-token-mode" >&2; exit 1 ;;
+          esac
           if [[ ! "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
             echo "source-sha must be an exact 40- or 64-character lowercase hexadecimal commit ID" >&2
             exit 1
@@ -140,12 +159,52 @@ jobs:
         matrix.target }}
       cancel-in-progress: false
     steps:
+      - name: Require release App credentials before cross-repository checkout
+        if: inputs['source-token-mode'] == 'release-automation-app'
+        env:
+          APP_CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_CLIENT_ID"
+          test -n "$APP_PRIVATE_KEY"
+
+      - name: Mint exact read-only Golden Path source token
+        id: source-app
+        if: inputs['source-token-mode'] == 'release-automation-app'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ansible-collection-supplementary
+          permission-contents: read
+
+      - name: Require exact App identity and one-repository token scope
+        if: inputs['source-token-mode'] == 'release-automation-app'
+        env:
+          APP_INSTALLATION_ID: ${{ steps.source-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.source-app.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.source-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "lightning-it-release-automation"
+          test "$APP_INSTALLATION_ID" = "148019054"
+          repositories="$(
+            gh api --paginate 'installation/repositories?per_page=100' \
+              | jq -sc '[.[].repositories[].full_name] | sort | unique'
+          )"
+          test "$repositories" = '["lightning-it/ansible-collection-supplementary"]'
+
       - name: Checkout exact collection source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: ${{ inputs['source-repository'] || github.repository }}
           ref: ${{ inputs['source-sha'] }}
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: >-
+            ${{ inputs['source-token-mode'] == 'release-automation-app' &&
+            steps.source-app.outputs.token ||
+            secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
       - name: Set up exact Python runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6

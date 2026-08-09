@@ -1,0 +1,412 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: MLX-90 collection candidate validation
+run-name: MLX-90 collection candidate / ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: SHA-256 of the canonical immutable v2 request.
+        required: true
+        type: string
+      request_json:
+        description: Canonical compact immutable v2 request JSON.
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: mlx90-collection-candidate-${{ inputs.request_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate immutable request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: mlx90-security-candidate-validation
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      request-id: ${{ steps.bind.outputs.request-id }}
+      source-sha: ${{ steps.bind.outputs.source-sha }}
+    steps:
+      - name: Reject every non-App dispatch before secret access
+        env:
+          DISPATCH_ACTOR: ${{ github.actor }}
+          DISPATCH_ACTOR_ID: ${{ github.actor_id }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REPOSITORY: ${{ github.repository }}
+          DISPATCH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_ACTOR" = "lightning-it-release-automation[bot]"
+          test "$DISPATCH_ACTOR_ID" = "307565056"
+          test "$DISPATCH_TRIGGERING_ACTOR" = "$DISPATCH_ACTOR"
+          test "$DISPATCH_REF" = "refs/heads/main"
+          test "$DISPATCH_REPOSITORY" = "lightning-it/modulix-validation"
+
+      - name: Checkout exact protected controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Mint exact read-only Producer evidence token
+        id: producer-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ansible-collection-supplementary
+          permission-actions: read
+          permission-contents: read
+
+      - name: Read exact App, controller, and Producer run evidence
+        id: evidence
+        env:
+          CONTROLLER_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.producer-app.outputs.token }}
+          REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          set -euo pipefail
+          evidence_root="$RUNNER_TEMP/mlx90-candidate-validation-evidence"
+          test ! -e "$evidence_root"
+          mkdir -p "$evidence_root"
+          source_run_id="$(
+            python3 - <<'PY'
+          import json
+          import os
+
+          value = json.loads(os.environ["REQUEST_JSON"])
+          run_id = value.get("source", {}).get("runId") if isinstance(value, dict) else None
+          if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id <= 0:
+              raise SystemExit("request does not contain a positive source run ID")
+          print(run_id)
+          PY
+          )"
+          [[ "$source_run_id" =~ ^[1-9][0-9]*$ ]]
+          gh api /installation > "$evidence_root/installation.json"
+          gh api --paginate 'installation/repositories?per_page=100' \
+            | jq -sc '[.[].repositories[].full_name] | sort | unique' \
+            > "$evidence_root/installation-repositories.json"
+          gh api \
+            "repos/lightning-it/ansible-collection-supplementary/actions/runs/$source_run_id" \
+            > "$evidence_root/source-run.json"
+          GH_TOKEN="$CONTROLLER_TOKEN" gh api \
+            "repos/lightning-it/modulix-validation/actions/runs/$GITHUB_RUN_ID" \
+            > "$evidence_root/controller-run.json"
+          echo "root=$evidence_root" >> "$GITHUB_OUTPUT"
+
+      - name: Validate canonical request and every immutable identity
+        id: bind
+        env:
+          APP_INSTALLATION_ID: ${{ steps.producer-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.producer-app.outputs.app-slug }}
+          EVIDENCE_ROOT: ${{ steps.evidence.outputs.root }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          set -euo pipefail
+          request_root="$RUNNER_TEMP/mlx90-validated-request"
+          test ! -e "$request_root"
+          mkdir -p "$request_root"
+          python3 scripts/mlx90-collection-candidate-validation.py validate-request \
+            --request-id "$REQUEST_ID" \
+            --request-json "$REQUEST_JSON" \
+            --controller-sha "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF" \
+            --actor "$GITHUB_ACTOR" \
+            --actor-id "$GITHUB_ACTOR_ID" \
+            --triggering-actor "$GITHUB_TRIGGERING_ACTOR" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --controller-run "$EVIDENCE_ROOT/controller-run.json" \
+            --source-run "$EVIDENCE_ROOT/source-run.json" \
+            --installation "$EVIDENCE_ROOT/installation.json" \
+            --installation-repositories "$EVIDENCE_ROOT/installation-repositories.json" \
+            --app-slug "$APP_SLUG" \
+            --installation-id "$APP_INSTALLATION_ID" \
+            --output "$request_root/request.json"
+          source_sha="$(jq -er '.source.sha' "$request_root/request.json")"
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "request-id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
+          echo "source-sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact validated request
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: mlx90-validated-request
+          path: ${{ runner.temp }}/mlx90-validated-request/request.json
+          if-no-files-found: error
+          retention-days: 30
+
+  nexus-readback:
+    name: Nexus exact-byte readback
+    needs: validate
+    runs-on: [self-hosted, linux, x64, incus]
+    timeout-minutes: 45
+    environment:
+      name: mlx90-security-candidate-validation
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      acceptance-matrix: ${{ steps.matrix.outputs.acceptance-matrix }}
+      candidate-artifact: ${{ steps.bind.outputs.candidate-artifact }}
+      heavy-matrix: ${{ steps.matrix.outputs.heavy-matrix }}
+    steps:
+      - name: Checkout exact controller implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          path: .modulix-validation
+          persist-credentials: false
+
+      - name: Download exact validated request
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          name: mlx90-validated-request
+          path: ${{ runner.temp }}/mlx90-validated-request
+
+      - name: Mint exact read-only source token
+        id: source-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ansible-collection-supplementary
+          permission-contents: read
+
+      - name: Require exact App and source checkout scope
+        env:
+          APP_INSTALLATION_ID: ${{ steps.source-app.outputs.installation-id }}
+          APP_SLUG: ${{ steps.source-app.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.source-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "lightning-it-release-automation"
+          test "$APP_INSTALLATION_ID" = "148019054"
+          repositories="$(
+            gh api --paginate 'installation/repositories?per_page=100' \
+              | jq -sc '[.[].repositories[].full_name] | sort | unique'
+          )"
+          test "$repositories" = '["lightning-it/ansible-collection-supplementary"]'
+
+      - name: Checkout exact Producer source represented by the candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: lightning-it/ansible-collection-supplementary
+          ref: ${{ needs.validate.outputs.source-sha }}
+          path: source
+          token: ${{ steps.source-app.outputs.token }}
+          persist-credentials: false
+
+      - name: Set up pinned validation runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install exact collection validation tools
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input \
+            ansible-core==2.18.18 \
+            PyYAML==6.0.3
+
+      - name: Download and independently verify exact Nexus candidate
+        id: bind
+        env:
+          NEXUS_GALAXY_PASSWORD: ${{ secrets.NEXUS_GALAXY_PASSWORD }}
+          NEXUS_GALAXY_REPOSITORY: ${{ vars.NEXUS_GALAXY_REPOSITORY }}
+          NEXUS_GALAXY_REPOSITORY_URL: ${{ vars.NEXUS_GALAXY_REPOSITORY_URL }}
+          NEXUS_GALAXY_USERNAME: ${{ secrets.NEXUS_GALAXY_USERNAME }}
+          REQUEST_ID: ${{ needs.validate.outputs.request-id }}
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/mlx90-validated-request/request.json"
+          candidate_root="$GITHUB_WORKSPACE/candidate-artifact"
+          candidate="$(
+            python3 .modulix-validation/scripts/mlx90-collection-candidate-validation.py \
+              nexus-readback \
+              --request "$request" \
+              --request-id "$REQUEST_ID" \
+              --output-directory "$candidate_root"
+          )"
+          test -f "$candidate"
+          test ! -L "$candidate"
+          candidate_name="$(basename "$candidate")"
+          expected_name="$(jq -er '.candidate.name' "$request")"
+          test "$candidate_name" = "$expected_name"
+          python3 source/scripts/source_dependencies.py \
+            --root source \
+            --candidate "$candidate"
+          original_digest="$(sha256sum "$candidate" | awk '{print $1}')"
+          install_root="$RUNNER_TEMP/mlx90-runtime-collections"
+          test ! -e "$install_root"
+          mkdir -p "$install_root"
+          ansible-galaxy collection install "$candidate" \
+            -p "$install_root" \
+            --force
+          test "$(sha256sum "$candidate" | awk '{print $1}')" = "$original_digest"
+          tar \
+            -C "$install_root" \
+            -czf "$candidate_root/runtime-collections.tar.gz" \
+            --exclude=ansible_collections/lit/supplementary \
+            ansible_collections
+          RUNTIME_BUNDLE="$candidate_root/runtime-collections.tar.gz" python3 - <<'PY'
+          import os
+          import tarfile
+          from pathlib import PurePosixPath
+
+          candidate = PurePosixPath("ansible_collections/lit/supplementary")
+          with tarfile.open(os.environ["RUNTIME_BUNDLE"], "r:gz") as archive:
+              members = [(PurePosixPath(item.name), item.isfile()) for item in archive]
+          if not any(is_file for _path, is_file in members):
+              raise SystemExit("runtime collection bundle contains no dependency files")
+          if any(path == candidate or candidate in path.parents for path, _ in members):
+              raise SystemExit("runtime collection bundle contains the candidate collection")
+          PY
+          (
+            cd "$candidate_root"
+            sha256sum "$candidate_name" runtime-collections.tar.gz \
+              > candidate-SHA256SUMS
+            sha256sum --check candidate-SHA256SUMS
+          )
+          artifact_name="mlx90-candidate-$REQUEST_ID"
+          echo "candidate-artifact=$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Generate exact supported Heavy and Application matrices
+        id: matrix
+        run: |
+          set -euo pipefail
+          heavy="$(python3 source/scripts/validate-role-coverage.py matrix --profile heavy)"
+          acceptance="$(
+            python3 source/scripts/validate-role-coverage.py \
+              matrix --profile application_acceptance
+          )"
+          python3 -c 'import json,sys; assert json.loads(sys.argv[1])["include"]' "$heavy"
+          python3 -c 'import json,sys; assert json.loads(sys.argv[1])["include"]' "$acceptance"
+          {
+            echo "heavy-matrix=$heavy"
+            echo "acceptance-matrix=$acceptance"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact candidate and runtime dependency bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ${{ steps.bind.outputs.candidate-artifact }}
+          path: ${{ github.workspace }}/candidate-artifact/
+          if-no-files-found: error
+          retention-days: 30
+
+  heavy:
+    name: Heavy / exact Nexus candidate
+    needs: [validate, nexus-readback]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/collection-quality-profile.yml
+    with:
+      profile: heavy
+      matrix-json: ${{ needs.nexus-readback.outputs.heavy-matrix }}
+      candidate-artifact: ${{ needs.nexus-readback.outputs.candidate-artifact }}
+      source-sha: ${{ needs.validate.outputs.source-sha }}
+      source-repository: lightning-it/ansible-collection-supplementary
+      source-token-mode: release-automation-app
+      environment-name: mlx90-security-candidate-validation
+    secrets:
+      RELEASE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+  application-acceptance:
+    name: Application Acceptance / exact Nexus candidate
+    needs: [validate, nexus-readback, heavy]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/collection-quality-profile.yml
+    with:
+      profile: application_acceptance
+      matrix-json: ${{ needs.nexus-readback.outputs.acceptance-matrix }}
+      candidate-artifact: ${{ needs.nexus-readback.outputs.candidate-artifact }}
+      source-sha: ${{ needs.validate.outputs.source-sha }}
+      source-repository: lightning-it/ansible-collection-supplementary
+      source-token-mode: release-automation-app
+      environment-name: mlx90-security-candidate-validation
+    secrets:
+      RELEASE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+  receipt:
+    name: Sign validation receipt
+    needs: [validate, nexus-readback, heavy, application-acceptance]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: mlx90-security-candidate-validation
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout exact controller implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download exact validated request
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          name: mlx90-validated-request
+          path: ${{ runner.temp }}/mlx90-validated-request
+
+      - name: Create canonical successful v2 receipt
+        env:
+          ACCEPTANCE_RESULT: ${{ needs.application-acceptance.result }}
+          HEAVY_RESULT: ${{ needs.heavy.result }}
+          NEXUS_RESULT: ${{ needs.nexus-readback.result }}
+          REQUEST_ID: ${{ needs.validate.outputs.request-id }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+        run: |
+          set -euo pipefail
+          python3 scripts/mlx90-collection-candidate-validation.py create-receipt \
+            --request "$RUNNER_TEMP/mlx90-validated-request/request.json" \
+            --request-id "$REQUEST_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --controller-sha "$GITHUB_SHA" \
+            --actor "$GITHUB_ACTOR" \
+            --actor-id "$GITHUB_ACTOR_ID" \
+            --validate-result "$VALIDATE_RESULT" \
+            --nexus-result "$NEXUS_RESULT" \
+            --heavy-result "$HEAVY_RESULT" \
+            --acceptance-result "$ACCEPTANCE_RESULT" \
+            --output-directory "$RUNNER_TEMP/mlx90-validation-receipt"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Sign exact canonical receipt with keyless GitHub OIDC
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/mlx90-validation-receipt/mlx90-collection-validation-receipt.json"
+          bundle="${receipt}.sigstore.json"
+          test -s "$receipt"
+          test ! -e "$bundle"
+          cosign sign-blob --yes --bundle "$bundle" "$receipt"
+          test -s "$bundle"
+          test "$(find "$(dirname "$receipt")" -maxdepth 1 -type f | wc -l)" -eq 2
+
+      - name: Upload exact signed validation receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: mlx90-collection-validation-${{ needs.validate.outputs.request-id }}
+          path: ${{ runner.temp }}/mlx90-validation-receipt/
+          if-no-files-found: error
+          retention-days: 90
