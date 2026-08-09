@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Require the protected main revision
         env:
-          EXPECTED_REPOSITORY: lightning-it/modulix-validation-lit
+          EXPECTED_REPOSITORY: lightning-it/modulix-validation
         run: |
           set -euo pipefail
           test "${GITHUB_REPOSITORY}" = "${EXPECTED_REPOSITORY}"

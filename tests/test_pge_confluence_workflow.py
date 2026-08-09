@@ -103,7 +103,7 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
         self.assertIn('test "${GITHUB_REPOSITORY}" = "${EXPECTED_REPOSITORY}"', guard)
         self.assertIn('test "${GITHUB_REF}" = "refs/heads/main"', guard)
         self.assertEqual(
-            "lightning-it/modulix-validation-lit",
+            "lightning-it/modulix-validation",
             authorize["steps"][0]["env"]["EXPECTED_REPOSITORY"],
         )
 

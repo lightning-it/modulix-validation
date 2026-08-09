@@ -92,7 +92,7 @@ The page-level rules require:
 ## Protected Live Workflow
 
 The `PGE Confluence Conformance` workflow is dispatch-only and refuses every
-revision except `main` in `lightning-it/modulix-validation-lit`. Its audit job uses
+revision except `main` in `lightning-it/modulix-validation`. Its audit job uses
 the protected `pge-confluence-read-only` GitHub Environment. Configure that
 environment with required reviewers and a deployment rule limited to `main`.
 
