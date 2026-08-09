@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import ipaddress
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -407,17 +409,41 @@ class WunderboxPolicyTests(unittest.TestCase):
         self.assertEqual(consumer["target"], "REPLACE_WITH_EXACT_TARGET_FQDN")
         self.assertNotIn("onepassword_approval", unlock)
 
-    def test_policy_contains_no_real_environment_identity(self):
-        text = POLICY_PATH.read_text(encoding="utf-8").lower()
-        for private_literal in (
-            "wunderbox01",
-            "136.243.38.174",
-            "3035773",
-            "153.53.58.197",
-            "rené osorio",
-            "dirk egert",
-        ):
-            self.assertNotIn(private_literal, text)
+    def test_policy_contains_no_concrete_environment_identity(self):
+        def string_values(value):
+            if isinstance(value, dict):
+                for child in value.values():
+                    yield from string_values(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from string_values(child)
+            elif isinstance(value, str):
+                yield value
+
+        concrete_fqdn = re.compile(
+            r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+            r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+"
+            r"\.[a-z]{2,63}$",
+            re.IGNORECASE,
+        )
+        numbered_host = re.compile(
+            r"^[a-z][a-z-]{2,}[0-9]{2}(?:\.[a-z0-9-]+)*$",
+            re.IGNORECASE,
+        )
+        provider_identifier = re.compile(r"^[0-9]{6,12}$")
+
+        for scalar in string_values(self.policy):
+            self.assertIsNone(concrete_fqdn.fullmatch(scalar))
+            self.assertIsNone(numbered_host.fullmatch(scalar))
+            self.assertIsNone(provider_identifier.fullmatch(scalar))
+            for token in re.split(r"[^0-9A-Fa-f:.]+", scalar):
+                if not token or ("." not in token and ":" not in token):
+                    continue
+                try:
+                    ipaddress.ip_address(token.strip("."))
+                except ValueError:
+                    continue
+                self.fail(f"policy contains a concrete IP address in {scalar!r}")
 
     def test_manifest_template_is_deliberately_non_executable(self):
         self.assertEqual(self.template["manifest_status"], "TEMPLATE")
