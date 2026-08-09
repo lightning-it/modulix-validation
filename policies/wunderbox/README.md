@@ -1,77 +1,97 @@
 # Wunderbox governed execution binding
 
-`root-of-trust-policy.json` is the versioned, environment-neutral action
-contract for one Wunderbox Root-of-Trust build. It fixes each action's record
-prefix, gate, impact, inventory, playbook, tags, timeout, output bound,
-extra-variable allowlist and evidence prerequisites. The adapter
-`scripts/wbx-governed-exec.py` exposes no target, playbook, gate, impact or
-arbitrary command option.
+`root-of-trust-policy.json` is the public, environment-neutral Recorder-v2
+action contract for one Wunderbox Root-of-Trust build. Its top-level schema is
+exact: it declares the policy identity, required repositories and collections,
+the collection-to-repository mapping, target contract and action matrix. It no
+longer contains signing configuration. The policy path, policy digest, manifest
+signer, runtime-attestation signer and approval authority are pinned by the
+root/admin-owned controller trust descriptor at
+`/Library/Application Support/Lightning IT/Governed Ansible/controller-trust.json`;
+an adapter caller cannot replace them.
 
-`gate-manifest.template.json` is deliberately non-executable. A real engagement
-manifest must be created outside Git in an owner-only directory, completed with
-the exact target/controller identity, all six frozen repository commits,
-digest-pinned runtime images, collection attestation, gate state and one
-authorization entry for every policy action. Unselected actions remain
-`NOT_APPROVED`; each selected action receives a time-bounded `APPROVED` entry.
-The manifest must retain
-`safety_hold: true` until the relevant gate conditions and execution approval
-are independently accepted.
+Each action fixes its record prefix, gate, impact, playbook or projection mode,
+timeout, output bound, extra-variable contract and evidence prerequisites. Every
+callback artifact that may be persisted has an exact schema which types every
+projected field and binds target identity fields to the signed manifest. The
+adapter `scripts/wbx-governed-exec.py` exposes no policy, allowed-signers,
+target, inventory, playbook, gate, impact or arbitrary command option.
 
-The reviewed manifest is signed as an SSH signature with identity
-`lit-wbx-approver` and namespace `lit-wbx-gate-manifest`. The allowed-signers
-file, detached signature and manifest are owner-only inputs to the adapter.
-Their presence does not itself accept evidence or advance a gate: recorder
-outputs remain Candidate Evidence until independently reviewed and externally
-anchored.
+`gate-manifest.template.json` and the renderer use manifest schema version 2.
+The runtime section binds only digest-pinned toolbox and run-EE images plus the
+absolute path, SHA-256 and detached signature path of the separate runtime
+attestation. That signed attestation records the source commits and measured
+installed collection trees. Collection metadata stated only by the manifest is
+not accepted as runtime provenance.
 
-`scripts/render-wbx-gate-manifest-template.py` writes a complete skeleton to
-stdout with the current policy hash and one `NOT_APPROVED` entry for every
-action. Redirect it only into the owner-only external directory, complete and
-review the selected authorizations, then sign that exact byte sequence. The
-renderer never signs, approves or writes a manifest itself.
+A real engagement manifest is created outside Git in an owner-only directory.
+It binds the exact target/controller identity, all six frozen repository
+commits, runtime attestation, gate states and one exact authorization entry for
+every action. Unselected and blocked actions remain `NOT_APPROVED`. A selected
+action additionally needs a time-bounded outer authorization and a separate,
+cryptographically signed Foundational execution approval. The execution
+approval binds the exact recorder execution ID, repository commits, target,
+controller, action, policy, runtime and outer approval and is consumed once by
+the recorder before Ansible starts.
+
+Signed approvals used by an Ansible consumer are a separate trust event. The
+manifest contains only `consumer_approval_contracts[variable]` with the exact
+operation, target and consumer binding. The corresponding signed transport is
+supplied only through that action's owner-only extra-vars input. It uses a
+different nonce and replay identity from the recorder execution approval; the
+recorder verifies it before execution but leaves its one-time claim to the
+pinned Foundational consumer immediately before the secret-bearing operation.
+Successful execution is accepted only after the recorder verifies that the
+consumer created the expected canonical replay marker.
+
+Run the renderer to produce the complete non-approved skeleton:
+
+```bash
+python3 scripts/render-wbx-gate-manifest-template.py
+```
+
+The renderer adds exactly the evidence and authorization fields required by
+each policy action. It gives every action a distinct placeholder execution ID
+and nonce so reuse is visible, but it never signs or approves anything. The
+output remains non-executable because `manifest_status` is `TEMPLATE`, safety
+hold is enabled and every signature is an explicit replacement marker. Replace
+all placeholders, independently review the resulting bytes and sign that exact
+manifest according to the fixed controller trust descriptor.
 
 The pinned Ansible toolbox and execution environment are Linux runtimes. They
-can mount the controller's SSH agent socket, but they cannot use the macOS
-1Password Desktop CLI integration. Mounting only part of that trust path would
-create an unverified half-integration, so `recovery_metadata_plan`, both
-`prepare_installimage` actions and `bootstrap_unlock` are fail-closed with
-`implementation_status: blocked` and blocker
+cannot use the macOS 1Password Desktop CLI integration. A socket-only or
+partially mounted bridge would leave an unverified trust transition. Therefore
+the following seven actions remain fail-closed:
+
+- `recovery_metadata_plan`
+- `prepare_installimage_plan`
+- `installimage_plan`
+- `prepare_installimage_apply`
+- `installimage_apply`
+- `first_encrypted_boot`
+- `bootstrap_unlock`
+
+Six of these actions depend on the Desktop-integrated preparation or unlock
+path and use
 `blocked_missing_desktop_integrated_onepassword_controller_runtime`.
+`installimage_apply` instead requires a dedicated secret-safe orchestrator and
+uses
+`dedicated_secret_safe_onepassword_installimage_orchestrator_missing`. The
+actions remain in the policy as reviewed interface contracts, and the recorder
+rejects them before gate, authorization or process evaluation. Syntax actions
+remain available because they neither consume the Desktop session nor mutate an
+external target.
 
-`installimage_plan` is secret-free in isolation, but it is not independently
-valid: the verified Dropbear hook it evaluates must first be staged by the
-blocked `prepare_installimage` action. It therefore carries the same blocker.
-The actions remain in the policy as reviewed interface contracts, but the
-recorder rejects them before gate, authorization or process evaluation. Syntax
-actions remain available because they require neither the Desktop session nor
-an external mutation.
+The blockers may be removed only after independent review of a dedicated macOS
+adapter which uses the authenticated Desktop integration without exposing
+secrets to the Linux execution environment, or a separately signed bootstrap
+phase whose output is a secret-free, integrity-bound Linux input. The
+installimage consumer must resolve the exact pinned Password item without
+returning the secret to an Ansible variable, fact, callback, file or command
+argument.
 
-The runtime blocker may be removed only after independent review of either a
-dedicated macOS adapter that uses the authenticated Desktop integration without
-exposing secrets to the Linux execution environment, or a separate signed
-bootstrap phase whose output is a secret-free, integrity-bound input to the
-Linux phase. A socket-only, partial or implicit bridge is not acceptable.
-
-The destructive `installimage_apply` action has the additional blocker
-`dedicated_secret_safe_onepassword_installimage_orchestrator_missing`. Its
-future consumer must resolve the exact pinned Password item without returning
-the secret to an Ansible variable, fact, callback, file or command argument.
-The generic recovery resolver and the installed-host LUKS/Tang workflows keep
-their existing Ansible Vault/HashiCorp Vault contracts; selecting
-`onepassword_cli` does not silently replace those Day-2 paths.
-
-The bootstrap-unlock authorization carries the foundational plugin's
-short-lived approval mapping only as signed-manifest transport metadata. The
-recorder binds it to the exact attempt, all six frozen repository commits, the
-approved Dropbear fingerprint, the exact dedicated known-hosts file digest and
-the manifest time window, then atomically consumes its nonce independently of
-the plugin payload. The mapping contains an armored signature from the pinned
-foundational Approval Authority. The recorder validates only its transport
-shape; the foundational action plugin must verify that signature against its
-full inventory- and destination-bound payload before it consumes a secret.
-Neither the unsigned mapping shape nor the outer transport alone replaces that
-plugin verification.
-
-Retries never reuse an execution ID. Increment the attempt from `001` to `002`
-and retain the earlier Started/Result records, including interrupted or failed
-attempts.
+Retries never reuse an execution ID, execution approval, consumer approval or
+nonce. Increment the attempt from `001` to `002` and retain the earlier
+Started/Result records, including interrupted or failed attempts. Recorder
+outputs remain Candidate Evidence until independently reviewed and externally
+anchored; they never advance a gate by themselves.

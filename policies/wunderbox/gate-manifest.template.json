@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "manifest_status": "TEMPLATE",
   "policy_sha256": "REPLACE_WITH_REVIEWED_POLICY_SHA256",
   "safety_hold": true,
@@ -21,17 +21,9 @@
   "runtime": {
     "toolbox_image": "registry.example.invalid/toolbox@sha256:REPLACE_WITH_64_HEX",
     "run_ee_image": "registry.example.invalid/run-ee@sha256:REPLACE_WITH_64_HEX",
+    "attestation_path": "/REPLACE/WITH/OWNER-ONLY/runtime-attestation.json",
     "attestation_sha256": "REPLACE_WITH_64_HEX",
-    "collections": {
-      "foundational": {
-        "version": "REPLACE_WITH_VERSION",
-        "source_commit": "REPLACE_WITH_FULL_GIT_SHA"
-      },
-      "ubuntu": {
-        "version": "REPLACE_WITH_VERSION",
-        "source_commit": "REPLACE_WITH_FULL_GIT_SHA"
-      }
-    }
+    "attestation_signature_path": "/REPLACE/WITH/OWNER-ONLY/runtime-attestation.sig"
   },
   "gates": {
     "WBX-G0": "NOT_STARTED",
@@ -74,17 +66,7 @@
       "approval_sha256": "REPLACE_WITH_64_HEX",
       "not_before_utc": "REPLACE_WITH_ISO_8601_UTC",
       "expires_utc": "REPLACE_WITH_ISO_8601_UTC",
-      "test_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "plan_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "readback_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "rollback_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "recovery_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "negative_test_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "finding_ref": "REPLACE_IF_REQUIRED_BY_ACTION",
-      "approved_plan_sha256": "REPLACE_IF_BOUND_BY_ACTION",
-      "approved_dropbear_fingerprint": "REPLACE_IF_BOUND_BY_ACTION",
-      "approved_dropbear_known_hosts_sha256": "REPLACE_IF_BOUND_BY_ACTION",
-      "onepassword_approval": {
+      "execution_approval": {
         "schema_version": 1,
         "execution_id": "REPLACE_WITH_EXACT_RECORDER_EXECUTION_ID",
         "commit_shas": {
@@ -94,8 +76,9 @@
         "issued_at": "REPLACE_WITH_WHOLE_SECOND_UTC",
         "expires_at": "REPLACE_WITH_WHOLE_SECOND_UTC_MAX_15_MINUTES",
         "replay_directory": "REPLACE_WITH_OWNER_ONLY_ABSOLUTE_DIRECTORY",
-        "signature": "REPLACE_WITH_ARMORED_PLUGIN_APPROVAL_SIGNATURE"
-      }
+        "signature": "REPLACE_WITH_REAL_ARMORED_EXECUTION_APPROVAL_SIGNATURE"
+      },
+      "consumer_approval_contracts": {}
     }
   }
 }

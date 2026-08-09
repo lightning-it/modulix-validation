@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Bind the generic recorder to the Wunderbox Root-of-Trust policy.
 
-This adapter deliberately exposes no target, playbook, inventory, gate, impact,
-tags, execution image, or arbitrary command option.  Those values come from the
-reviewed policy and the separately protected, signed gate manifest.
+This adapter deliberately exposes no policy, signer, target, playbook,
+inventory, gate, impact, tags, execution image, or arbitrary command option.
+Policy and signer trust come from the recorder's fixed controller trust
+descriptor; engagement values come from the separately protected, signed gate
+manifest.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-POLICY = REPOSITORY_ROOT / "policies" / "wunderbox" / "root-of-trust-policy.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,7 +28,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--operations-repo", required=True, type=Path)
     parser.add_argument("--gate-manifest", required=True, type=Path)
     parser.add_argument("--gate-signature", required=True, type=Path)
-    parser.add_argument("--allowed-signers", required=True, type=Path)
     parser.add_argument("--action-id", required=True)
     parser.add_argument("--attempt", required=True, type=int)
     parser.add_argument("--operator", required=True)
@@ -47,14 +47,10 @@ def build_core_command(args: argparse.Namespace) -> list[str]:
     command = [
         sys.executable,
         str(core),
-        "--policy",
-        str(POLICY),
         "--gate-manifest",
         str(args.gate_manifest),
         "--gate-signature",
         str(args.gate_signature),
-        "--allowed-signers",
-        str(args.allowed_signers),
         "--action-id",
         args.action_id,
         "--attempt",

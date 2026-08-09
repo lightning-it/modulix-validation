@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "policy_id": "wunderbox-root-of-trust-v1",
+  "schema_version": 2,
+  "policy_id": "wunderbox-root-of-trust-v2",
   "required_repositories": [
     "automation",
     "inventory",
@@ -10,9 +10,9 @@
     "operations"
   ],
   "required_collections": ["foundational", "ubuntu"],
-  "signing": {
-    "identity": "lit-wbx-approver",
-    "namespace": "lit-wbx-gate-manifest"
+  "collection_repositories": {
+    "foundational": "foundational",
+    "ubuntu": "ubuntu"
   },
   "target_contract": {
     "target_id_pattern": "^[A-Z][A-Z0-9-]{2,63}$",
@@ -325,6 +325,14 @@
       },
       "expected_artifact": "plan",
       "artifact_projection_paths": ["target", "action", "plan_sha256"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.installimage-plan.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "action": {"type": "string", "allowed_values": ["plan"]},
+          "plan_sha256": {"type": "sha256"}
+        }
+      },
       "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
       "timeout_seconds": 1800,
       "max_output_bytes": 4194304
@@ -382,6 +390,14 @@
       },
       "expected_artifact": "plan",
       "artifact_projection_paths": ["target", "action", "plan_sha256"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.installimage-apply-plan.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "action": {"type": "string", "allowed_values": ["install"]},
+          "plan_sha256": {"type": "sha256"}
+        }
+      },
       "required_evidence_references": [
         "plan_ref",
         "rollback_ref",
@@ -394,6 +410,8 @@
     },
     "first_encrypted_boot": {
       "record_prefix": "340",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
       "gate": "WBX-G3",
       "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
       "impact": "availability",
@@ -418,6 +436,16 @@
         "dropbear_port",
         "known_hosts_sha256"
       ],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.first-encrypted-boot-readback.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "dropbear_fingerprint": {"type": "ssh_fingerprint"},
+          "openssh_fingerprint": {"type": "ssh_fingerprint"},
+          "dropbear_port": {"type": "integer"},
+          "known_hosts_sha256": {"type": "sha256"}
+        }
+      },
       "required_evidence_references": ["rollback_ref", "recovery_ref", "finding_ref"],
       "timeout_seconds": 1800,
       "max_output_bytes": 4194304
@@ -449,7 +477,8 @@
       "extra_var_bindings": {
         "hetzner_bootstrap_unlock_approval": {
           "kind": "signed_approval_transport",
-          "field": "onepassword_approval"
+          "operation": "unlock-luks-over-ssh-stdin",
+          "contract_binding": "REPLACE_WITH_EXACT_FOUNDATIONAL_PLUGIN_BINDING"
         },
         "hetzner_bootstrap_unlock_dropbear_fingerprint": {
           "kind": "authorization_field",
@@ -495,6 +524,17 @@
       },
       "expected_artifact": "readback",
       "artifact_projection_paths": ["target", "openssh_fingerprint", "state"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.first-boot-reconnect-readback.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "openssh_fingerprint": {"type": "ssh_fingerprint"},
+          "state": {
+            "type": "string",
+            "allowed_values": ["installed_openssh_pinned"]
+          }
+        }
+      },
       "required_evidence_references": [
         "readback_ref",
         "recovery_ref",
@@ -604,6 +644,15 @@
         "plan_sha256",
         "confirmation"
       ],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.vault-lifecycle-plan.v1",
+        "fields": {
+          "operation": {"type": "string", "allowed_values": ["deploy"]},
+          "target": {"type": "string", "binding": "fqdn"},
+          "plan_sha256": {"type": "sha256"},
+          "confirmation": {"type": "string"}
+        }
+      },
       "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
       "timeout_seconds": 1800,
       "max_output_bytes": 4194304
