@@ -149,7 +149,7 @@ jobs:
   nexus-readback:
     name: Nexus exact-byte readback
     needs: validate
-    runs-on: [self-hosted, linux, x64, incus, keycloak-test]
+    runs-on: [self-hosted, linux, x64, incus]
     timeout-minutes: 45
     environment:
       name: mlx90-security-candidate-validation

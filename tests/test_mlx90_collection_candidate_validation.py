@@ -396,7 +396,7 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
                 jobs[job]["environment"]["name"],
             )
         self.assertEqual(
-            ["self-hosted", "linux", "x64", "incus", "keycloak-test"],
+            ["self-hosted", "linux", "x64", "incus"],
             jobs["nexus-readback"]["runs-on"],
         )
 
