@@ -92,7 +92,6 @@ jobs:
           PY
           )"
           [[ "$source_run_id" =~ ^[1-9][0-9]*$ ]]
-          gh api /installation > "$evidence_root/installation.json"
           gh api --paginate 'installation/repositories?per_page=100' \
             | jq -sc '[.[].repositories[].full_name] | sort | unique' \
             > "$evidence_root/installation-repositories.json"
@@ -130,7 +129,6 @@ jobs:
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --controller-run "$EVIDENCE_ROOT/controller-run.json" \
             --source-run "$EVIDENCE_ROOT/source-run.json" \
-            --installation "$EVIDENCE_ROOT/installation.json" \
             --installation-repositories "$EVIDENCE_ROOT/installation-repositories.json" \
             --app-slug "$APP_SLUG" \
             --installation-id "$APP_INSTALLATION_ID" \

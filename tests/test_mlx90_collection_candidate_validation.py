@@ -97,16 +97,12 @@ def run_fixture(*, controller=False):
         "conclusion": None,
         "repository": {
             "full_name": (
-                MODULE.CONTROLLER_REPOSITORY
-                if controller
-                else MODULE.SOURCE_REPOSITORY
+                MODULE.CONTROLLER_REPOSITORY if controller else MODULE.SOURCE_REPOSITORY
             )
         },
         "head_repository": {
             "full_name": (
-                MODULE.CONTROLLER_REPOSITORY
-                if controller
-                else MODULE.SOURCE_REPOSITORY
+                MODULE.CONTROLLER_REPOSITORY if controller else MODULE.SOURCE_REPOSITORY
             )
         },
         "actor": actor(),
@@ -248,32 +244,26 @@ class CandidateValidationUnitTests(unittest.TestCase):
                     triggering_actor=MODULE.APP_ACTOR,
                 )
 
-    def test_app_installation_is_exact_and_token_is_single_repo(self):
-        installation = {
-            "id": MODULE.APP_INSTALLATION_ID,
-            "app_slug": MODULE.APP_SLUG,
-            "repository_selection": "selected",
-            "target_type": "Organization",
-            "account": {"login": "lightning-it"},
-            "permissions": MODULE.APP_PERMISSIONS,
-        }
-        MODULE.validate_installation(
-            installation,
+    def test_app_identity_and_token_scope_are_exact(self):
+        MODULE.validate_app_token_scope(
             [MODULE.SOURCE_REPOSITORY],
             app_slug=MODULE.APP_SLUG,
             installation_id=MODULE.APP_INSTALLATION_ID,
         )
-        for repositories, permissions in (
-            ([MODULE.SOURCE_REPOSITORY, MODULE.CONTROLLER_REPOSITORY], MODULE.APP_PERMISSIONS),
-            ([MODULE.SOURCE_REPOSITORY], {**MODULE.APP_PERMISSIONS, "workflows": "write"}),
+        for repositories, app_slug, installation_id in (
+            (
+                [MODULE.SOURCE_REPOSITORY, MODULE.CONTROLLER_REPOSITORY],
+                MODULE.APP_SLUG,
+                MODULE.APP_INSTALLATION_ID,
+            ),
+            ([MODULE.SOURCE_REPOSITORY], "another-app", MODULE.APP_INSTALLATION_ID),
+            ([MODULE.SOURCE_REPOSITORY], MODULE.APP_SLUG, 1),
         ):
-            candidate = {**installation, "permissions": permissions}
             with self.assertRaises(MODULE.ContractError):
-                MODULE.validate_installation(
-                    candidate,
+                MODULE.validate_app_token_scope(
                     repositories,
-                    app_slug=MODULE.APP_SLUG,
-                    installation_id=MODULE.APP_INSTALLATION_ID,
+                    app_slug=app_slug,
+                    installation_id=installation_id,
                 )
 
     def test_receipt_is_exactly_bound_to_successful_profiles(self):
@@ -357,16 +347,16 @@ class CandidateValidationUnitTests(unittest.TestCase):
         environment = {
             "NEXUS_GALAXY_USERNAME": "fixture-user",
             "NEXUS_GALAXY_PASSWORD": "fixture-password",
-            "NEXUS_GALAXY_REPOSITORY": request["candidate"]["nexus"][
-                "repository"
-            ],
+            "NEXUS_GALAXY_REPOSITORY": request["candidate"]["nexus"]["repository"],
             "NEXUS_GALAXY_REPOSITORY_URL": request["candidate"]["nexus"][
                 "repositoryUrl"
             ],
         }
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
             os.environ, environment, clear=False
-        ), mock.patch.object(MODULE.urllib.request, "build_opener", return_value=opener):
+        ), mock.patch.object(
+            MODULE.urllib.request, "build_opener", return_value=opener
+        ):
             output = Path(temporary) / "candidate"
             result = MODULE.download_candidate(request, output)
             self.assertEqual(candidate_bytes, result.read_bytes())
@@ -385,7 +375,9 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
         inputs = trigger["workflow_dispatch"]["inputs"]
         self.assertEqual({"request_id", "request_json"}, set(inputs))
         self.assertTrue(all(item["required"] is True for item in inputs.values()))
-        self.assertEqual("MLX-90 collection candidate validation", self.workflow["name"])
+        self.assertEqual(
+            "MLX-90 collection candidate validation", self.workflow["name"]
+        )
 
     def test_exact_jobs_and_security_environment_are_required(self):
         jobs = self.workflow["jobs"]
@@ -447,10 +439,7 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
         jobs = self.workflow["jobs"]
         delegated_workflow = yaml.safe_load(
             (
-                ROOT
-                / ".github"
-                / "workflows"
-                / "collection-quality-profile.yml"
+                ROOT / ".github" / "workflows" / "collection-quality-profile.yml"
             ).read_text(encoding="utf-8")
         )
         delegated_jobs = delegated_workflow["jobs"]
@@ -478,6 +467,11 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
         self.assertIn("permission-actions: read", self.text)
         self.assertIn("id-token: write", self.text)
         self.assertIn("cosign sign-blob", self.text)
+
+    def test_installation_evidence_uses_only_supported_token_endpoint(self):
+        self.assertIn("installation/repositories?per_page=100", self.text)
+        self.assertNotIn("gh api /installation", self.text)
+        self.assertNotIn('--installation "$EVIDENCE_ROOT/installation.json"', self.text)
 
 
 if __name__ == "__main__":

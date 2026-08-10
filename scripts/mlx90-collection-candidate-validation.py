@@ -34,13 +34,6 @@ APP_SLUG = "lightning-it-release-automation"
 APP_INSTALLATION_ID = 148019054
 APP_ACTOR = f"{APP_SLUG}[bot]"
 APP_ACTOR_ID = 307565056
-APP_PERMISSIONS = {
-    "actions": "write",
-    "checks": "read",
-    "contents": "write",
-    "metadata": "read",
-    "pull_requests": "write",
-}
 REQUEST_API_VERSION = "lit.mlx90.collection-validation-request/v2"
 REQUEST_KIND = "CollectionValidationRequest"
 RECEIPT_API_VERSION = "lit.mlx90.collection-validation-receipt/v2"
@@ -54,10 +47,7 @@ MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 REQUEST_ID = re.compile(r"[0-9a-f]{64}\Z")
-VERSION = re.compile(
-    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\."
-    r"(?:0|[1-9][0-9]*)\Z"
-)
+VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\." r"(?:0|[1-9][0-9]*)\Z")
 EVIDENCE_ID = re.compile(r"MLX90-[A-Z0-9][A-Z0-9._-]{2,121}\Z")
 REPOSITORY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,126}\Z")
 ARTIFACT_NAME = re.compile(
@@ -211,7 +201,10 @@ def validate_request(
     actual_id = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
     if actual_id != request_id:
         fail("request ID does not match the exact request bytes")
-    if request.get("apiVersion") != REQUEST_API_VERSION or request.get("kind") != REQUEST_KIND:
+    if (
+        request.get("apiVersion") != REQUEST_API_VERSION
+        or request.get("kind") != REQUEST_KIND
+    ):
         fail("request schema is unsupported")
     if (
         repository != CONTROLLER_REPOSITORY
@@ -276,7 +269,9 @@ def validate_request(
         or ARTIFACT_NAME.fullmatch(str(candidate.get("name"))) is None
         or not isinstance(candidate.get("sha256"), str)
         or DIGEST.fullmatch(candidate["sha256"]) is None
-        or not 0 < positive_integer(candidate.get("size"), "candidate size") <= MAX_CANDIDATE_BYTES
+        or not 0
+        < positive_integer(candidate.get("size"), "candidate size")
+        <= MAX_CANDIDATE_BYTES
     ):
         fail("request candidate identity is invalid")
     _validate_url_contract(candidate)
@@ -328,7 +323,9 @@ def validate_controller_run(
 
 
 def validate_source_run(run: object, request: Mapping[str, Any]) -> None:
-    payload = exact_keys(run, set(run) if isinstance(run, dict) else set(), "source run")
+    payload = exact_keys(
+        run, set(run) if isinstance(run, dict) else set(), "source run"
+    )
     source = request["source"]
     repository = payload.get("repository")
     head_repository = payload.get("head_repository")
@@ -351,33 +348,18 @@ def validate_source_run(run: object, request: Mapping[str, Any]) -> None:
         fail("source run does not match the active App-dispatched producer run")
 
 
-def validate_installation(
-    installation: object,
+def validate_app_token_scope(
     repositories: object,
     *,
     app_slug: str,
     installation_id: int,
 ) -> None:
-    payload = exact_keys(
-        installation,
-        set(installation) if isinstance(installation, dict) else set(),
-        "App installation",
-    )
-    account = payload.get("account")
-    permissions = payload.get("permissions")
-    if not isinstance(account, dict) or not isinstance(permissions, dict):
-        fail("App installation response is incomplete")
     if (
         app_slug != APP_SLUG
         or installation_id != APP_INSTALLATION_ID
-        or payload.get("id") != APP_INSTALLATION_ID
-        or payload.get("app_slug") != APP_SLUG
-        or payload.get("repository_selection") != "selected"
-        or payload.get("target_type") != "Organization"
-        or account.get("login") != "lightning-it"
-        or permissions != APP_PERMISSIONS
+        or not isinstance(repositories, list)
     ):
-        fail("App installation identity, selection, or permission matrix differs")
+        fail("App identity or token repository scope is invalid")
     if repositories != [SOURCE_REPOSITORY]:
         fail("read token repository scope is not exactly the Golden Path producer")
 
@@ -432,7 +414,9 @@ def validate_candidate_archive(path: Path, request: Mapping[str, Any]) -> None:
                 fail("candidate MANIFEST.json cannot be read")
             manifest = strict_loads(stream.read().decode("utf-8"), "candidate MANIFEST")
     except (OSError, tarfile.TarError, UnicodeDecodeError) as error:
-        raise ContractError("candidate archive is not a valid bounded collection") from error
+        raise ContractError(
+            "candidate archive is not a valid bounded collection"
+        ) from error
     info = manifest.get("collection_info") if isinstance(manifest, dict) else None
     if not isinstance(info, dict) or (
         info.get("namespace") != "lit"
@@ -464,12 +448,17 @@ def download_candidate(request: Mapping[str, Any], output_directory: Path) -> Pa
     credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
     request_object = urllib.request.Request(
         nexus["url"],
-        headers={"Authorization": f"Basic {credentials}", "Accept": "application/octet-stream"},
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Accept": "application/octet-stream",
+        },
         method="GET",
     )
     opener = urllib.request.build_opener(NoRedirects())
     try:
-        with opener.open(request_object, timeout=120) as response, temporary.open("xb") as stream:
+        with opener.open(request_object, timeout=120) as response, temporary.open(
+            "xb"
+        ) as stream:
             if response.status != 200 or response.geturl() != nexus["url"]:
                 fail("Nexus did not return the exact immutable artifact endpoint")
             written = 0
@@ -587,9 +576,10 @@ def command_validate(args: argparse.Namespace) -> None:
         run_id=args.run_id,
         run_attempt=args.run_attempt,
     )
-    validate_source_run(read_json(args.source_run, "source run", maximum=512 * 1024), request)
-    validate_installation(
-        read_json(args.installation, "App installation", maximum=512 * 1024),
+    validate_source_run(
+        read_json(args.source_run, "source run", maximum=512 * 1024), request
+    )
+    validate_app_token_scope(
         read_json(args.installation_repositories, "App token repositories"),
         app_slug=args.app_slug,
         installation_id=args.installation_id,
@@ -648,7 +638,6 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--run-attempt", type=int, required=True)
     validate.add_argument("--controller-run", type=Path, required=True)
     validate.add_argument("--source-run", type=Path, required=True)
-    validate.add_argument("--installation", type=Path, required=True)
     validate.add_argument("--installation-repositories", type=Path, required=True)
     validate.add_argument("--app-slug", required=True)
     validate.add_argument("--installation-id", type=int, required=True)
