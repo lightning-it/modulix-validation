@@ -5,4 +5,5 @@ self-hosted-runner:
     - x64
     - incus
     - nested-virt
+    - keycloak-test
     - aap
