@@ -362,6 +362,32 @@ class CandidateValidationUnitTests(unittest.TestCase):
             self.assertEqual(candidate_bytes, result.read_bytes())
             self.assertEqual(1, opener.open.call_count)
 
+    def test_profile_matrix_rejects_every_unapproved_runner_route(self):
+        expected = list(MODULE.APPROVED_PROFILE_RUNNERS["heavy"])
+        valid = {"include": [{"profile": "heavy", "runner": expected}]}
+        MODULE.validate_profile_matrix("heavy", json.dumps(valid))
+        for replacement in (
+            expected[:-1],
+            [*expected, "unapproved-runner"],
+            "self-hosted",
+            ["self-hosted", "linux", "x64", "incus", "keycloak-test"],
+        ):
+            candidate = {"include": [{"profile": "heavy", "runner": replacement}]}
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(
+                MODULE.ContractError, "exact approved protected Incus"
+            ):
+                MODULE.validate_profile_matrix("heavy", json.dumps(candidate))
+
+        malformed = {"include": [{"profile": "heavy", "runner": [True]}]}
+        with self.assertRaises(MODULE.ContractError):
+            MODULE.validate_profile_matrix("heavy", json.dumps(malformed))
+
+        wrong_profile = {
+            "include": [{"profile": "application_acceptance", "runner": expected}]
+        }
+        with self.assertRaises(MODULE.ContractError):
+            MODULE.validate_profile_matrix("heavy", json.dumps(wrong_profile))
+
 
 class CandidateValidationWorkflowContractTests(unittest.TestCase):
     @classmethod
@@ -420,6 +446,16 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
                 "mlx90-security-candidate-validation",
                 jobs[job]["with"]["environment-name"],
             )
+
+    def test_untrusted_profile_matrix_is_checked_before_delegation(self):
+        matrix_step = next(
+            step
+            for step in self.workflow["jobs"]["nexus-readback"]["steps"]
+            if step.get("id") == "matrix"
+        )
+        self.assertEqual(2, matrix_step["run"].count("validate-profile-matrix"))
+        for profile in ("heavy", "application_acceptance"):
+            self.assertIn(f"--profile {profile}", matrix_step["run"])
 
     def test_both_real_profiles_consume_the_same_nexus_artifact(self):
         jobs = self.workflow["jobs"]

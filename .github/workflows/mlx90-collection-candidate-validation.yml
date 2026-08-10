@@ -294,6 +294,11 @@ jobs:
           )"
           python3 -c 'import json,sys; assert json.loads(sys.argv[1])["include"]' "$heavy"
           python3 -c 'import json,sys; assert json.loads(sys.argv[1])["include"]' "$acceptance"
+          python3 .modulix-validation/scripts/mlx90-collection-candidate-validation.py \
+            validate-profile-matrix --profile heavy --matrix-json "$heavy"
+          python3 .modulix-validation/scripts/mlx90-collection-candidate-validation.py \
+            validate-profile-matrix \
+            --profile application_acceptance --matrix-json "$acceptance"
           {
             echo "heavy-matrix=$heavy"
             echo "acceptance-matrix=$acceptance"

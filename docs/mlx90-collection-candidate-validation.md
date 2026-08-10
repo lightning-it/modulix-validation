@@ -82,8 +82,8 @@ secret values:
 
 The environment must have no required reviewers and must allow only the
 protected `main` branch. The Incus runner must be supplied through the
-declarative ephemeral runner controller with at least
-`self-hosted`, `linux`, `x64`, `incus`, and `keycloak-test` labels. A manually
+declarative ephemeral runner controller with the exact labels `self-hosted`,
+`linux`, `x64`, `incus`, `nested-virt`, and `keycloak-test`. A manually
 registered or manually approved runner is not acceptance evidence.
 
 Nexus must run version 3.93.1 or later with the `AnsibleGalaxyToken` realm and

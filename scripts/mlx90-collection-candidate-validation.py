@@ -54,6 +54,24 @@ ARTIFACT_NAME = re.compile(
     r"lit-supplementary-(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.tar\.gz\Z"
 )
+APPROVED_PROFILE_RUNNERS = {
+    "heavy": (
+        "self-hosted",
+        "linux",
+        "x64",
+        "incus",
+        "nested-virt",
+        "keycloak-test",
+    ),
+    "application_acceptance": (
+        "self-hosted",
+        "linux",
+        "x64",
+        "incus",
+        "nested-virt",
+        "keycloak-test",
+    ),
+}
 
 
 class ContractError(ValueError):
@@ -289,6 +307,35 @@ def validate_request(
     }:
         fail("request controller binding differs from the executing protected main SHA")
     return dict(request)
+
+
+def validate_profile_matrix(profile: str, matrix_json: str) -> None:
+    """Reject producer-controlled matrix runner routing before secret exposure."""
+
+    approved_runner = APPROVED_PROFILE_RUNNERS.get(profile)
+    if approved_runner is None:
+        fail("profile has no approved protected runner contract")
+    matrix = strict_loads(matrix_json, "profile matrix")
+    if not isinstance(matrix, dict) or set(matrix) != {"include"}:
+        fail("profile matrix must contain exactly one include list")
+    cells = matrix["include"]
+    if not isinstance(cells, list) or not cells:
+        fail("profile matrix include must be a non-empty list")
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            fail(f"profile matrix include[{index}] must be an object")
+        if cell.get("profile") != profile:
+            fail(f"profile matrix include[{index}] profile differs from dispatch")
+        runner = cell.get("runner")
+        if (
+            not isinstance(runner, list)
+            or any(not isinstance(label, str) for label in runner)
+            or tuple(runner) != approved_runner
+        ):
+            fail(
+                f"profile matrix include[{index}] runner is not the exact approved "
+                "protected Incus label set"
+            )
 
 
 def validate_controller_run(
@@ -595,6 +642,10 @@ def command_readback(args: argparse.Namespace) -> None:
     print(destination)
 
 
+def command_validate_profile_matrix(args: argparse.Namespace) -> None:
+    validate_profile_matrix(args.profile, args.matrix_json)
+
+
 def command_receipt(args: argparse.Namespace) -> None:
     for label, result in (
         ("validate", args.validate_result),
@@ -649,6 +700,11 @@ def build_parser() -> argparse.ArgumentParser:
     readback.add_argument("--request-id", required=True)
     readback.add_argument("--output-directory", type=Path, required=True)
     readback.set_defaults(handler=command_readback)
+
+    matrix = commands.add_parser("validate-profile-matrix")
+    matrix.add_argument("--profile", required=True)
+    matrix.add_argument("--matrix-json", required=True)
+    matrix.set_defaults(handler=command_validate_profile_matrix)
 
     receipt = commands.add_parser("create-receipt")
     receipt.add_argument("--request", type=Path, required=True)
