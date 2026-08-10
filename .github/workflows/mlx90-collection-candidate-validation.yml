@@ -109,6 +109,7 @@ jobs:
           APP_INSTALLATION_ID: ${{ steps.producer-app.outputs.installation-id }}
           APP_SLUG: ${{ steps.producer-app.outputs.app-slug }}
           EVIDENCE_ROOT: ${{ steps.evidence.outputs.root }}
+          GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           REQUEST_ID: ${{ inputs.request_id }}
           REQUEST_JSON: ${{ inputs.request_json }}
         run: |
@@ -320,8 +321,6 @@ jobs:
       source-repository: lightning-it/ansible-collection-supplementary
       source-token-mode: release-automation-app
       environment-name: mlx90-security-candidate-validation
-    secrets:
-      RELEASE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
   application-acceptance:
     name: Application Acceptance / exact Nexus candidate
@@ -337,8 +336,6 @@ jobs:
       source-repository: lightning-it/ansible-collection-supplementary
       source-token-mode: release-automation-app
       environment-name: mlx90-security-candidate-validation
-    secrets:
-      RELEASE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
   receipt:
     name: Sign validation receipt

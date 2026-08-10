@@ -400,6 +400,27 @@ class CandidateValidationWorkflowContractTests(unittest.TestCase):
             jobs["nexus-readback"]["runs-on"],
         )
 
+    def test_dispatch_identity_and_environment_secret_boundary_are_explicit(self):
+        jobs = self.workflow["jobs"]
+        validate_step = next(
+            step
+            for step in jobs["validate"]["steps"]
+            if step.get("id") == "bind"
+        )
+        self.assertEqual(
+            "${{ github.triggering_actor }}",
+            validate_step["env"]["GITHUB_TRIGGERING_ACTOR"],
+        )
+        self.assertIn(
+            '--triggering-actor "$GITHUB_TRIGGERING_ACTOR"', validate_step["run"]
+        )
+        for job in ("heavy", "application-acceptance"):
+            self.assertNotIn("secrets", jobs[job])
+            self.assertEqual(
+                "mlx90-security-candidate-validation",
+                jobs[job]["with"]["environment-name"],
+            )
+
     def test_both_real_profiles_consume_the_same_nexus_artifact(self):
         jobs = self.workflow["jobs"]
         for job, profile in (
