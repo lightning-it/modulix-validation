@@ -18,12 +18,12 @@ page `2875654145` and classifies every current descendant as directly
 validated, delegated, or disposition-excluded. Its
 excluded subtree roots are justified by the version-pinned Content State and
 Disposition Manifest (`PGE-CONF-DISP-001`, page `2892759041`, Confluence
-version 13, document version 2.1) and Item Level Content Disposition Register
-(`PGE-CONF-DISP-001-R`, page `2892890133`, Confluence version 11, document
-version 2.1). A live or offline run fails if
+version 14, document version 2.2) and Item Level Content Disposition Register
+(`PGE-CONF-DISP-001-R`, page `2892890133`, Confluence version 12, document
+version 2.2). A live or offline run fails if
 either authority page is absent from the included inventory or its Confluence
-version differs. The reviewed full scan fixes the canonical inventory at 792
-content nodes: 778 pages and 14 folders. Of the pages, 52 are validated
+version differs. The reviewed full scan fixes the canonical inventory at 793
+content nodes: 779 pages and 14 folders. Of the pages, 53 are validated
 directly under the product profile, 40 Product
 Decision pages are delegated to `pge-product-decisions`, 11 Template Library
 pages are delegated to `pge-template-library`, and 675 pages are below 69
@@ -44,10 +44,10 @@ product and Product Decisions targets plus the coupled Template Library and
 Artifact Catalog targets, so delegated coverage cannot be omitted. The Catalog
 root remains directly validated in the canonical count and is also selected as
 the alignment source; the report does not count that second validation inside
-the 792-node canonical inventory. The Product Decisions, Template Library, and
+the 793-node canonical inventory. The Product Decisions, Template Library, and
 Artifact Catalog targets respectively bind `40 + 0 = 40`, `11 + 0 = 11`, and
 `1 + 0 = 1` page/non-page/content counts. The LIT-PIS engagement target binds
-389 pages plus nine current embeds, for 398 content nodes. The embeds are
+390 pages plus nine current embeds, for 399 content nodes. The embeds are
 inventoried and digested, not counted as pages. A
 root, traversal mode, count, exclusion, or authority-version change therefore
 requires the same pull request review as validator code.

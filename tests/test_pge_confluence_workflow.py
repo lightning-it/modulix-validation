@@ -212,12 +212,12 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
             )
         canonical = targets["pge-canonical-product"]
         self.assertEqual("2875654145", canonical["root_page_id"])
-        self.assertEqual(778, canonical["expected_page_count"])
+        self.assertEqual(779, canonical["expected_page_count"])
         self.assertEqual(14, canonical["expected_non_page_count"])
-        self.assertEqual(792, canonical["expected_content_count"])
+        self.assertEqual(793, canonical["expected_content_count"])
         self.assertEqual(
             {
-                "direct_validated": 52,
+                "direct_validated": 53,
                 "delegated": 51,
                 "disposition_excluded": 675,
             },
@@ -236,7 +236,7 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
             tuple(canonical["excluded_subtree_root_ids"]),
         )
         self.assertEqual(
-            {("2892759041", 13), ("2892890133", 11)},
+            {("2892759041", 14), ("2892890133", 12)},
             {
                 (authority["page_id"], authority["version"])
                 for authority in canonical["exclusion_authorities"]
@@ -290,7 +290,7 @@ class PgeConfluenceWorkflowTests(unittest.TestCase):
         )
         self.assertEqual("page-only", targets["pge-artifact-catalog"]["traversal"])
         self.assertEqual(
-            (389, 9, 398),
+            (390, 9, 399),
             tuple(
                 targets["lit-pis-engagement"][key]
                 for key in (
