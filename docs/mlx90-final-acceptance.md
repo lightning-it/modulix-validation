@@ -9,8 +9,9 @@ digest, and an immutable acceptance profile specific to the security fix.
 The workflow and profile allowlist are foundations, not evidence that a release
 has passed. The historical `lit.supplementary/mlx90-fixture` profile remains
 `releaseEligible: false` with a non-success command. The separately reviewed
-`lit.supplementary/forgejo-manifest-secret-permissions-v1` profile is the only
-release-eligible profile. It cannot produce a `delivered` result without the
+`lit.supplementary/forgejo-manifest-secret-permissions-v1` and
+`lit.supplementary/keycloak-26.7.1-security-v1` profiles are the only
+release-eligible profiles. Neither can produce a `delivered` result without the
 matching authoritative producer evidence, immutable container evidence, and
 all live finalizer checks.
 
@@ -434,6 +435,16 @@ as `root:root` with mode `0600`. The profile does not fetch code, accept a
 free-form command, or read a credential. Its successful exit is one required
 observation; it is never a substitute for signed producer/container evidence
 or the final revocation check.
+
+The Keycloak profile is independently fixed to the packaged
+`scripts/verify-keycloak-26.7.1-security.py` verifier at
+`sha256:3b2e895b0e875458f769543736ee56eb80eb195d0c8456591ec40c5c5cf49f85`.
+That verifier fails unless the installed collection binds the official
+Keycloak `26.7.1` OCI index digest
+`sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6`
+in the role default, identity-stack manifest, and source-dependency inventory.
+The verifier digest is checked before Python executes, so the Security
+candidate cannot replace its own acceptance logic.
 
 ## Local verification
 
