@@ -519,6 +519,304 @@ def check_managed_assets() -> None:
         raise AssertionError(f"stale provenance inventory entries: {', '.join(stale)}")
 
 
+def check_pge_confluence_conformance_assets() -> None:
+    """Keep the governed documentation validator bound to reviewed assets."""
+    required_paths = [
+        ROOT / ".github" / "scripts" / "pge-confluence-conformance.py",
+        ROOT / ".github" / "workflows" / "pge-confluence-conformance.yml",
+        ROOT / "inventories" / "pge" / "confluence-conformance.json",
+        ROOT / "docs" / "pge-confluence-conformance.md",
+        ROOT / "tests" / "test_pge_confluence_conformance.py",
+        ROOT / "tests" / "test_pge_confluence_workflow.py",
+    ]
+    for path in required_paths:
+        if path.is_symlink() or not path.is_file():
+            raise AssertionError(
+                "PGE Confluence conformance asset is missing or not a regular file: "
+                f"{path.relative_to(ROOT)}"
+            )
+
+    config_path = ROOT / "inventories" / "pge" / "confluence-conformance.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AssertionError("PGE Confluence target inventory is invalid JSON") from exc
+    if not isinstance(config, dict) or config.get("schema_version") != 1:
+        raise AssertionError("PGE Confluence target inventory schema_version must be 1")
+    if config.get("allowed_confluence_origin") != "https://wiki.cloud.l-it.io":
+        raise AssertionError(
+            "PGE Confluence target inventory must remain bound to the reviewed origin"
+        )
+    targets = config.get("targets")
+    if not isinstance(targets, list) or not targets:
+        raise AssertionError("PGE Confluence target inventory needs targets")
+    names: set[str] = set()
+    roots: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict):
+            raise AssertionError("PGE Confluence targets must be objects")
+        name = target.get("name")
+        root_page_id = target.get("root_page_id")
+        profile = target.get("profile")
+        traversal = target.get("traversal")
+        expected_page_count = target.get("expected_page_count")
+        expected_non_page_count = target.get("expected_non_page_count")
+        expected_content_count = target.get("expected_content_count")
+        excluded_roots = target.get("excluded_subtree_root_ids", [])
+        exclusion_authorities = target.get("exclusion_authorities", [])
+        delegated_subtrees = target.get("delegated_subtree_targets", [])
+        classification_counts = target.get("expected_classification_counts")
+        non_page_classification_counts = target.get(
+            "expected_non_page_classification_counts"
+        )
+        expected_page_count_is_valid = (
+            isinstance(expected_page_count, int)
+            and not isinstance(expected_page_count, bool)
+            and expected_page_count > 0
+        )
+        expected_non_page_count_is_valid = (
+            isinstance(expected_non_page_count, int)
+            and not isinstance(expected_non_page_count, bool)
+            and expected_non_page_count >= 0
+        )
+        expected_content_count_is_valid = (
+            isinstance(expected_content_count, int)
+            and not isinstance(expected_content_count, bool)
+            and expected_content_count > 0
+        )
+        excluded_roots_are_valid = (
+            isinstance(excluded_roots, list)
+            and all(isinstance(value, str) and value.isdigit() for value in excluded_roots)
+            and len(excluded_roots) == len(set(excluded_roots))
+            and root_page_id not in excluded_roots
+        )
+        authority_ids = (
+            [value.get("page_id") for value in exclusion_authorities]
+            if isinstance(exclusion_authorities, list)
+            and all(isinstance(value, dict) for value in exclusion_authorities)
+            else []
+        )
+        exclusion_authorities_are_valid = (
+            isinstance(exclusion_authorities, list)
+            and all(
+                isinstance(value, dict)
+                and set(value) == {"page_id", "version"}
+                and isinstance(value.get("page_id"), str)
+                and value["page_id"].isdigit()
+                and isinstance(value.get("version"), int)
+                and not isinstance(value["version"], bool)
+                and value["version"] > 0
+                for value in exclusion_authorities
+            )
+            and len(authority_ids) == len(set(authority_ids))
+        )
+        delegated_roots = (
+            [value.get("root_page_id") for value in delegated_subtrees]
+            if isinstance(delegated_subtrees, list)
+            and all(isinstance(value, dict) for value in delegated_subtrees)
+            else []
+        )
+        delegated_subtrees_are_valid = (
+            isinstance(delegated_subtrees, list)
+            and all(
+                isinstance(value, dict)
+                and set(value) == {"root_page_id", "target_name"}
+                and isinstance(value.get("root_page_id"), str)
+                and value["root_page_id"].isdigit()
+                and isinstance(value.get("target_name"), str)
+                and bool(value["target_name"])
+                and value["target_name"] != name
+                for value in delegated_subtrees
+            )
+            and len(delegated_roots) == len(set(delegated_roots))
+        )
+        classification_counts_are_valid = classification_counts is None or (
+            isinstance(classification_counts, dict)
+            and set(classification_counts)
+            == {"direct_validated", "delegated", "disposition_excluded"}
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                for value in classification_counts.values()
+            )
+            and expected_page_count is not None
+            and sum(classification_counts.values()) == expected_page_count
+        )
+        non_page_classification_counts_are_valid = (
+            isinstance(non_page_classification_counts, dict)
+            and set(non_page_classification_counts)
+            == {"direct", "delegated", "disposition_excluded"}
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                for value in non_page_classification_counts.values()
+            )
+            and expected_non_page_count_is_valid
+            and sum(non_page_classification_counts.values())
+            == expected_non_page_count
+        )
+        if (
+            not isinstance(name, str)
+            or not name
+            or name in names
+            or not isinstance(root_page_id, str)
+            or not root_page_id.isdigit()
+            or root_page_id in roots
+            or profile not in {"product", "template", "engagement"}
+            or traversal not in {"recursive", "page-only"}
+            or not expected_page_count_is_valid
+            or not expected_non_page_count_is_valid
+            or not expected_content_count_is_valid
+            or expected_page_count + expected_non_page_count
+            != expected_content_count
+            or not excluded_roots_are_valid
+            or not exclusion_authorities_are_valid
+            or not delegated_subtrees_are_valid
+            or not classification_counts_are_valid
+            or not non_page_classification_counts_are_valid
+            or bool(excluded_roots) != bool(exclusion_authorities)
+            or (excluded_roots and traversal != "recursive")
+            or (delegated_subtrees and traversal != "recursive")
+            or any(authority_id in excluded_roots for authority_id in authority_ids)
+            or root_page_id in delegated_roots
+            or any(root_id in excluded_roots for root_id in delegated_roots)
+        ):
+            raise AssertionError("PGE Confluence target inventory contains an invalid target")
+        names.add(name)
+        roots.add(root_page_id)
+    targets_by_name = {target["name"]: target for target in targets}
+    for target in targets:
+        for delegation in target.get("delegated_subtree_targets", []):
+            delegated_target = targets_by_name.get(delegation["target_name"])
+            if (
+                delegated_target is None
+                or delegated_target.get("root_page_id") != delegation["root_page_id"]
+            ):
+                raise AssertionError(
+                    "PGE Confluence delegated subtree does not match its covering target"
+                )
+    canonical_targets = [
+        target for target in targets if target.get("name") == "pge-canonical-product"
+    ]
+    if len(canonical_targets) != 1:
+        raise AssertionError("PGE Confluence inventory needs the canonical product target")
+    canonical = canonical_targets[0]
+    if (
+        canonical.get("root_page_id") != "2875654145"
+        or canonical.get("expected_page_count") != 778
+        or canonical.get("expected_non_page_count") != 14
+        or canonical.get("expected_content_count") != 792
+        or len(canonical.get("excluded_subtree_root_ids", [])) != 69
+        or canonical.get("expected_classification_counts")
+        != {
+            "direct_validated": 52,
+            "delegated": 51,
+            "disposition_excluded": 675,
+        }
+        or canonical.get("expected_non_page_classification_counts")
+        != {
+            "direct": 0,
+            "delegated": 0,
+            "disposition_excluded": 14,
+        }
+        or {
+            (authority.get("page_id"), authority.get("version"))
+            for authority in canonical.get("exclusion_authorities", [])
+        }
+        != {("2892759041", 13), ("2892890133", 11)}
+        or canonical.get("delegated_subtree_targets")
+        != [
+            {
+                "root_page_id": "2882765966",
+                "target_name": "pge-product-decisions",
+            },
+            {
+                "root_page_id": "2891710468",
+                "target_name": "pge-template-library",
+            },
+        ]
+    ):
+        raise AssertionError(
+            "PGE canonical product scope or exclusion authority versions changed"
+        )
+    expected_target_counts = {
+        "pge-canonical-product": (778, 14, 792),
+        "pge-product-decisions": (40, 0, 40),
+        "pge-template-library": (11, 0, 11),
+        "pge-artifact-catalog": (1, 0, 1),
+        "lit-pis-engagement": (389, 9, 398),
+    }
+    actual_target_counts = {
+        name: (
+            target.get("expected_page_count"),
+            target.get("expected_non_page_count"),
+            target.get("expected_content_count"),
+        )
+        for name, target in targets_by_name.items()
+    }
+    if actual_target_counts != expected_target_counts:
+        raise AssertionError(
+            "PGE Confluence target page, non-page, or content counts changed"
+        )
+    for alignment in config.get("alignments", []):
+        product_sources = (
+            alignment.get("product_source_artifacts")
+            if isinstance(alignment, dict)
+            else None
+        )
+        if (
+            not isinstance(alignment, dict)
+            or not isinstance(alignment.get("name"), str)
+            or not alignment["name"]
+            or alignment.get("template_target") not in names
+            or alignment.get("catalog_target") not in names
+            or alignment.get("template_target") == alignment.get("catalog_target")
+            or not isinstance(product_sources, list)
+            or any(
+                not isinstance(value, str) or not value.strip()
+                for value in product_sources
+            )
+            or len(product_sources) != len(set(product_sources))
+        ):
+            raise AssertionError("PGE Confluence target inventory contains an invalid alignment")
+
+    workflow = assert_file(
+        ROOT / ".github" / "workflows" / "pge-confluence-conformance.yml"
+    )
+    for contract in (
+        "workflow_dispatch:",
+        "pge-confluence-read-only",
+        "pge-canonical-product",
+        "pge-product-baseline)",
+        "--target pge-product-decisions",
+        "--target pge-template-library",
+        "--target pge-artifact-catalog",
+        'test "${GITHUB_REF}" = "refs/heads/main"',
+        "--redact-details",
+        "PGE_CONFLUENCE_API_TOKEN: ${{ secrets.PGE_CONFLUENCE_API_TOKEN }}",
+    ):
+        if contract not in workflow:
+            raise AssertionError(
+                f"PGE Confluence workflow is missing protected contract {contract!r}"
+            )
+    if "--snapshot-out" in workflow:
+        raise AssertionError("PGE Confluence workflow must not upload live snapshots")
+    if workflow.count("secrets.PGE_CONFLUENCE_") != 2:
+        raise AssertionError("PGE Confluence secrets must appear only in the audit step")
+
+    readme = assert_file(ROOT / "README.md")
+    if "docs/pge-confluence-conformance.md" not in readme:
+        raise AssertionError("README.md does not link the PGE Confluence validator")
+    ignore = assert_file(ROOT / ".gitignore")
+    for ignored_path in (".pge-conformance/", "evidence/", "snapshots/"):
+        if ignored_path not in ignore.splitlines():
+            raise AssertionError(
+                f".gitignore does not exclude PGE evidence path {ignored_path}"
+            )
+
+
 def main() -> int:
     try:
         meta = metadata()
@@ -527,6 +825,7 @@ def main() -> int:
         check_markdown()
         check_embedded_code()
         check_managed_assets()
+        check_pge_confluence_conformance_assets()
         repo_type = meta.get("repository_type", "")
         check_terraform(repo_type)
         check_helm(repo_type)

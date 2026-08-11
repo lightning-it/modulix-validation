@@ -1,0 +1,147 @@
+# yamllint disable rule:truthy
+---
+name: PGE Confluence Conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_scope:
+        description: Fixed, reviewed documentation scope to validate
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - pge-product-baseline
+          - pge-templates-and-catalog
+          - lit-pis-engagement
+      warnings_as_errors:
+        description: Fail the acceptance run on warnings
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pge-confluence-conformance
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: confluence / authorize immutable source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require the protected main revision
+        env:
+          EXPECTED_REPOSITORY: lightning-it/modulix-validation
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "${EXPECTED_REPOSITORY}"
+          test "${GITHUB_REF}" = "refs/heads/main"
+
+  audit:
+    name: confluence / read-only documentation audit
+    needs: authorize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: pge-confluence-read-only
+
+    steps:
+      - name: Checkout the authorized validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.13"
+
+      - name: Verify the offline validator contracts
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+            tests/test_pge_confluence_conformance.py \
+            tests/test_pge_confluence_workflow.py
+          python3 -m py_compile \
+            .github/scripts/pge-confluence-conformance.py
+
+      - name: Run the bounded read-only Confluence audit
+        id: conformance
+        env:
+          AUDIT_SCOPE: ${{ inputs.audit_scope }}
+          PGE_CONFLUENCE_API_TOKEN: ${{ secrets.PGE_CONFLUENCE_API_TOKEN }}
+          PGE_CONFLUENCE_BASE_URL: ${{ vars.PGE_CONFLUENCE_BASE_URL }}
+          PGE_CONFLUENCE_USER_EMAIL: ${{ secrets.PGE_CONFLUENCE_USER_EMAIL }}
+          WARNINGS_AS_ERRORS: ${{ inputs.warnings_as_errors }}
+        run: |
+          set -euo pipefail
+          umask 077
+          report_dir="${RUNNER_TEMP}/pge-confluence-conformance"
+          install -d -m 0700 "${report_dir}"
+          arguments=(
+            --config inventories/pge/confluence-conformance.json
+            --json-report "${report_dir}/conformance-report.json"
+            --markdown-report "${report_dir}/conformance-report.md"
+            --redact-details
+          )
+          case "${AUDIT_SCOPE}" in
+            all) ;;
+            pge-product-baseline)
+              arguments+=(
+                --target pge-canonical-product
+                --target pge-product-decisions
+                --target pge-template-library
+                --target pge-artifact-catalog
+              )
+              ;;
+            pge-templates-and-catalog)
+              arguments+=(
+                --target pge-template-library
+                --target pge-artifact-catalog
+              )
+              ;;
+            lit-pis-engagement)
+              arguments+=(--target lit-pis-engagement)
+              ;;
+            *)
+              echo "Unsupported fixed audit scope" >&2
+              exit 2
+              ;;
+          esac
+          if [ "${WARNINGS_AS_ERRORS}" = "true" ]; then
+            arguments+=(--warnings-as-errors)
+          fi
+          set +e
+          python3 .github/scripts/pge-confluence-conformance.py \
+            "${arguments[@]}"
+          result=$?
+          set -e
+          test -f "${report_dir}/conformance-report.json"
+          test -f "${report_dir}/conformance-report.md"
+          echo "has_report=true" >> "${GITHUB_OUTPUT}"
+          exit "${result}"
+
+      - name: Publish the sanitized summary
+        if: ${{ always() && steps.conformance.outputs.has_report == 'true' }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/pge-confluence-conformance/conformance-report.md"
+          test -f "${report}"
+          sed -n '1,18p' "${report}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload sanitized conformance evidence
+        if: ${{ always() && steps.conformance.outputs.has_report == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pge-conformance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: >-
+            ${{ runner.temp }}/pge-confluence-conformance/conformance-report.*
+          if-no-files-found: error
+          retention-days: 14
