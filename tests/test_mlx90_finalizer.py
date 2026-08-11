@@ -885,6 +885,23 @@ class FinalizerTests(unittest.TestCase):
             ],
             forgejo_profile["containerCommand"],
         )
+        keycloak_profile = MODULE.eligible_profile(
+            repository_profiles,
+            "lit.supplementary/keycloak-26.7.1-security-v1",
+        )
+        self.assertEqual(
+            [
+                "/bin/bash",
+                "-ceu",
+                "script=/usr/share/ansible/collections/ansible_collections/lit/"
+                "supplementary/scripts/verify-keycloak-26.7.1-security.py; "
+                'test -f "$script"; test ! -L "$script"; '
+                'test "$(sha256sum "$script" | cut -d\' \' -f1)" = '
+                '"3b2e895b0e875458f769543736ee56eb80eb195d0c8456591ec40c5c5cf49f85"; '
+                'exec python3 "$script"',
+            ],
+            keycloak_profile["containerCommand"],
+        )
         with self.assertRaisesRegex(ValueError, "non-releaseable"):
             MODULE.eligible_profile(
                 repository_profiles, "lit.supplementary/mlx90-fixture"
@@ -2441,6 +2458,7 @@ class FinalizerTests(unittest.TestCase):
     def test_profile_id_is_bounded_and_has_exactly_two_segments(self):
         existing = (
             self.profile,
+            "lit.supplementary/keycloak-26.7.1-security-v1",
             "lit.supplementary/mlx90-fixture",
         )
         for value in existing:
