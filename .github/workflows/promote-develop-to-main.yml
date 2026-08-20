@@ -72,12 +72,15 @@ jobs:
           fi
 
       - name: Create or update protected promotion
+        id: exact-review-target
         env:
           GH_TOKEN: ${{ steps.release-app.outputs.token }}
           REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           title='chore(release): promote develop to main'
+          transition_title='chore(release): promote develop to main (REP-60 protected transition)'
           token_header="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
           echo "::add-mask::${token_header}"
 
@@ -89,6 +92,67 @@ jobs:
 
           if ! git merge-base --is-ancestor origin/main origin/develop; then
             echo '::error::develop does not contain the current main ancestry; wait for the protected backmerge.'
+            exit 1
+          fi
+          if ! changed_paths_text="$(git diff --name-only origin/main origin/develop --)"; then
+            echo '::error::Unable to determine the exact main-to-develop path delta.'
+            exit 1
+          fi
+          changed_paths=()
+          if [ -n "${changed_paths_text}" ]; then
+            mapfile -t changed_paths <<<"${changed_paths_text}"
+          fi
+          if [ "${#changed_paths[@]}" -eq 1 ] \
+            && [ "${changed_paths[0]}" = .lit/main-ancestry.json ]; then
+            if ! main_sha="$(git rev-parse origin/main)"; then
+              echo '::error::The protected main ref is not readable.'
+              exit 1
+            fi
+            if ! outer_parents="$(git show -s --format=%P origin/develop)"; then
+              echo '::error::The protected develop tip is not readable.'
+              exit 1
+            fi
+            read -r outer_develop_parent inner_merge unexpected_outer_parent \
+              <<<"${outer_parents}"
+            if [ -z "${outer_develop_parent}" ] \
+              || [ -z "${inner_merge}" ] \
+              || [ -n "${unexpected_outer_parent:-}" ]; then
+              echo '::error::The ancestry-only develop delta is not a two-parent protected PR merge.'
+              exit 1
+            fi
+            if ! inner_parents="$(git show -s --format=%P "${inner_merge}")"; then
+              echo '::error::The protected inner ancestry merge is not readable.'
+              exit 1
+            fi
+            read -r inner_develop_parent inner_main_parent unexpected_inner_parent \
+              <<<"${inner_parents}"
+            if [ -z "${inner_develop_parent}" ] \
+              || [ -z "${inner_main_parent}" ] \
+              || [ -n "${unexpected_inner_parent:-}" ]; then
+              echo '::error::The protected inner ancestry merge does not have exactly two parents.'
+              exit 1
+            fi
+            if ! evidence="$(git show origin/develop:.lit/main-ancestry.json)"; then
+              echo '::error::The protected main-ancestry evidence is not readable.'
+              exit 1
+            fi
+            if [ "${inner_develop_parent}" = "${outer_develop_parent}" ] \
+              && [ "${inner_main_parent}" = "${main_sha}" ] \
+              && jq -e \
+                --arg repository "${REPOSITORY}" \
+                --arg main_sha "${main_sha}" \
+                --arg develop_parent_sha "${outer_develop_parent}" \
+                '(keys | sort) == ["develop_parent_sha", "main_sha", "purpose", "repository", "schema_version"]
+                 and .schema_version == 1
+                 and .repository == $repository
+                 and .main_sha == $main_sha
+                 and .develop_parent_sha == $develop_parent_sha
+                 and .purpose == "Bind the reviewed main ancestry backmerge."' \
+                <<<"${evidence}" >/dev/null; then
+              echo 'Only the exact protected main-ancestry evidence changed; no promotion or AI review is needed.'
+              exit 0
+            fi
+            echo '::error::The ancestry-only develop delta does not match the protected backmerge contract.'
             exit 1
           fi
           if git diff --quiet origin/main origin/develop; then
@@ -117,14 +181,70 @@ jobs:
             pr_number="${pr_url##*/}"
           fi
 
-          gh pr view "${pr_number}" \
+          promotion="$(gh pr view "${pr_number}" \
             --repo "${REPOSITORY}" \
-            --json author,baseRefName,headRefName,headRepositoryOwner,title \
-          | jq -e --arg title "${title}" \
+            --json author,baseRefName,baseRefOid,headRefName,headRefOid,headRepositoryOwner,isDraft,title)"
+          promotion_title="$(jq -r .title <<<"${promotion}")"
+          if [ "${REPOSITORY}" = lightning-it/shared-assets-lit ] \
+            && [ "${pr_number}" = 1047 ] \
+            && [ "${promotion_title}" = "${transition_title}" ]; then
+            # Normalize the already-open bootstrap PR. The App may edit its own
+            # title, but it intentionally never changes Draft/Ready state.
+            gh api --method PATCH "repos/${REPOSITORY}/pulls/${pr_number}" \
+              -f "title=${title}" >/dev/null
+            promotion="$(gh pr view "${pr_number}" \
+              --repo "${REPOSITORY}" \
+              --json author,baseRefName,baseRefOid,headRefName,headRefOid,headRepositoryOwner,isDraft,title)"
+          fi
+          jq -e --arg expected_head "$(git rev-parse origin/develop)" \
+              --arg owner "${REPOSITORY_OWNER}" \
+              --arg title "${title}" \
               '.author.login == "app/lightning-it-release-automation"
                and .baseRefName == "main"
                and .headRefName == "develop"
-               and .headRepositoryOwner.login == "lightning-it"
+               and .headRefOid == $expected_head
+               and .headRepositoryOwner.login == $owner
+               and .isDraft == false
                and .title == $title' \
+              <<<"${promotion}" \
             | grep -qx true
+          {
+            echo "pr_number=${pr_number}"
+            echo "base_ref=$(jq -r .baseRefName <<<"${promotion}")"
+            echo "expected_base=$(jq -r .baseRefOid <<<"${promotion}")"
+            echo "expected_head=$(jq -r .headRefOid <<<"${promotion}")"
+          } >>"${GITHUB_OUTPUT}"
           echo "Promotion PR ${pr_number} is ready for protected Human approval and Current-Head checks."
+
+      - name: Mint protected review dispatch token
+        if: steps.exact-review-target.outputs.pr_number != ''
+        id: review-dispatch-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Dispatch protected Exact-Revision review
+        if: steps.exact-review-target.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ steps.review-dispatch-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.exact-review-target.outputs.pr_number }}
+          BASE_REF: ${{ steps.exact-review-target.outputs.base_ref }}
+          EXPECTED_BASE: ${{ steps.exact-review-target.outputs.expected_base }}
+          EXPECTED_HEAD: ${{ steps.exact-review-target.outputs.expected_head }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_BASE}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_HEAD}" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run release-bot-exact-head-review.yml \
+            --repo "${REPOSITORY}" \
+            --ref "${BASE_REF}" \
+            -f "pr_number=${PR_NUMBER}" \
+            -f "base_ref=${BASE_REF}" \
+            -f "expected_base=${EXPECTED_BASE}" \
+            -f "expected_head=${EXPECTED_HEAD}"
