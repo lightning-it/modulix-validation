@@ -160,6 +160,8 @@ jobs:
             exit 0
           fi
 
+          expected_head="$(git rev-parse origin/develop)"
+          head_marker="<!-- lit-promotion-head:${expected_head} -->"
           pr_number="$(
             gh pr list \
               --repo "${REPOSITORY}" \
@@ -169,14 +171,36 @@ jobs:
               --json number \
               --jq '.[0].number // empty'
           )"
+          if [ -n "${pr_number}" ]; then
+            existing="$(gh pr view "${pr_number}" \
+              --repo "${REPOSITORY}" --json author,body)"
+            if ! jq -e \
+              '.author.login == "app/lightning-it-release-automation"' \
+              <<<"${existing}" >/dev/null; then
+              echo '::error::Open develop-to-main PR is not Release-App-owned.'
+              exit 1
+            fi
+            if ! jq -e --arg marker "${head_marker}" '
+              [(.body // "") | split("\n")[] |
+                select(startswith("<!-- lit-promotion-head:"))] == [$marker]
+            ' <<<"${existing}" >/dev/null; then
+              close_comment='Closing consumed or stale promotion PR; '
+              close_comment+='a fresh PR will bind the new develop head.'
+              gh pr close "${pr_number}" \
+                --repo "${REPOSITORY}" --comment "${close_comment}"
+              pr_number=''
+            fi
+          fi
           if [ -z "${pr_number}" ]; then
+            body="${head_marker}"$'\n\n'
+            body+='Automated protected promotion of reviewed changes from develop to main.'
             pr_url="$(
               gh pr create \
                 --repo "${REPOSITORY}" \
                 --base main \
                 --head develop \
                 --title "${title}" \
-                --body "Automated protected promotion of reviewed changes from develop to main."
+                --body "${body}"
             )"
             pr_number="${pr_url##*/}"
           fi
@@ -196,7 +220,7 @@ jobs:
               --repo "${REPOSITORY}" \
               --json author,baseRefName,baseRefOid,headRefName,headRefOid,headRepositoryOwner,isDraft,title)"
           fi
-          jq -e --arg expected_head "$(git rev-parse origin/develop)" \
+          jq -e --arg expected_head "${expected_head}" \
               --arg owner "${REPOSITORY_OWNER}" \
               --arg title "${title}" \
               '.author.login == "app/lightning-it-release-automation"
