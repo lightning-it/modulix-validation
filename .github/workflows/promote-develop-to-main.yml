@@ -22,12 +22,10 @@ concurrency:
 
 jobs:
   promote:
-    # The App authors the PR; the protected normal-release environment still
-    # requires an independent release-team approval before main can advance.
-    if: >-
-      github.repository == 'lightning-it/shared-assets-lit' ||
-      github.repository == 'lightning-it/github-management-lit' ||
-      github.repository == 'lightning-it/modulix-validation'
+    # This protected source is bound only to itself. Every downstream copy is
+    # rendered to exactly one inventory-authorized target before installation;
+    # public repositories never receive the private fleet inventory.
+    if: github.repository == 'lightning-it/modulix-validation'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
