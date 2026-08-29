@@ -353,6 +353,10 @@ Actions and Copilot checks authorize merge. The exception ends once v2 is on
   pin it in `container-ee-wunder-devtools-ubi9`, release that image normally,
   update the centrally managed digest, and rerun the gate. Host fallbacks,
   ad-hoc virtual environments, and unpinned helper images are forbidden.
+- Repository-owned tests derive the exact full Devtools image reference from
+  the centrally managed push-ready engine when checking the installed wrapper;
+  they never hard-code an independent release tag that can drift during a
+  normal image rollout.
 - Defaults stay read-only, offline, socket-free, capability-dropped, and
   non-privileged. A gate may opt into only its explicit tested minimum. Linked
   Git metadata remains read-only and container Git may trust only
