@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "path": "tests/test_wunder_devtools_tmpfs.py",
+      "category": "central-managed",
+      "source": "shared-assets-lit/default/tests/test_wunder_devtools_tmpfs.py",
+      "sha256": "c17ca426f46dc5945585cc7310586468fca4e0c9c31a9b0ed1aae890c1dec95a"
+    }
+  ]
+}
