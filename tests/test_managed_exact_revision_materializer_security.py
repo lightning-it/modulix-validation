@@ -47,8 +47,12 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", rerun)
         self.assertIn("rerun-protected-verifier:", rerun)
         self.assertIn(
-            "github.ref == format('refs/heads/{0}', "
-            "github.event.repository.default_branch)",
+            "".join(
+                (
+                    "github.ref == format('refs/heads/{0}', ",
+                    "github.event.repository.default_branch)",
+                )
+            ),
             rerun,
         )
         self.assertIn(
@@ -56,8 +60,12 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
             rerun,
         )
         self.assertNotIn(
-            "github.ref == format('refs/heads/{0}', "
-            "github.event.pull_request.base.ref)",
+            "".join(
+                (
+                    "github.ref == format('refs/heads/{0}', ",
+                    "github.event.pull_request.base.ref)",
+                )
+            ),
             rerun,
         )
         self.assertNotIn(
@@ -295,7 +303,9 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
                 )
             notes = getattr(raised.exception, "__notes__", ())
             if hasattr(raised.exception, "add_note"):
-                self.assertTrue(any("simulated cleanup failure" in note for note in notes))
+                self.assertTrue(
+                    any("simulated cleanup failure" in note for note in notes),
+                )
             self.assertEqual(b"unchanged", protected.read_bytes())
 
     def test_protected_writer_close_does_not_mask_write_failure(self) -> None:
@@ -345,7 +355,9 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
                 )
             notes = getattr(raised.exception, "__notes__", ())
             if hasattr(raised.exception, "add_note"):
-                self.assertTrue(any("simulated close failure" in note for note in notes))
+                self.assertTrue(
+                    any("simulated close failure" in note for note in notes),
+                )
             self.assertEqual(b"unchanged", protected.read_bytes())
 
     def test_protected_writer_directory_close_failure_fails_closed(self) -> None:
@@ -390,7 +402,9 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
                 )
             notes = getattr(raised.exception, "__notes__", ())
             if hasattr(raised.exception, "add_note"):
-                self.assertTrue(any("simulated directory close failure" in note for note in notes))
+                self.assertTrue(
+                    any("simulated directory close failure" in note for note in notes),
+                )
             self.assertEqual(b"replacement", protected.read_bytes())
 
     def test_protected_writer_preserves_existing_close_note_when_fstat_fails(
@@ -441,7 +455,9 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
                 )
             notes = getattr(raised.exception, "__notes__", ())
             if hasattr(raised.exception, "add_note"):
-                self.assertTrue(any("simulated existing close failure" in note for note in notes))
+                self.assertTrue(
+                    any("simulated existing close failure" in note for note in notes),
+                )
             self.assertEqual(1, close_attempts.count(close_attempts[0]))
             self.assertEqual(b"unchanged", protected.read_bytes())
 
@@ -492,7 +508,9 @@ class ExactRevisionMaterializerTests(unittest.TestCase):
                 )
             notes = getattr(raised.exception, "__notes__", ())
             if hasattr(raised.exception, "add_note"):
-                self.assertTrue(any("simulated directory close failure" in note for note in notes))
+                self.assertTrue(
+                    any("simulated directory close failure" in note for note in notes),
+                )
             self.assertEqual(b"unchanged", protected.read_bytes())
 
     def test_metadata_binding_rejects_non_object(self) -> None:
