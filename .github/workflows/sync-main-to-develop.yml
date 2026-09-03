@@ -20,12 +20,14 @@ jobs:
   backmerge:
     if: github.repository_owner == 'lightning-it'
     runs-on: ubuntu-latest
+    environment: shared-assets-sync
     timeout-minutes: 10
 
     steps:
       - name: Mint release automation App token
         id: release-app
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        if: github.repository != 'lightning-it/.github'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
@@ -34,17 +36,50 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Validate release bot token
-        id: release-bot
+      - name: Mint protected workflow-source App token
+        id: workflow-source-app
+        if: github.repository == 'lightning-it/.github'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.SHARED_ASSETS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SHARED_ASSETS_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Validate ancestry bot token
+        id: ancestry-bot
         env:
-          APP_SLUG: ${{ steps.release-app.outputs.app-slug }}
-          GH_TOKEN: ${{ steps.release-app.outputs.token }}
-          APP_INSTALLATION_ID: ${{ steps.release-app.outputs.installation-id }}
+          APP_SLUG: >-
+            ${{ steps.release-app.outputs.app-slug ||
+            steps.workflow-source-app.outputs.app-slug }}
+          GH_TOKEN: >-
+            ${{ steps.release-app.outputs.token ||
+            steps.workflow-source-app.outputs.token }}
+          APP_INSTALLATION_ID: >-
+            ${{ steps.release-app.outputs.installation-id ||
+            steps.workflow-source-app.outputs.installation-id }}
+          EXPECTED_APP_SLUG: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            'lightning-it-shared-assets-sync' ||
+            'lightning-it-release-automation' }}
+          EXPECTED_BOT_LOGIN: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            'lightning-it-shared-assets-sync[bot]' ||
+            'lightning-it-release-automation[bot]' }}
+          EXPECTED_BOT_PATH: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            'lightning-it-shared-assets-sync%5Bbot%5D' ||
+            'lightning-it-release-automation%5Bbot%5D' }}
+          EXPECTED_INSTALLATION_ID: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            '147922640' || '148019054' }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test "${APP_SLUG}" = "lightning-it-release-automation"
-          test "${APP_INSTALLATION_ID}" = "148019054"
+          test "${APP_SLUG}" = "${EXPECTED_APP_SLUG}"
+          test "${APP_INSTALLATION_ID}" = "${EXPECTED_INSTALLATION_ID}"
           installations="$(
             gh api --paginate --slurp \
               "installation/repositories?per_page=100"
@@ -61,18 +96,25 @@ jobs:
           jq -e --arg repository "${REPOSITORY}" \
             "${repository_filter}" \
             <<<"${installations}" >/dev/null
-          login="$(gh api "users/lightning-it-release-automation%5Bbot%5D" --jq .login)"
-          bot_id="$(gh api "users/lightning-it-release-automation%5Bbot%5D" --jq .id)"
-          if [ "${login}" != "lightning-it-release-automation[bot]" ] || ! [[ "${bot_id}" =~ ^[0-9]+$ ]]; then
-            echo "::error::Release App identity mismatch: expected lightning-it-release-automation[bot]."
+          login="$(gh api "users/${EXPECTED_BOT_PATH}" --jq .login)"
+          bot_id="$(gh api "users/${EXPECTED_BOT_PATH}" --jq .id)"
+          if [ "${login}" != "${EXPECTED_BOT_LOGIN}" ] || ! [[ "${bot_id}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Ancestry App identity mismatch: expected ${EXPECTED_BOT_LOGIN}."
             exit 1
           fi
-          echo "email=${bot_id}+${login}@users.noreply.github.com" >>"${GITHUB_OUTPUT}"
+          {
+            echo "email=${bot_id}+${login}@users.noreply.github.com"
+            echo "login=${login}"
+            echo "pr_author=app/${APP_SLUG}"
+          } >>"${GITHUB_OUTPUT}"
 
-      - name: Create file-identical ancestry backmerge
+      - name: Create reviewable ancestry backmerge
+        id: exact-review-target
         env:
-          BOT_EMAIL: ${{ steps.release-bot.outputs.email }}
-          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          BOT_EMAIL: ${{ steps.ancestry-bot.outputs.email }}
+          BOT_LOGIN: ${{ steps.ancestry-bot.outputs.login }}
+          EXPECTED_PR_AUTHOR: ${{ steps.ancestry-bot.outputs.pr_author }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token || steps.workflow-source-app.outputs.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -86,10 +128,18 @@ jobs:
             fetch --quiet --no-tags origin main develop
           main_short="$(git rev-parse --short=12 origin/main)"
           develop_short="$(git rev-parse --short=12 origin/develop)"
+          main_sha="$(git rev-parse origin/main)"
+          develop_sha="$(git rev-parse origin/develop)"
+          evidence_path='.lit/main-ancestry.json'
           repository_name="${REPOSITORY#*/}"
-          branch="backmerge/${repository_name}-${main_short}-${develop_short}-main"
+          repository_branch_name="${repository_name#.}"
+          if ! [[ "${repository_branch_name}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Unsupported repository name for backmerge branch: ${repository_name}"
+            exit 1
+          fi
+          branch="backmerge/${repository_branch_name}-${main_short}-${develop_short}-main"
           title="chore(governance): record main ancestry before ${main_short}"
-          git config user.name lightning-it-release-automation[bot]
+          git config user.name "${BOT_LOGIN}"
           git config user.email "${BOT_EMAIL}"
           if git merge-base --is-ancestor origin/main origin/develop; then
             echo 'develop already contains the current main ancestry.'
@@ -100,94 +150,337 @@ jobs:
           # Bind the merge object to an existing Git timestamp so retries
           # reproduce the exact same commit and never require a force-update.
           merge_date="$(git show -s --format=%cI origin/main)"
+          git merge --no-ff --no-commit --strategy=ours origin/main
+          mkdir -p "${evidence_path%/*}"
+          jq --null-input --sort-keys \
+            --arg repository "${REPOSITORY}" \
+            --arg main_sha "${main_sha}" \
+            --arg develop_parent_sha "${develop_sha}" \
+            '{
+              schema_version: 1,
+              repository: $repository,
+              main_sha: $main_sha,
+              develop_parent_sha: $develop_parent_sha,
+              purpose: "Bind the reviewed main ancestry backmerge."
+            }' >"${evidence_path}"
+          git add -- "${evidence_path}"
           GIT_AUTHOR_DATE="${merge_date}" GIT_COMMITTER_DATE="${merge_date}" \
-            git merge --no-ff --strategy=ours origin/main \
+            git commit \
             --message 'merge: preserve develop tree and main ancestry'
           git merge-base --is-ancestor origin/main HEAD
           git merge-base --is-ancestor origin/develop HEAD
           [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]
-          git diff --quiet origin/develop HEAD
+          test "$(git diff --name-only origin/develop HEAD --)" = "${evidence_path}"
+          git show "HEAD:${evidence_path}" | jq -e \
+            --arg repository "${REPOSITORY}" \
+            --arg main_sha "${main_sha}" \
+            --arg develop_parent_sha "${develop_sha}" '
+              .schema_version == 1
+              and .repository == $repository
+              and .main_sha == $main_sha
+              and .develop_parent_sha == $develop_parent_sha
+              and .purpose == "Bind the reviewed main ancestry backmerge."
+            ' >/dev/null
           create_backmerge_branch() {
             local branch_name="$1"
             local desired_head="$2"
-            local remote_head
+            local created encoded_ref remote_head upload_branch upload_encoded upload_head upload_nonce
 
-            if git \
-              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
-              push \
-              --force-with-lease="refs/heads/${branch_name}:" \
-              origin \
-              "${desired_head}:refs/heads/${branch_name}"; then
-              echo 'Created exact backmerge branch with a create-only lease.'
+            cleanup_upload_ref_best_effort() {
+              local observed=''
+              if ! observed="$(
+                gh api "repos/${REPOSITORY}/git/ref/${BACKMERGE_UPLOAD_ENCODED}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                return 0
+              fi
+              if [ "${observed}" != "${BACKMERGE_UPLOAD_EXPECTED}" ]; then
+                echo '::warning::Refusing to clean an upload ref whose head changed.'
+                return 0
+              fi
+              gh api --method DELETE \
+                "repos/${REPOSITORY}/git/refs/${BACKMERGE_UPLOAD_ENCODED}" \
+                >/dev/null 2>&1 \
+                || echo '::warning::Unable to clean the exact temporary upload ref.'
+            }
+
+            encoded_ref="$(jq -rn --arg value "heads/${branch_name}" '$value|@uri')"
+            if remote_head="$(
+              gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha 2>/dev/null
+            )"; then
+              if [ "${remote_head}" != "${desired_head}" ]; then
+                echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+                return 1
+              fi
+              echo 'Exact backmerge branch already exists; no update required.'
               return 0
             fi
 
-            if ! remote_head="$(
-              git \
-                -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
-                ls-remote --exit-code --heads \
-                origin "refs/heads/${branch_name}" \
-                | awk '{print $1}'
-            )"; then
-              echo "::error::Unable to create or verify the backmerge branch."
+            upload_nonce="$(openssl rand -hex 16)"
+            [[ "${upload_nonce}" =~ ^[0-9a-f]{32}$ ]]
+            upload_branch="backmerge-upload/${desired_head}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${upload_nonce}"
+            upload_encoded="$(jq -rn --arg value "heads/${upload_branch}" '$value|@uri')"
+            if gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" >/dev/null 2>&1; then
+              echo '::error::Random upload ref already exists; refusing to update it.'
               return 1
             fi
-            if [ "${remote_head}" != "${desired_head}" ]; then
-              echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+              push --porcelain origin "${desired_head}:refs/heads/${upload_branch}"
+            BACKMERGE_UPLOAD_ENCODED="${upload_encoded}"
+            BACKMERGE_UPLOAD_EXPECTED="${desired_head}"
+            trap cleanup_upload_ref_best_effort EXIT
+            upload_ref_ready=false
+            for upload_visibility_delay in 0 1 2 4 8; do
+              if [ "${upload_visibility_delay}" -gt 0 ]; then
+                sleep "${upload_visibility_delay}"
+              fi
+              if upload_head="$(
+                gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                if [ "${upload_head}" != "${desired_head}" ]; then
+                  echo '::error::Temporary backmerge upload ref changed unexpectedly.'
+                  return 1
+                fi
+                upload_ref_ready=true
+                break
+              fi
+            done
+            if [ "${upload_ref_ready}" != true ]; then
+              echo '::error::GitHub did not materialize the exact temporary backmerge ref after bounded retries.'
               return 1
             fi
-            echo 'Exact backmerge branch already exists; no update required.'
+
+            final_ref_ready=false
+            for create_delay in 0 1 2 4 8; do
+              if [ "${create_delay}" -gt 0 ]; then
+                sleep "${create_delay}"
+              fi
+              if created="$(gh api --method POST \
+                  "repos/${REPOSITORY}/git/refs" \
+                  -f "ref=refs/heads/${branch_name}" \
+                  -f "sha=${desired_head}" 2>/dev/null)"; then
+                jq -e \
+                  --arg ref "refs/heads/${branch_name}" \
+                  --arg sha "${desired_head}" '
+                    .ref == $ref and .object.sha == $sha
+                  ' <<<"${created}" >/dev/null
+              fi
+              if remote_head="$(
+                gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                if [ "${remote_head}" != "${desired_head}" ]; then
+                  cleanup_upload_ref_best_effort
+                  echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+                  return 1
+                fi
+                final_ref_ready=true
+                break
+              fi
+            done
+            if [ "${final_ref_ready}" != true ]; then
+              cleanup_upload_ref_best_effort
+              echo '::error::GitHub did not materialize the immutable backmerge ref after bounded retries.'
+              return 1
+            fi
+            test "$(
+              gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha
+            )" = "${desired_head}"
+            test "$(
+              gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" --jq .object.sha
+            )" = "${desired_head}"
+            gh api --method DELETE \
+              "repos/${REPOSITORY}/git/refs/${upload_encoded}"
+            trap - EXIT
+            unset BACKMERGE_UPLOAD_ENCODED BACKMERGE_UPLOAD_EXPECTED
+            echo 'Uploaded the immutable object and created the final ref atomically.'
           }
 
           local_head="$(git rev-parse HEAD)"
           create_backmerge_branch "${branch}" "${local_head}"
 
-          pr_number="$(
-            gh api --method GET "repos/${REPOSITORY}/pulls" \
-              -f state=open \
+          pr_pages="$(
+            gh api --method GET --paginate --slurp \
+              "repos/${REPOSITORY}/pulls" \
+              -f state=all \
               -f base=develop \
               -f "head=lightning-it:${branch}" \
-              --jq '.[0].number // empty'
+              -f per_page=100
           )"
-          if [ -z "${pr_number}" ]; then
-            pr_url="$(
-              gh pr create \
-                --repo "${REPOSITORY}" \
-                --base develop \
-                --head "${branch}" \
-                --title "${title}" \
-                --body 'Automated develop-tree-preserving ancestry backmerge after a protected main promotion.'
-            )"
-            pr_number="${pr_url##*/}"
-          fi
+          pr_pages_filter='
+            if type != "array" or length == 0 or any(.[]; type != "array") then
+              error("invalid paginated PR inventory")
+            else
+              [.[][]]
+            end
+          '
+          pr_inventory="$(jq -ce "${pr_pages_filter}" <<<"${pr_pages}")"
+          # shellcheck disable=SC2016  # jq variables must not expand in the shell.
+          pr_inventory_filter='
+            type == "array"
+            and all(.[];
+              (.number | type == "number" and . > 0)
+              and (.state == "open" or .state == "closed")
+              and .base.ref == "develop"
+              and .base.sha == $base
+              and .head.ref == $branch
+              and .head.sha == $head
+              and .head.repo.owner.login == "lightning-it"
+            )
+          '
+          jq -e \
+            --arg base "${develop_sha}" \
+            --arg branch "${branch}" \
+            --arg head "${local_head}" \
+            "${pr_inventory_filter}" \
+            <<<"${pr_inventory}" >/dev/null
+          # A deterministic retry recreates the same commit. Never attach that
+          # commit to a second PR or dispatch another review for an existing PR.
+          # shellcheck disable=SC2016  # jq program must not expand in the shell.
+          pr_decision_filter='
+            if length == 0 then "create"
+            elif length == 1 and .[0].state == "open" then "existing-open"
+            elif any(.[]; .state == "closed") then "closed-history"
+            else "ambiguous"
+            end
+          '
+          pr_decision="$(jq -er "${pr_decision_filter}" <<<"${pr_inventory}")"
+          created_new_pr=false
+          case "${pr_decision}" in
+            create)
+              pr_url="$(
+                gh pr create \
+                  --repo "${REPOSITORY}" \
+                  --base develop \
+                  --head "${branch}" \
+                  --title "${title}" \
+                  --body 'Automated ancestry backmerge with a deterministic, reviewable main binding.'
+              )"
+              pr_number="${pr_url##*/}"
+              created_new_pr=true
+              ;;
+            existing-open)
+              pr_number="$(jq -er '.[0].number' <<<"${pr_inventory}")"
+              ;;
+            closed-history)
+              echo '::error::An exact backmerge PR already exists in a terminal state;'
+              echo '::error::Refusing PR creation or review dispatch.'
+              exit 1
+              ;;
+            *)
+              echo '::error::Exact backmerge PR inventory is ambiguous; refusing creation or review dispatch.'
+              exit 1
+              ;;
+          esac
+          [[ "${pr_number}" =~ ^[1-9][0-9]*$ ]]
 
           pr_details="$(gh pr view "${pr_number}" \
             --repo "${REPOSITORY}" \
-            --json author,baseRefName,headRefName,headRefOid,headRepositoryOwner,title)"
+            --json author,baseRefName,baseRefOid,headRefName,headRefOid,headRepositoryOwner,isDraft,state,title)"
           # shellcheck disable=SC2016  # jq variables must not expand in the shell.
           pr_filter='
-            .author.login == "app/lightning-it-release-automation"
+            .author.login == $expected_author
+            and .state == "OPEN"
             and .baseRefName == "develop"
+            and .baseRefOid == $expected_base
             and .headRefName == $branch
             and .headRefOid == $expected_head
             and .headRepositoryOwner.login == "lightning-it"
+            and .isDraft == false
             and .title == $title
           '
           jq -e \
               --arg branch "${branch}" \
+              --arg expected_base "${develop_sha}" \
               --arg expected_head "${local_head}" \
+              --arg expected_author "${EXPECTED_PR_AUTHOR}" \
               --arg title "${title}" \
               "${pr_filter}" \
               <<<"${pr_details}" \
             | grep -qx true
-          pr_id="$(gh pr view "${pr_number}" --repo "${REPOSITORY}" --json id --jq .id)"
-          auto_merge_enabled="$(
-            gh pr view "${pr_number}" --repo "${REPOSITORY}" \
-              --json autoMergeRequest --jq '.autoMergeRequest != null'
-          )"
+          if [ "${created_new_pr}" != true ]; then
+            echo 'Exact open backmerge PR already exists; no review redispatch is permitted.'
+            exit 0
+          fi
+          {
+            echo "pr_number=${pr_number}"
+            echo "base_ref=$(jq -r .baseRefName <<<"${pr_details}")"
+            echo "expected_base=$(jq -r .baseRefOid <<<"${pr_details}")"
+            echo "expected_head=$(jq -r .headRefOid <<<"${pr_details}")"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Mint protected review dispatch token
+        if: >-
+          steps.exact-review-target.outputs.pr_number != '' &&
+          github.repository != 'lightning-it/.github'
+        id: review-dispatch-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Dispatch protected Exact-Revision review
+        if: >-
+          steps.exact-review-target.outputs.pr_number != '' &&
+          github.repository != 'lightning-it/.github'
+        env:
+          GH_TOKEN: ${{ steps.review-dispatch-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.exact-review-target.outputs.pr_number }}
+          BASE_REF: ${{ steps.exact-review-target.outputs.base_ref }}
+          EXPECTED_BASE: ${{ steps.exact-review-target.outputs.expected_base }}
+          EXPECTED_HEAD: ${{ steps.exact-review-target.outputs.expected_head }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_BASE}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_HEAD}" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run release-bot-exact-head-review.yml \
+            --repo "${REPOSITORY}" \
+            --ref "${BASE_REF}" \
+            -f "pr_number=${PR_NUMBER}" \
+            -f "base_ref=${BASE_REF}" \
+            -f "expected_base=${EXPECTED_BASE}" \
+            -f "expected_head=${EXPECTED_HEAD}"
+
+      - name: Enable protected ancestry auto-merge
+        if: steps.exact-review-target.outputs.pr_number != ''
+        env:
+          EXPECTED_AUTHOR: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            'app/lightning-it-shared-assets-sync' ||
+            'app/lightning-it-release-automation' }}
+          EXPECTED_BASE: ${{ steps.exact-review-target.outputs.expected_base }}
+          EXPECTED_HEAD: ${{ steps.exact-review-target.outputs.expected_head }}
+          GH_TOKEN: >-
+            ${{ steps.release-app.outputs.token ||
+            steps.workflow-source-app.outputs.token }}
+          PR_NUMBER: ${{ steps.exact-review-target.outputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_details="$(gh pr view "${PR_NUMBER}" --repo "${REPOSITORY}" \
+            --json author,autoMergeRequest,baseRefName,baseRefOid,headRefOid,id,isDraft,state)"
+          jq -e \
+            --arg author "${EXPECTED_AUTHOR}" \
+            --arg base "${EXPECTED_BASE}" \
+            --arg head "${EXPECTED_HEAD}" '
+              .author.login == $author
+              and .state == "OPEN"
+              and .isDraft == false
+              and .baseRefName == "develop"
+              and .baseRefOid == $base
+              and .headRefOid == $head
+            ' <<<"${pr_details}" >/dev/null
+          auto_merge_enabled="$(jq -r '.autoMergeRequest != null' <<<"${pr_details}")"
           case "${auto_merge_enabled}" in
             true) ;;
             false)
+              pr_id="$(jq -er .id <<<"${pr_details}")"
               query="mutation(\$pr:ID!){enablePullRequestAutoMerge("
               query+="input:{pullRequestId:\$pr,mergeMethod:MERGE}){"
               query+="pullRequest{autoMergeRequest{enabledAt}}}}"

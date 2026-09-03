@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create exact-diff local pipeline and dual-agent review evidence."""
+"""Create deterministic local pipeline evidence without local AI egress."""
 
 from __future__ import annotations
 
@@ -75,6 +75,10 @@ SECRET_PATH_MARKER = "secrets"
 SAFE_TERRAFORM_SECRET_MODULE_PATTERN = re.compile(
     r"[a-z0-9][a-z0-9_]*_secrets\.tf"
 )
+SAFE_PUBLIC_SECRET_ROUTE_PATTERN = re.compile(
+    r"(?:en/)?[a-z0-9]+(?:-[a-z0-9]+)*-secrets-"
+    r"[a-z0-9]+(?:-[a-z0-9]+)*\.html"
+)
 SECRET_CONTENT_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(
@@ -114,7 +118,7 @@ AUTHORITATIVE_BASE_REFS = {
     "refs/remotes/origin/main": "main",
 }
 INTEGRATION_DIRECTORY_PREFIX = ".lit-integration-"
-COPILOT_DEVTOOL_IMAGE = "quay.io/l-it/ee-wunder-devtools-ubi9:v1.13.0@sha256:d65d9f849e2e18827d37277d25d9c62f6525c5f9a075feee977b9b0d02ec74c9"
+COPILOT_DEVTOOL_IMAGE = "quay.io/l-it/ee-wunder-devtools-ubi9:v1.16.1@sha256:c5e8707e825fcddb3e7bbc7592ebdc99a02e6ba9fa2cad71b88bcd5c71bd4d08"
 CHECK_PROFILE = {
     "name": "repository-quality-profile",
     "command": ["scripts/lit-ci-profile.sh", "repository-quality"],
@@ -135,9 +139,9 @@ TRUSTED_CHECK_POLICY_PATHS = (
 PARITY_GAPS = (
     {
         "id": "copilot-review-surface",
-        "local": "GitHub Copilot CLI read-only exact-diff review",
-        "remote": "GitHub Copilot pull-request code review on the current head SHA",
-        "status": "not-identical-by-product-design",
+        "local": "prohibited; deterministic checks only",
+        "remote": "protected current-revision review on the exact head SHA",
+        "status": "remote-only-by-policy",
         "remote_gate_required": True,
     },
     {
@@ -200,7 +204,7 @@ class PlannedChange(NamedTuple):
 
 
 def is_secret_like_path(path: str) -> bool:
-    """Reject secret markers except in Terraform source-module filenames."""
+    """Reject secret markers except narrow reviewed source-file patterns."""
     lowered = path.lower()
     if any(fragment in lowered for fragment in SECRET_PATH_FRAGMENTS):
         return True
@@ -211,6 +215,11 @@ def is_secret_like_path(path: str) -> bool:
         if (
             index == len(components) - 1
             and SAFE_TERRAFORM_SECRET_MODULE_PATTERN.fullmatch(component)
+        ):
+            continue
+        if (
+            index == len(components) - 1
+            and SAFE_PUBLIC_SECRET_ROUTE_PATTERN.fullmatch(lowered)
         ):
             continue
         return True
@@ -328,6 +337,9 @@ def isolated_git_environment(
     result.update(trusted_container_git_binding(source))
     result.update(
         {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(ROOT),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_TERMINAL_PROMPT": "0",
@@ -377,6 +389,15 @@ def run(
     resolved_environment = env
     if command and command[0] == "git":
         resolved_environment = isolated_git_environment(env)
+        command_root = (cwd or ROOT).resolve()
+        try:
+            command_root.relative_to(ROOT)
+        except ValueError:
+            # The wrapper's linked-worktree binding is valid only for ROOT.
+            # Retaining it for a sanitized repository redirects Git back to
+            # the source checkout and its read-only common object store.
+            for variable in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"):
+                resolved_environment.pop(variable, None)
     return subprocess.run(
         command,
         cwd=cwd or ROOT,
@@ -666,9 +687,14 @@ def fetch_authoritative_base(branch: str, base_ref: str) -> subprocess.Completed
     environment = isolated_git_environment()
     environment.update(
         {
-            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_COUNT": "2",
+            # Preserve the distributed engine's existing header slot while
+            # adding the container-safe workspace binding. Several managed
+            # repositories validate this credential-placement contract.
             "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
             "GIT_CONFIG_VALUE_0": github_https_authorization(),
+            "GIT_CONFIG_KEY_1": "safe.directory",
+            "GIT_CONFIG_VALUE_1": str(ROOT),
         }
     )
     return subprocess.run(
@@ -746,9 +772,10 @@ def validate_agent_config(name: str, value: Any) -> None:
         raise RuntimeError(
             f"agents.{name}.enabled and agents.{name}.required must be booleans"
         )
-    if enabled is not True or required is not True:
+    if enabled is not False or required is not False:
         raise RuntimeError(
-            f"agents.{name} must be enabled and required by the v2 policy"
+            f"agents.{name} must remain disabled and not required by the "
+            "local no-AI-egress policy"
         )
     command = validate_command(value.get("command"), f"agents.{name}.command")
     if command != [name]:
@@ -1130,26 +1157,130 @@ def expected_integration_tree(change: PlannedChange) -> str:
                     "could not refresh the compatibility merge worktree "
                     "index: " + refreshed.stdout.strip()
                 )
+            merge_command = [
+                "git",
+                "-c",
+                f"core.hooksPath={disabled_hooks}",
+                "-c",
+                "merge.autoStash=false",
+                "-c",
+                "user.name=Lightning IT push-ready",
+                "-c",
+                "user.email=push-ready@invalid",
+                "merge",
+                "--no-commit",
+                "--no-ff",
+                "--strategy=ort",
+                change.head_commit,
+            ]
             merged = run(
-                [
-                    "git",
-                    "-c",
-                    f"core.hooksPath={disabled_hooks}",
-                    "-c",
-                    "merge.autoStash=false",
-                    "-c",
-                    "user.name=Lightning IT push-ready",
-                    "-c",
-                    "user.email=push-ready@invalid",
-                    "merge",
-                    "--no-commit",
-                    "--no-ff",
-                    "--strategy=ort",
-                    change.head_commit,
-                ],
+                merge_command,
                 capture=True,
                 cwd=worktree,
             )
+            merge_output_lines = merged.stdout.splitlines()
+            if (
+                merged.returncode
+                and merge_output_lines
+                and merge_output_lines[0].strip() == "fatal: stash failed"
+            ):
+                merge_head = run(
+                    ["git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+                    capture=True,
+                    cwd=worktree,
+                )
+                current_head = git_output_at(worktree, "rev-parse", "HEAD").strip()
+                if (
+                    merge_head.returncode == 1
+                    and current_head == change.base_tip
+                    and directory_identity(
+                        worktree,
+                        purpose="compatibility merge worktree",
+                    )
+                    == worktree_identity
+                ):
+                    staged_drift = run(
+                        [
+                            "git",
+                            "diff",
+                            "--cached",
+                            "--quiet",
+                            "--no-ext-diff",
+                            "--no-textconv",
+                            change.base_tip,
+                            "--",
+                        ],
+                        capture=True,
+                        cwd=worktree,
+                    )
+                    tracked_drift = run(
+                        [
+                            "git",
+                            "diff",
+                            "--quiet",
+                            "--no-ext-diff",
+                            "--no-textconv",
+                            "--",
+                        ],
+                        capture=True,
+                        cwd=worktree,
+                    )
+                    untracked_drift = git_output_at(
+                        worktree,
+                        "ls-files",
+                        "--others",
+                        "--exclude-standard",
+                        "-z",
+                    )
+                    pre_rewrite_clean = (
+                        staged_drift.returncode == 0
+                        and tracked_drift.returncode == 0
+                        and not untracked_drift
+                    )
+                    if pre_rewrite_clean:
+                        # A newly checked-out linked-worktree index can remain
+                        # racily clean for the filesystem's one-second Git
+                        # timestamp window.  A normal refresh can leave the
+                        # index file untouched and make the single recovery
+                        # merge fail identically.
+                        # Wait past the window only after all three drift
+                        # proofs pass, then force a Git 2.34-compatible rewrite
+                        # in index format version 2.  This preserves every
+                        # index entry while moving the index timestamp beyond
+                        # the racy-clean window.  Re-prove status before the
+                        # one permitted retry.
+                        time.sleep(1.1)
+                        rewritten = run(
+                            [
+                                "git",
+                                "-c",
+                                f"core.hooksPath={disabled_hooks}",
+                                "update-index",
+                                "--index-version",
+                                "2",
+                            ],
+                            capture=True,
+                            cwd=worktree,
+                        )
+                        if rewritten.returncode:
+                            raise RuntimeError(
+                                "could not rewrite the compatibility merge "
+                                "worktree index after a transient stash race: "
+                                + rewritten.stdout.strip()
+                            )
+                        status_value = git_output_at(
+                            worktree,
+                            "status",
+                            "--porcelain=v1",
+                            "--untracked-files=all",
+                            "-z",
+                        )
+                        if not status_value:
+                            merged = run(
+                                merge_command,
+                                capture=True,
+                                cwd=worktree,
+                            )
             if merged.returncode:
                 raise RuntimeError(
                     "the reviewed HEAD does not merge cleanly with the "
@@ -2656,7 +2787,7 @@ def ensure_workspace_review_safe(
     workspace: Path,
     documented: Optional[dict[str, dict[int, tuple[str, str]]]] = None,
 ) -> None:
-    """Scan the complete tracked review snapshot before external model use."""
+    """Scan the complete tracked snapshot before local evidence is accepted."""
     names = git_output_at(workspace, "ls-files", "-z").split("\0")
     total = 0
     unsafe_paths: list[str] = []
@@ -3521,65 +3652,21 @@ def run_agent_reviews(
     expected = change.tree_fingerprint
     if tree_fingerprint() != expected:
         raise RuntimeError("exact planned push patch is stale before local review")
-    reviews: list[dict[str, Any]] = []
+    if any(
+        agent["enabled"] or agent["required"]
+        for agent in config["agents"].values()
+    ):
+        raise RuntimeError("local AI execution is prohibited by policy")
+    # Materialize the exact-patch snapshot so the deterministic secret and
+    # topology guards still fail closed, without invoking any local reviewer.
     with sanitized_review_workspace(
         change,
         fixture_manifest_bootstrap=fixture_manifest_bootstrap,
-    ) as (
-        workspace,
-        state_root,
-        topology,
     ):
-        instructions = tracked_instruction_bundle(workspace)
-        workspace_fingerprint = integration_worktree_fingerprint(
-            workspace,
-            include_ignored=True,
-        )
-        reviews.append(
-            copilot_review(
-                config,
-                change,
-                expected,
-                workspace=workspace,
-                state_root=state_root,
-                instructions=instructions,
-                topology=topology,
-            )
-        )
-        if (
-            integration_worktree_fingerprint(
-                workspace,
-                include_ignored=True,
-            )
-            != workspace_fingerprint
-        ):
-            raise RuntimeError(
-                "Copilot review changed the sanitized exact-patch workspace"
-            )
-        reviews.append(
-            codex_review(
-                config,
-                change,
-                expected,
-                workspace=workspace,
-                state_root=state_root,
-                instructions=instructions,
-                topology=topology,
-            )
-        )
-        if (
-            integration_worktree_fingerprint(
-                workspace,
-                include_ignored=True,
-            )
-            != workspace_fingerprint
-        ):
-            raise RuntimeError(
-                "Codex review changed the sanitized exact-patch workspace"
-            )
+        pass
     if tree_fingerprint() != expected:
-        raise RuntimeError("local agent review changed the reviewed Git tree")
-    return reviews
+        raise RuntimeError("local deterministic review changed the Git tree")
+    return []
 
 
 def command_version(command: list[str]) -> str:
@@ -3627,7 +3714,9 @@ def governed_push_remote_from_url(
         if value.startswith(prefix):
             repository_name = value[len(prefix) :]
             break
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", repository_name):
+    if repository_name != ".github" and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", repository_name
+    ):
         raise RuntimeError(
             "origin push URL must target a Lightning IT repository on github.com"
         )
@@ -3698,6 +3787,7 @@ def write_evidence(
         "push_scope": "clean-head",
         "fixture_manifest_bootstrap": fixture_manifest_bootstrap,
         "evidence_trust": LOCAL_EVIDENCE_TRUST,
+        "local_ai_egress": "prohibited",
     }
     evidence.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -3781,6 +3871,7 @@ def verify_evidence(config: dict[str, Any]) -> dict[str, Any]:
         "push_scope": "clean-head",
         "fixture_manifest_bootstrap": fixture_manifest_bootstrap,
         "evidence_trust": LOCAL_EVIDENCE_TRUST,
+        "local_ai_egress": "prohibited",
     }
     for key, value in expected.items():
         if payload.get(key) != value:
@@ -4068,6 +4159,7 @@ def main() -> int:
                 change,
                 fixture_manifest_bootstrap=args.fixture_manifest_bootstrap,
             )
+            print("Deterministic local review passed; no local AI was invoked.")
             return 0
         require_clean_head()
         original_head = git_output("rev-parse", "HEAD").strip()
