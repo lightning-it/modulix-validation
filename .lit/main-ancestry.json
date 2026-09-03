@@ -1,0 +1,7 @@
+{
+  "develop_parent_sha": "1d540ff01bc65dc3760cae7c90e63f72332b6156",
+  "main_sha": "948b438a2c70f5c389582eac2b5bb5e73e5dc0e1",
+  "purpose": "Bind the reviewed main ancestry backmerge.",
+  "repository": "lightning-it/modulix-validation",
+  "schema_version": 1
+}
