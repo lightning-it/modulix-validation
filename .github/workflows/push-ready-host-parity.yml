@@ -171,9 +171,9 @@ jobs:
             done
             artifacts="${RUNNER_TEMP}/rhel9-incus"
             mkdir -p "${artifacts}"
-            curl -fsSL --retry 3 "${RHEL_9_INCUS_METADATA_URL}" \
+            curl -fsSL --retry 2 "${RHEL_9_INCUS_METADATA_URL}" \
               -o "${artifacts}/metadata.tar.xz"
-            curl -fsSL --retry 3 "${RHEL_9_INCUS_QCOW2_URL}" \
+            curl -fsSL --retry 2 "${RHEL_9_INCUS_QCOW2_URL}" \
               -o "${artifacts}/rootfs.qcow2"
             printf '%s  %s\n' "${RHEL_9_INCUS_METADATA_SHA256}" \
               "${artifacts}/metadata.tar.xz" | sha256sum -c -
