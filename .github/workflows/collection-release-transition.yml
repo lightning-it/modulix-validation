@@ -38,6 +38,7 @@ jobs:
   transition-noop:
     name: Transition / Nexus promotion command (not executed)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Validate immutable release identity
         env:

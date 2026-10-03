@@ -45,6 +45,7 @@ jobs:
   validate-contract:
     name: Validate runbook Heavy contract
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Validate immutable identity and bounded paths
         env:
@@ -144,6 +145,7 @@ jobs:
     if: always()
     needs: [validate-contract, heavy]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Require contract and Heavy execution
         env:
