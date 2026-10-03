@@ -53,6 +53,7 @@ jobs:
   validate-inputs:
     name: Validate delegated profile contract
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       profile: ${{ steps.contract.outputs.profile }}
     steps:
