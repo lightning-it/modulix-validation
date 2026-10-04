@@ -153,7 +153,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run validation-owned infrastructure profile
-        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@7d9e9edb4eb8f6efbd025a8da74a78f2de2d2ed4
+        uses: lightning-it/modulix-validation/.github/actions/run-quality-profile@eb6a40169d3b9fc25a5d4d1dede9e8f1066bf581
         with:
           profile: ${{ needs.validate-inputs.outputs.profile }}
           scenario: ${{ matrix.scenario }}
