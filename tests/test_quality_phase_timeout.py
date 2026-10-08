@@ -12,6 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = ROOT / ".github/actions/run-quality-profile"
 PHASE_SCRIPT = ACTION_DIR / "run-phase.sh"
+WORKFLOW = ROOT / ".github/workflows/collection-quality-profile.yml"
 
 
 class QualityPhaseTimeoutTests(unittest.TestCase):
@@ -67,7 +68,7 @@ class QualityPhaseTimeoutTests(unittest.TestCase):
     def test_action_gives_test_capture_and_destroy_separate_budgets(self):
         action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
         steps = {step.get("id"): step for step in action["runs"]["steps"]}
-        expected = {"molecule": ("test", 3600), "cleanup": ("cleanup", 600), "destroy": ("destroy", 600)}
+        expected = {"molecule": ("test", 1800), "cleanup": ("cleanup", 600), "destroy": ("destroy", 600)}
         for step_id, (phase, seconds) in expected.items():
             self.assertIn(
                 f'run-phase.sh" {phase} {seconds}',
@@ -75,6 +76,23 @@ class QualityPhaseTimeoutTests(unittest.TestCase):
             )
         self.assertEqual("always()", steps["cleanup"]["if"])
         self.assertEqual("always()", steps["destroy"]["if"])
+
+    def test_profile_job_reserves_time_beyond_bounded_phases(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        job_timeout_seconds = workflow["jobs"]["profile-cells"]["timeout-minutes"] * 60
+        phase_timeout_seconds = 1800 + 600 + 600
+        kill_grace_seconds = 3 * 30
+
+        self.assertEqual(90 * 60, job_timeout_seconds)
+        self.assertEqual(40 * 60, job_timeout_seconds - phase_timeout_seconds)
+        self.assertIn(
+            "--kill-after=30s",
+            PHASE_SCRIPT.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            38 * 60 + 30,
+            job_timeout_seconds - phase_timeout_seconds - kill_grace_seconds,
+        )
 
 
 if __name__ == "__main__":
