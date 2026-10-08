@@ -3,18 +3,26 @@ from pathlib import Path
 
 
 class AapIncusNightlyContractTests(unittest.TestCase):
-    def test_public_cross_repository_checkouts_have_read_only_fallback(self):
+    def test_cross_repository_checkouts_use_bounded_app_tokens(self):
         workflow = (
             Path(__file__).parents[1] / ".github/workflows/aap-incus-nightly.yml"
         ).read_text(encoding="utf-8")
 
-        fallback = (
-            "token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}"
+        self.assertEqual(
+            workflow.count("actions/create-github-app-token@"), 2
         )
-        self.assertEqual(workflow.count(fallback), 8)
-        self.assertNotIn(
-            "token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}", workflow
+        self.assertEqual(
+            workflow.count("token: ${{ steps.source-app.outputs.token }}"), 8
         )
+        self.assertEqual(workflow.count("permission-contents: read"), 2)
+        self.assertEqual(
+            workflow.count(
+                "            modulix-automation\n"
+                "          permission-contents: read"
+            ),
+            2,
+        )
+        self.assertNotIn("LIT_REPOSITORY_READ_TOKEN", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("timeout-minutes: 15", workflow)

@@ -47,12 +47,27 @@ jobs:
           path: modulix-validation
           persist-credentials: false
 
+      - name: Mint least-privilege source checkout token
+        id: source-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ansible-collection-foundational
+            ansible-collection-rhel
+            ansible-collection-supplementary
+            ansible-collection-ubuntu
+            modulix-automation
+          permission-contents: read
+
       - name: Checkout automation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout supplementary collection
@@ -60,7 +75,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout Ubuntu collection
@@ -68,7 +83,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Build matrix from validation inventory
@@ -297,12 +312,27 @@ jobs:
           path: modulix-validation
           persist-credentials: false
 
+      - name: Mint least-privilege source checkout token
+        id: source-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ansible-collection-foundational
+            ansible-collection-rhel
+            ansible-collection-supplementary
+            ansible-collection-ubuntu
+            modulix-automation
+          permission-contents: read
+
       - name: Checkout automation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout foundational collection
@@ -310,7 +340,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-foundational
           path: ansible-collection-foundational
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout RHEL collection
@@ -318,7 +348,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-rhel
           path: ansible-collection-rhel
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout supplementary collection
@@ -326,7 +356,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Checkout Ubuntu collection
@@ -334,7 +364,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
+          token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
 
       - name: Run AAP Incus matrix entry

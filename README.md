@@ -213,14 +213,16 @@ docs/                                      validation documentation
 
 Required for the current AAP suite:
 
+- `RELEASE_AUTOMATION_APP_CLIENT_ID`: organization variable for the bounded
+  cross-repository checkout App.
+- `RELEASE_AUTOMATION_APP_PRIVATE_KEY`: organization secret for that App. The
+  workflow mints a short-lived token limited to the five public source
+  repositories and `contents:read`.
 - `RH_AUTOMATION_HUB_TOKEN`: Red Hat offline token for certified collection
   installation.
 
 Optional:
 
-- `LIT_REPOSITORY_READ_TOKEN`: read-only token for cross-repository checkouts.
-  The current source repositories are public, so the workflow falls back to its
-  read-only `github.token` when this secret is absent.
 - `RHSM_ORG_ID`: overrides the validation inventory RHSM org.
 - `AAP_CI_ADMIN_PASSWORD`: fixed test admin password.
 - `AAP_26_BUNDLE_URL` / `AAP_26_BUNDLE_SHA256`: AAP 2.6 bundle artifact.
