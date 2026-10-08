@@ -130,7 +130,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment:
       name: ${{ inputs['environment-name'] }}
-    timeout-minutes: 180
+    timeout-minutes: 90
     concurrency:
       # A shared group can retain only one pending job; later collection
       # requests otherwise cancel an already queued required profile. Runner

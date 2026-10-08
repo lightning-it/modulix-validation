@@ -12,6 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = ROOT / ".github/actions/run-quality-profile"
 PHASE_SCRIPT = ACTION_DIR / "run-phase.sh"
+WORKFLOW = ROOT / ".github/workflows/collection-quality-profile.yml"
 
 
 class QualityPhaseTimeoutTests(unittest.TestCase):
@@ -75,6 +76,14 @@ class QualityPhaseTimeoutTests(unittest.TestCase):
             )
         self.assertEqual("always()", steps["cleanup"]["if"])
         self.assertEqual("always()", steps["destroy"]["if"])
+
+    def test_profile_job_reserves_time_beyond_bounded_phases(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        job_timeout_seconds = workflow["jobs"]["profile-cells"]["timeout-minutes"] * 60
+        phase_timeout_seconds = 3600 + 600 + 600
+
+        self.assertEqual(90 * 60, job_timeout_seconds)
+        self.assertEqual(10 * 60, job_timeout_seconds - phase_timeout_seconds)
 
 
 if __name__ == "__main__":
