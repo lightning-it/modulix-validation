@@ -17,10 +17,25 @@ class AapIncusNightlyContractTests(unittest.TestCase):
         self.assertEqual(workflow.count("permission-contents: read"), 2)
         self.assertEqual(
             workflow.count(
+                "          repositories: |\n"
+                "            ansible-collection-supplementary\n"
+                "            ansible-collection-ubuntu\n"
                 "            modulix-automation\n"
                 "          permission-contents: read"
             ),
-            2,
+            1,
+        )
+        self.assertEqual(
+            workflow.count(
+                "          repositories: |\n"
+                "            ansible-collection-foundational\n"
+                "            ansible-collection-rhel\n"
+                "            ansible-collection-supplementary\n"
+                "            ansible-collection-ubuntu\n"
+                "            modulix-automation\n"
+                "          permission-contents: read"
+            ),
+            1,
         )
         self.assertNotIn("LIT_REPOSITORY_READ_TOKEN", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)

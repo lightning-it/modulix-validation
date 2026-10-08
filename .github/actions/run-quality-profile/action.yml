@@ -443,7 +443,7 @@ runs:
       id: molecule
       shell: bash
       run: |
-        bash "${{ github.action_path }}/run-phase.sh" test 3600
+        bash "${{ github.action_path }}/run-phase.sh" test 1800
 
     - name: Capture target evidence before destruction
       id: cleanup

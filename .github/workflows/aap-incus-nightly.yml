@@ -55,8 +55,6 @@ jobs:
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: |
-            ansible-collection-foundational
-            ansible-collection-rhel
             ansible-collection-supplementary
             ansible-collection-ubuntu
             modulix-automation
