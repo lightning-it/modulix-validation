@@ -81,9 +81,18 @@ class QualityPhaseTimeoutTests(unittest.TestCase):
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         job_timeout_seconds = workflow["jobs"]["profile-cells"]["timeout-minutes"] * 60
         phase_timeout_seconds = 1800 + 600 + 600
+        kill_grace_seconds = 3 * 30
 
         self.assertEqual(90 * 60, job_timeout_seconds)
         self.assertEqual(40 * 60, job_timeout_seconds - phase_timeout_seconds)
+        self.assertIn(
+            "--kill-after=30s",
+            PHASE_SCRIPT.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            38 * 60 + 30,
+            job_timeout_seconds - phase_timeout_seconds - kill_grace_seconds,
+        )
 
 
 if __name__ == "__main__":
