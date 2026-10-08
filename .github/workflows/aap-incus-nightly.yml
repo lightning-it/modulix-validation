@@ -52,7 +52,7 @@ jobs:
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout supplementary collection
@@ -60,7 +60,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout Ubuntu collection
@@ -68,7 +68,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Build matrix from validation inventory
@@ -302,7 +302,7 @@ jobs:
         with:
           repository: lightning-it/modulix-automation
           path: modulix-automation
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout foundational collection
@@ -310,7 +310,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-foundational
           path: ansible-collection-foundational
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout RHEL collection
@@ -318,7 +318,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-rhel
           path: ansible-collection-rhel
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout supplementary collection
@@ -326,7 +326,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-supplementary
           path: ansible-collection-supplementary
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Checkout Ubuntu collection
@@ -334,7 +334,7 @@ jobs:
         with:
           repository: lightning-it/ansible-collection-ubuntu
           path: ansible-collection-ubuntu
-          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN }}
+          token: ${{ secrets.LIT_REPOSITORY_READ_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Run AAP Incus matrix entry
