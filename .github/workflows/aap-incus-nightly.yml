@@ -51,17 +51,34 @@ jobs:
           test -n "${AAP_STAGE_S3_PUT_URL}"
           expected_sha256=7e3e330ce415269f391ad1cc9bf4493400a00ef8e8268fbc21a17ed2454db600
           stage_dir="$(mktemp -d "${RUNNER_TEMP}/aap27-stage.XXXXXX")"
-          trap 'unlink "${stage_dir}/bundle.tar.gz"; rmdir "${stage_dir}"' EXIT
-          curl --fail --location --retry 3 --silent --show-error \
-            --output "${stage_dir}/bundle.tar.gz" "${AAP_STAGE_SOURCE_URL}"
+          # All names are confined to the new per-run directory.
+          trap 'rm -f -- "${stage_dir}"/part-* "${stage_dir}/bundle.tar.gz"; rmdir "${stage_dir}"' EXIT
+          expected_bytes=4430534650
+          part_bytes=$(((expected_bytes + 7) / 8))
+          pids=()
+          for part in {0..7}; do
+            start=$((part * part_bytes))
+            end=$((start + part_bytes - 1))
+            if ((end >= expected_bytes)); then end=$((expected_bytes - 1)); fi
+            (
+              printf 'url = "%s"\n' "${AAP_STAGE_SOURCE_URL}" |
+                curl --config - --fail --location --retry 3 --silent --show-error \
+                  --range "${start}-${end}" --output "${stage_dir}/part-${part}"
+            ) &
+            pids+=("$!")
+          done
+          for pid in "${pids[@]}"; do wait "${pid}"; done
+          cat "${stage_dir}"/part-{0,1,2,3,4,5,6,7} > "${stage_dir}/bundle.tar.gz"
+          test "$(stat -c %s "${stage_dir}/bundle.tar.gz")" = "${expected_bytes}"
           printf '%s  %s\n' "${expected_sha256}" "${stage_dir}/bundle.tar.gz" |
             sha256sum -c -
           sudo install -D -m 0644 "${stage_dir}/bundle.tar.gz" \
             /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
           content_md5="$(openssl dgst -md5 -binary "${stage_dir}/bundle.tar.gz" | base64 -w 0)"
-          curl --fail --silent --show-error --request PUT \
-            --header "Content-MD5: ${content_md5}" \
-            --upload-file "${stage_dir}/bundle.tar.gz" "${AAP_STAGE_S3_PUT_URL}"
+          printf 'url = "%s"\n' "${AAP_STAGE_S3_PUT_URL}" |
+            curl --config - --fail --silent --show-error --request PUT \
+              --header "Content-MD5: ${content_md5}" \
+              --upload-file "${stage_dir}/bundle.tar.gz"
           test -r /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 
   prepare-matrix:
