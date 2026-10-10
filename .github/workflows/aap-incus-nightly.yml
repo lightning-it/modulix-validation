@@ -123,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
-          ref: 641c07f10d5b0559fcf8fae5971e399d4eb7b5e9
+          ref: dff1db7ef8e463cce1a19f3f0dce27f35923cef0
           path: modulix-automation
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
@@ -386,7 +386,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
-          ref: 641c07f10d5b0559fcf8fae5971e399d4eb7b5e9
+          ref: dff1db7ef8e463cce1a19f3f0dce27f35923cef0
           path: modulix-automation
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
