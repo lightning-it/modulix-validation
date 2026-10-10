@@ -978,7 +978,7 @@ aap_deploy_install_user: $(yaml_single_quote "${install_user}")
 aap_deploy_install_user_home: $(yaml_single_quote "${install_user_home}")
 aap_deploy_topology: growth
 aap_deploy_setup_download_version: "$(printf '%s' "${AAP_VERSION}")"
-aap_deploy_gateway_main_url: "https://{{ ansible_host }}"
+aap_fqdn: $(yaml_single_quote "${guest_fqdn}")
 aap_deploy_validate_certs: false
 aap_prepare_bundle_src: "$(printf '%s' "${AAP_BUNDLE_FILE}")"
 aap_deploy_manage_download_unpack: true
