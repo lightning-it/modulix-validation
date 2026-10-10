@@ -58,7 +58,9 @@ jobs:
             sha256sum -c -
           sudo install -D -m 0644 "${stage_dir}/bundle.tar.gz" \
             /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+          content_md5="$(openssl dgst -md5 -binary "${stage_dir}/bundle.tar.gz" | base64 -w 0)"
           curl --fail --silent --show-error --request PUT \
+            --header "Content-MD5: ${content_md5}" \
             --upload-file "${stage_dir}/bundle.tar.gz" "${AAP_STAGE_S3_PUT_URL}"
           test -r /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 
