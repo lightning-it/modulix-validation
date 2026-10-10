@@ -107,6 +107,30 @@
         fail_msg: The AAP CI bridge is missing or has unexpected settings.
       when: aap_ci_incus_action == 'create'
 
+    - name: Check the cloud-init ISO builder
+      ansible.builtin.stat:
+        path: /usr/bin/mkisofs
+      register: aap_ci_mkisofs
+      when: aap_ci_incus_action == 'create'
+
+    - name: Install the cloud-init ISO builder when absent
+      ansible.builtin.apt:
+        name: genisoimage
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+      when:
+        - aap_ci_incus_action == 'create'
+        - not aap_ci_mkisofs.stat.exists
+
+    - name: Verify the cloud-init ISO builder
+      ansible.builtin.stat:
+        path: /usr/bin/mkisofs
+      register: aap_ci_mkisofs_ready
+      failed_when: not aap_ci_mkisofs_ready.stat.exists
+      when: aap_ci_incus_action == 'create'
+
     - name: Create the stopped AAP validation VM
       ansible.builtin.include_role:
         name: lit.ubuntu.incus_instance
