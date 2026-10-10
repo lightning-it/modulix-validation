@@ -140,6 +140,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
+          ref: 64a0bf8de05fbaf27b25c362fc4ae285dc917c43
           path: ansible-collection-ubuntu
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
@@ -419,6 +420,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/ansible-collection-ubuntu
+          ref: 64a0bf8de05fbaf27b25c362fc4ae285dc917c43
           path: ansible-collection-ubuntu
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
