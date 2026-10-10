@@ -116,6 +116,26 @@ If object-storage secrets are configured, these files and aliases are managed by
 `modulix-automation/ansible/runbooks/40-platforms/incus/20-image-artifacts.yml`
 from the validation inventory.
 
+### Build and stage RHEL guest images
+
+Red Hat Image Builder can produce x86_64 Virtualization guest qcow2 images for
+RHEL 9 and 10. Choose **Register later** so the AAP test registers each new VM
+at boot. The separate `Stage RHEL guest image for AAP Incus CI` manual workflow
+uses the pinned `lit.rhel.cloud_image` and `lit.ubuntu.incus_image` roles to
+verify and import one release at a time. Before dispatch, set the temporary
+`RHEL_STAGE_SOURCE_URL` repository secret to that release's signed Image Builder
+download URL. The workflow checks the qcow2 size and format, computes SHA-256,
+and imports `local:rhel9-aap-ci` or `local:rhel10-aap-ci` on the bare metal
+runner without privileged host access.
+
+To archive the result, also set exact-key, short-lived S3 PUT URLs in
+`RHEL_STAGE_QCOW2_PUT_URL` and `RHEL_STAGE_METADATA_PUT_URL`. The job uploads
+both verified artifacts to the private bucket using Content-MD5. With both PUT
+URLs absent, the import still succeeds and the objects remain pending archive.
+Remove all temporary URL secrets after staging and record the SHA-256 values
+shown in the job log. The builder's major-release selection does not prove a
+specific minor release; inspect the running guest before claiming one.
+
 ## Manual Run
 
 Run a single matrix entry:
