@@ -119,7 +119,7 @@ jobs:
 
           matrix_file = Path(
               "modulix-validation/inventories/nightly/host_vars/"
-              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+              "ciwkr01.prd.edge.pub.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
           default_project = data.get("aap_ci_incus_project", "default")
@@ -152,7 +152,7 @@ jobs:
 
           matrix_file = Path(
               "modulix-validation/inventories/nightly/host_vars/"
-              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+              "ciwkr01.prd.edge.pub.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
           print(data["aap_ci_rhsm_org"])
@@ -167,8 +167,6 @@ jobs:
 
       - name: Sync runner artifacts from object storage
         env:
-          AAP_26_BUNDLE_URL: ${{ secrets.AAP_26_BUNDLE_URL }}
-          AAP_26_BUNDLE_SHA256: ${{ secrets.AAP_26_BUNDLE_SHA256 }}
           AAP_27_BUNDLE_URL: ${{ secrets.AAP_27_BUNDLE_URL }}
           AAP_27_BUNDLE_SHA256: ${{ secrets.AAP_27_BUNDLE_SHA256 }}
           RHEL_9_INCUS_METADATA_URL: ${{ secrets.RHEL_9_INCUS_METADATA_URL }}
@@ -183,8 +181,6 @@ jobs:
           set -euo pipefail
 
           required_vars=(
-            AAP_26_BUNDLE_URL
-            AAP_26_BUNDLE_SHA256
             AAP_27_BUNDLE_URL
             AAP_27_BUNDLE_SHA256
             RHEL_9_INCUS_METADATA_URL
@@ -251,7 +247,7 @@ jobs:
 
           matrix_file = Path(
               "modulix-validation/inventories/nightly/host_vars/"
-              "ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml"
+              "ciwkr01.prd.edge.pub.l-it.io/aap_ci_matrix.yml"
           )
           data = yaml.safe_load(matrix_file.read_text(encoding="utf-8"))
           default_project = data.get("aap_ci_incus_project", "default")

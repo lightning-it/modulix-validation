@@ -35,7 +35,7 @@ Runner script:
 Validation matrix:
 
 ```text
-inventories/nightly/host_vars/ciwkr01.prd.dmz.corp.l-it.io/aap_ci_matrix.yml
+inventories/nightly/host_vars/ciwkr01.prd.edge.pub.l-it.io/aap_ci_matrix.yml
 ```
 
 The nightly schedule runs at `02:00 UTC` from the default branch. The workflow
@@ -71,12 +71,10 @@ Optional secrets:
   generates a per-run password.
 
 Artifact sync secrets are optional. When all of them are present, the workflow
-downloads/verifies the AAP bundles and RHEL Incus images before preflight. When
+downloads/verifies the active AAP 2.7 bundle and RHEL Incus images before preflight. When
 one or more are missing, the workflow expects the files and Incus aliases to
 already exist on the runner.
 
-- `AAP_26_BUNDLE_URL`
-- `AAP_26_BUNDLE_SHA256`
 - `AAP_27_BUNDLE_URL`
 - `AAP_27_BUNDLE_SHA256`
 - `RHEL_9_INCUS_METADATA_URL`
@@ -96,14 +94,13 @@ The runner must match these labels:
 self-hosted, linux, x64, incus, nested-virt, aap
 ```
 
-On the runner, verify:
+On the bare metal runner `ciwkr01.prd.edge.pub.l-it.io`, verify:
 
 ```bash
 test -e /dev/kvm
 incus info >/dev/null
 incus image info local:rhel9-aap-ci >/dev/null
 incus image info local:rhel10-aap-ci >/dev/null
-test -f /srv/aap/bundles/aap-2.6-containerized-setup-bundle.tar.gz
 test -f /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
 ```
 
@@ -117,7 +114,7 @@ Run a single matrix entry:
 
 ```bash
 gh workflow run "AAP Incus Nightly Matrix" \
-  --repo lightning-it/modulix-validation \
+  --repo lightning-it/modulix-validation-lit \
   -f matrix_filter=aap27-rhel10 \
   -f destroy_instances=true
 ```
@@ -126,7 +123,7 @@ Watch the run:
 
 ```bash
 gh run list \
-  --repo lightning-it/modulix-validation \
+  --repo lightning-it/modulix-validation-lit \
   --workflow "AAP Incus Nightly Matrix" \
   --limit 5
 ```
