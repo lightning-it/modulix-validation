@@ -195,6 +195,7 @@
         name: lit.ubuntu.incus_instance
       vars:
         incus_instance_default_project: "{{ aap_ci_incus_project }}"
+        incus_instance_default_cloud_init_manage_etc_hosts: false
         incus_instance_inventory_path: ""
         incus_instance_items:
           - name: "{{ aap_ci_instance_name }}"

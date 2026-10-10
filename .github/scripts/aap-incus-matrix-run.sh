@@ -961,6 +961,10 @@ wait_for_incus_guest_ready
 
 ansible-playbook \
   -i "${inventory_path}" \
+  "${validation_dir}/.github/playbooks/aap-incus-guest-dns.yml"
+
+ansible-playbook \
+  -i "${inventory_path}" \
   "${supplementary_dir}/playbooks/rhel_prepare.yml" \
   -e rhel_guest_target=aaps \
   -e '{"virtual_guest_manage_qemu_guest_agent": false}'
