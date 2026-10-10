@@ -10,6 +10,7 @@
     aap_ci_guest_hostname: "{{ lookup('ansible.builtin.env', 'AAP_CI_GUEST_HOSTNAME') }}"
     aap_ci_guest_fqdn: "{{ lookup('ansible.builtin.env', 'AAP_CI_GUEST_FQDN') }}"
     aap_ci_incus_image: "{{ lookup('ansible.builtin.env', 'INCUS_IMAGE') }}"
+    aap_ci_incus_network: "{{ lookup('ansible.builtin.env', 'AAP_CI_INCUS_NETWORK') | default('incusbr0', true) }}"
     aap_ci_vm_cpu: "{{ lookup('ansible.builtin.env', 'INCUS_VM_CPU') | default('4', true) }}"
     aap_ci_vm_memory: "{{ lookup('ansible.builtin.env', 'INCUS_VM_MEMORY') | default('20GiB', true) }}"
     aap_ci_vm_root_size: "{{ lookup('ansible.builtin.env', 'INCUS_VM_ROOT_SIZE') | default('70GiB', true) }}"
@@ -19,6 +20,11 @@
     aap_ci_run_attempt: "{{ lookup('ansible.builtin.env', 'GITHUB_RUN_ATTEMPT') | default('1', true) }}"
     aap_ci_matrix_name: "{{ lookup('ansible.builtin.env', 'MATRIX_NAME') }}"
     aap_ci_expires_at: "{{ lookup('ansible.builtin.env', 'AAP_CI_EXPIRES_AT') }}"
+    aap_ci_mac_suffix: "{{ (aap_ci_instance_name | hash('sha256'))[:10] }}"
+    aap_ci_instance_mac: >-
+      {{ '02:' ~ aap_ci_mac_suffix[0:2] ~ ':' ~ aap_ci_mac_suffix[2:4]
+         ~ ':' ~ aap_ci_mac_suffix[4:6] ~ ':' ~ aap_ci_mac_suffix[6:8]
+         ~ ':' ~ aap_ci_mac_suffix[8:10] }}
     aap_ci_incus_argv: >-
       {{
         ['incus', '--force-local']
@@ -38,6 +44,7 @@
               aap_ci_guest_hostname | length > 0
               and aap_ci_guest_fqdn | length > 0
               and aap_ci_incus_image | length > 0
+              and aap_ci_incus_network | length > 0
               and aap_ci_ssh_public_key_file | length > 0
             )
         fail_msg: AAP Incus lifecycle inputs are incomplete or invalid.
@@ -91,27 +98,23 @@
       changed_when: true
       when: aap_ci_incus_action == 'create'
 
-    - name: Read the AAP validation VM NIC MAC address
+    - name: Attach the managed Incus network before first boot
       ansible.builtin.command:
         argv: >-
           {{
             aap_ci_incus_argv
             + [
               'config',
-              'get',
+              'device',
+              'add',
               aap_ci_instance_name,
-              'volatile.eth0.hwaddr'
+              'eth0',
+              'nic',
+              'network=' ~ aap_ci_incus_network,
+              'hwaddr=' ~ aap_ci_instance_mac
             ]
           }}
-      register: aap_ci_instance_mac
-      changed_when: false
-      when: aap_ci_incus_action == 'create'
-
-    - name: Validate the AAP validation VM NIC MAC address
-      ansible.builtin.assert:
-        that:
-          - aap_ci_instance_mac.stdout | trim | length > 0
-        fail_msg: Incus did not expose volatile.eth0.hwaddr for the AAP VM.
+      changed_when: true
       when: aap_ci_incus_action == 'create'
 
     - name: Start the configured AAP validation VM
@@ -141,7 +144,7 @@
               ethernets:
                 incus0:
                   match:
-                    macaddress: "{{ aap_ci_instance_mac.stdout | trim }}"
+                    macaddress: "{{ aap_ci_instance_mac }}"
                   dhcp4: true
                   dhcp6: true
                   accept-ra: true
