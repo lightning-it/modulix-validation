@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
-          ref: 657dc749ccf4aefe712debca802385c146ff5425
+          ref: e92c6c613f9a350f7a2e842c694389ea6a1553e7
           path: modulix-automation
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
