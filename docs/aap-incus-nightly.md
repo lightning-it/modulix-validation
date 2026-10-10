@@ -75,6 +75,13 @@ downloads/verifies the active AAP 2.7 bundle and RHEL Incus images before prefli
 one or more are missing, the workflow expects the files and Incus aliases to
 already exist on the runner.
 
+For a one-time manual bundle stage, set `AAP_STAGE_SOURCE_URL` to a short-lived
+Red Hat download URL and `AAP_STAGE_S3_PUT_URL` to a short-lived, exact-key S3
+PUT URL. Dispatch this workflow with `stage_aap27_bundle=true`. That job checks
+the fixed AAP 2.7-11 SHA-256 before placing the bundle in `/srv/aap/bundles`
+and uploading it to private storage. It does not run the AAP matrix. Remove
+the temporary secrets after the job. The scheduled workflow does not use them.
+
 - `AAP_27_BUNDLE_URL`
 - `AAP_27_BUNDLE_SHA256`
 - `RHEL_9_INCUS_METADATA_URL`

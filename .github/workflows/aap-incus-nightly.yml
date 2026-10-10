@@ -15,6 +15,11 @@ on:
         required: true
         default: true
         type: boolean
+      stage_aap27_bundle:
+        description: "Verify and stage the AAP 2.7 bundle on this runner and in private S3"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,8 +29,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  stage-aap27-bundle:
+    name: Stage verified AAP 2.7 bundle
+    if: github.event_name == 'workflow_dispatch' && inputs.stage_aap27_bundle
+    timeout-minutes: 180
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - incus
+      - nested-virt
+      - aap
+    steps:
+      - name: Download, verify, and stage bundle
+        env:
+          AAP_STAGE_SOURCE_URL: ${{ secrets.AAP_STAGE_SOURCE_URL }}
+          AAP_STAGE_S3_PUT_URL: ${{ secrets.AAP_STAGE_S3_PUT_URL }}
+        run: |
+          set -euo pipefail
+          test -n "${AAP_STAGE_SOURCE_URL}"
+          test -n "${AAP_STAGE_S3_PUT_URL}"
+          expected_sha256=7e3e330ce415269f391ad1cc9bf4493400a00ef8e8268fbc21a17ed2454db600
+          stage_dir="$(mktemp -d "${RUNNER_TEMP}/aap27-stage.XXXXXX")"
+          trap 'unlink "${stage_dir}/bundle.tar.gz"; rmdir "${stage_dir}"' EXIT
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "${stage_dir}/bundle.tar.gz" "${AAP_STAGE_SOURCE_URL}"
+          printf '%s  %s\n' "${expected_sha256}" "${stage_dir}/bundle.tar.gz" |
+            sha256sum -c -
+          sudo install -D -m 0644 "${stage_dir}/bundle.tar.gz" \
+            /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+          curl --fail --silent --show-error --request PUT \
+            --upload-file "${stage_dir}/bundle.tar.gz" "${AAP_STAGE_S3_PUT_URL}"
+          test -r /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+
   prepare-matrix:
     name: Prepare AAP matrix
+    if: github.event_name != 'workflow_dispatch' || !inputs.stage_aap27_bundle
     timeout-minutes: 15
     runs-on:
       - self-hosted
