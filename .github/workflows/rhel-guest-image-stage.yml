@@ -11,6 +11,13 @@ on:
         options:
           - "9"
           - "10"
+      source:
+        description: Verified source location
+        required: true
+        type: choice
+        options:
+          - runner_cache
+          - redhat_url
 
 permissions:
   contents: read
@@ -45,7 +52,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: lightning-it/modulix-automation
-          ref: 3c20fc31f05be0f717baa2084f4dba298436c309
+          ref: 657dc749ccf4aefe712debca802385c146ff5425
           path: modulix-automation
           token: ${{ steps.source-app.outputs.token }}
           persist-credentials: false
@@ -72,21 +79,33 @@ jobs:
         env:
           RHEL_STAGE_SOURCE_URL: ${{ secrets.RHEL_STAGE_SOURCE_URL }}
           RHEL_RELEASE: ${{ inputs.release }}
+          RHEL_SOURCE: ${{ inputs.source }}
         run: |
           set -euo pipefail
-          test -n "${RHEL_STAGE_SOURCE_URL}"
           case "${RHEL_RELEASE}" in
-            9) expected_bytes=1284374528 ;;
-            10) expected_bytes=1049821184 ;;
+            9) expected_bytes=1284374528; expected_sha=933a76c995f8866f186f1530c7d4be9d5684656dadda614b1d651705230dd41e ;;
+            10) expected_bytes=1049821184; expected_sha=07b63e34655baaa89b8f310367293a438444768da9bec45f27170b7f0a877ec4 ;;
             *) echo 'Unsupported RHEL release' >&2; exit 1 ;;
           esac
           stage_dir="${RUNNER_TEMP}/rhel-guest-stage"
           mkdir -p -- "${stage_dir}"
           image_path="${stage_dir}/rhel-${RHEL_RELEASE}-guest.qcow2"
-          printf 'url = "%s"\n' "${RHEL_STAGE_SOURCE_URL}" |
-            curl --config - --fail --location --retry 3 --silent --show-error \
-              --output "${image_path}"
+          case "${RHEL_SOURCE}" in
+            runner_cache)
+              cp --sparse=always \
+                "${HOME}/.cache/lit/rhel-guest-images/${RHEL_RELEASE}/rhel${RHEL_RELEASE}-original.qcow2" \
+                "${image_path}"
+              ;;
+            redhat_url)
+              test -n "${RHEL_STAGE_SOURCE_URL}"
+              printf 'url = "%s"\n' "${RHEL_STAGE_SOURCE_URL}" |
+                curl --config - --fail --location --retry 3 --silent --show-error \
+                  --output "${image_path}"
+              ;;
+            *) echo 'Unsupported source' >&2; exit 1 ;;
+          esac
           test "$(stat -c %s "${image_path}")" = "${expected_bytes}"
+          printf '%s  %s\n' "${expected_sha}" "${image_path}" | sha256sum --check --status
           python3 - "${image_path}" <<'PY'
           from pathlib import Path
           import sys
