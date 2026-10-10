@@ -72,14 +72,15 @@ jobs:
           test "$(stat -c %s "${stage_dir}/bundle.tar.gz")" = "${expected_bytes}"
           printf '%s  %s\n' "${expected_sha256}" "${stage_dir}/bundle.tar.gz" |
             sha256sum -c -
-          sudo install -D -m 0644 "${stage_dir}/bundle.tar.gz" \
-            /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+          bundle_path="${HOME}/.cache/lit/aap/aap-2.7-containerized-setup-bundle.tar.gz"
+          mkdir -p -- "$(dirname "${bundle_path}")"
+          install -m 0644 "${stage_dir}/bundle.tar.gz" "${bundle_path}"
           content_md5="$(openssl dgst -md5 -binary "${stage_dir}/bundle.tar.gz" | base64 -w 0)"
           printf 'url = "%s"\n' "${AAP_STAGE_S3_PUT_URL}" |
             curl --config - --fail --silent --show-error --request PUT \
               --header "Content-MD5: ${content_md5}" \
               --upload-file "${stage_dir}/bundle.tar.gz"
-          test -r /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+          test -r "${bundle_path}"
 
   prepare-matrix:
     name: Prepare AAP matrix
@@ -185,6 +186,7 @@ jobs:
               {
                   **entry,
                   "incus_project": entry.get("incus_project", default_project),
+                  "aap_bundle_file": os.path.expanduser(entry["aap_bundle_file"]),
               }
               for entry in data["aap_ci_test_matrix"]
               if entry.get("enabled", True)
@@ -327,7 +329,7 @@ jobs:
                           entry["name"],
                           entry.get("incus_project", default_project),
                           entry["incus_image"],
-                          entry["aap_bundle_file"],
+                          os.path.expanduser(entry["aap_bundle_file"]),
                       ]
                   )
               )

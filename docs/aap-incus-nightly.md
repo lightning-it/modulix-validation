@@ -78,7 +78,8 @@ already exist on the runner.
 For a one-time manual bundle stage, set `AAP_STAGE_SOURCE_URL` to a short-lived
 Red Hat download URL and `AAP_STAGE_S3_PUT_URL` to a short-lived, exact-key S3
 PUT URL. Dispatch this workflow with `stage_aap27_bundle=true`. That job checks
-the fixed AAP 2.7-11 SHA-256 before placing the bundle in `/srv/aap/bundles`
+the fixed AAP 2.7-11 SHA-256 before placing the bundle in the runner account's
+`~/.cache/lit/aap` directory
 and uploading it to private storage. It does not run the AAP matrix. Remove
 the temporary secrets after the job. The scheduled workflow does not use them.
 
@@ -108,7 +109,7 @@ test -e /dev/kvm
 incus info >/dev/null
 incus image info local:rhel9-aap-ci >/dev/null
 incus image info local:rhel10-aap-ci >/dev/null
-test -f /srv/aap/bundles/aap-2.7-containerized-setup-bundle.tar.gz
+test -f ~/.cache/lit/aap/aap-2.7-containerized-setup-bundle.tar.gz
 ```
 
 If object-storage secrets are configured, these files and aliases are managed by
