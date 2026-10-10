@@ -209,6 +209,9 @@
               - "{{ lookup('ansible.builtin.file', aap_ci_ssh_public_key_file) | trim }}"
             wait_for_ip: false
             wait_for_ssh: false
+            # The verified RHEL CI image already includes OpenSSH. Package
+            # installation before RHSM registration makes cloud-init fail.
+            cloud_init_packages: []
             limits:
               cpu: "{{ aap_ci_vm_cpu }}"
               memory: "{{ aap_ci_vm_memory }}"
