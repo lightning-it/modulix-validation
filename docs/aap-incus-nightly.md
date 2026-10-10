@@ -122,11 +122,14 @@ Red Hat Image Builder can produce x86_64 Virtualization guest qcow2 images for
 RHEL 9 and 10. Choose **Register later** so the AAP test registers each new VM
 at boot. The separate `Stage RHEL guest image for AAP Incus CI` manual workflow
 uses the pinned `lit.rhel.cloud_image` and `lit.ubuntu.incus_image` roles to
-verify and import one release at a time. Before dispatch, set the temporary
-`RHEL_STAGE_SOURCE_URL` repository secret to that release's signed Image Builder
-download URL. The workflow checks the qcow2 size and format, computes SHA-256,
-and imports `local:rhel9-aap-ci` or `local:rhel10-aap-ci` on the bare metal
-runner without privileged host access.
+verify and import one release at a time. Select `redhat_url` and set the
+temporary `RHEL_STAGE_SOURCE_URL` secret for a new Image Builder download, or
+select `runner_cache` to reuse a previously verified original qcow2 retained
+on the runner. The workflow checks the exact size and SHA-256, enables SSH and
+Incus cloud-init in the output, and replaces the `local:rhel9-aap-ci` or
+`local:rhel10-aap-ci` image alias without privileged workflow access. The host
+playbook must first install `guestfs-tools` and grant the runner account read
+access to the installed kernels.
 
 To archive the result, also set exact-key, short-lived S3 PUT URLs in
 `RHEL_STAGE_QCOW2_PUT_URL` and `RHEL_STAGE_METADATA_PUT_URL`. The job uploads
