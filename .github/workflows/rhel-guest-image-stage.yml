@@ -2,11 +2,6 @@
 name: Stage RHEL guest image for AAP Incus CI
 
 on:
-  push:
-    branches:
-      - codex/bare-metal-aap-artifacts
-    paths:
-      - .github/workflows/rhel-guest-image-stage.yml
   workflow_dispatch:
     inputs:
       release:
@@ -20,12 +15,9 @@ on:
 permissions:
   contents: read
 
-env:
-  RHEL_STAGE_RELEASE: "10"
-
 jobs:
   stage:
-    name: Verify, import, and archive RHEL ${{ inputs.release || '10' }} guest image
+    name: Verify, import, and archive RHEL ${{ inputs.release }} guest image
     timeout-minutes: 120
     runs-on:
       - self-hosted
@@ -79,7 +71,7 @@ jobs:
       - name: Download and verify Red Hat guest qcow2
         env:
           RHEL_STAGE_SOURCE_URL: ${{ secrets.RHEL_STAGE_SOURCE_URL }}
-          RHEL_RELEASE: ${{ inputs.release || env.RHEL_STAGE_RELEASE }}
+          RHEL_RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
           test -n "${RHEL_STAGE_SOURCE_URL}"
@@ -107,7 +99,7 @@ jobs:
 
       - name: Build and import Incus image using pinned Ansible roles
         env:
-          RHEL_RELEASE: ${{ inputs.release || env.RHEL_STAGE_RELEASE }}
+          RHEL_RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
           ansible_core_version=2.18.14
@@ -133,7 +125,7 @@ jobs:
 
       - name: Archive verified Incus image in private object storage
         env:
-          RHEL_RELEASE: ${{ inputs.release || env.RHEL_STAGE_RELEASE }}
+          RHEL_RELEASE: ${{ inputs.release }}
           RHEL_STAGE_QCOW2_PUT_URL: ${{ secrets.RHEL_STAGE_QCOW2_PUT_URL }}
           RHEL_STAGE_METADATA_PUT_URL: ${{ secrets.RHEL_STAGE_METADATA_PUT_URL }}
         run: |
