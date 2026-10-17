@@ -31,6 +31,22 @@ workflow references a Nexus reader. A runner-local credential or a separately
 approved external secret source has not been established by that inspection.
 An App token is not a Nexus reader credential.
 
+This is not evidence that the worker needs broader GitHub rights, nor proof
+that a service is unreachable. There is no confirmed endpoint to probe. The
+authoritative deployment record
+[Nexus PRD Target](https://lit.atlassian.net/wiki/spaces/LIT/pages/2897838457)
+(version 11) describes a planned target, without an installed or accepted
+service, FQDN, TLS, repository, or credential baseline. The
+[service project](https://lit.atlassian.net/wiki/spaces/LIT/pages/2897969321)
+(version 14) likewise keeps applicability, design, and installation open.
+The accepted
+[MLX-70 ADR](https://lit.atlassian.net/wiki/spaces/LIT/pages/2893119515)
+(version 7) explicitly keeps Nexus cutover and technical acceptance open.
+The smallest missing input is an as-built service and exact repository
+reference plus its approved reader delivery mechanism. If that service has
+since been installed, its custodian can supply those nonsecret references.
+Deploying a new service is outside this paired receiver increment.
+
 The concrete configuration decision for the existing environment is:
 
 | Type | Proposed reference | Exact boundary |
@@ -40,7 +56,10 @@ The concrete configuration decision for the existing environment is:
 | Secret | `NEXUS_GALAXY_READ_USERNAME` | A dedicated reader for that repository |
 | Secret | `NEXUS_GALAXY_READ_PASSWORD` | Its password or user-token secret |
 
-These are proposed references, not configured or granted credentials. The
+These are proposed references, not configured or granted credentials. An
+existing approved external-secret delivery path can replace these proposed
+GitHub Secret references without changing the exact repository-read scope.
+No secret value should be requested or copied into the chat. The
 reader requires only browse/read on the exact existing repository. It must
 have no upload, delete, redeploy, or administration privilege. Provisioning or
 delegating this access requires the authorized credential custodian; no
