@@ -25,6 +25,11 @@ and has no required human reviewers. Reusing this environment needs no change
 to its protection rules. The separate collection runtime environments have
 human reviewers and must retain them.
 
+On 2026-10-17, the owner confirmed directly that Nexus has not yet been
+provisioned. There is consequently no existing service endpoint or reader
+configuration to discover. Foundation or host provisioning is outside LI-359;
+the upstream service work must first deliver the accepted Nexus target.
+
 Repository, organization, and all seven existing environment metadata lists
 contained no Nexus endpoint or reader credential configuration. No existing
 workflow references a Nexus reader. A runner-local credential or a separately
@@ -42,9 +47,9 @@ service, FQDN, TLS, repository, or credential baseline. The
 The accepted
 [MLX-70 ADR](https://lit.atlassian.net/wiki/spaces/LIT/pages/2893119515)
 (version 7) explicitly keeps Nexus cutover and technical acceptance open.
-The smallest missing input is an as-built service and exact repository
-reference plus its approved reader delivery mechanism. If that service has
-since been installed, its custodian can supply those nonsecret references.
+The smallest missing prerequisite is now the actual provisioned service,
+followed by its as-built repository reference and approved reader delivery
+mechanism. There is no further secret or endpoint search in this increment.
 Deploying a new service is outside this paired receiver increment.
 
 The concrete configuration decision for the existing environment is:
