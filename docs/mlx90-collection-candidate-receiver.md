@@ -1,10 +1,14 @@
-# MLX-90 collection candidate receiver preparation
+# MLX-90 collection candidate receiver
 
 LI-359 owns the paired receiver for Supplementary's v2 validation request.
-This branch currently supplies the request and live producer-run validation
-boundary in `scripts/collection_candidate_request.py`. It does not yet expose
-the dispatch workflow, execute infrastructure profiles, or issue a receipt.
-It must not be reported as an operational or release-eligible receiver.
+The workflow `mlx90-collection-candidate-validation.yml` implements the paired
+request boundary, authenticated exact-byte Nexus readback, real supported
+Heavy/Application matrices and keyless v2 receipt signing. Its controller
+adapters are `scripts/collection_candidate_request.py` and
+`scripts/collection_candidate_receiver.py`. Code delivery and independent
+checks proceed under the owner's workflow-first decision. Runtime activation,
+Nexus/Galaxy cutover and operational acceptance remain later work under
+LI-371/LI-118; code presence is not an operational or release-eligible result.
 
 The request adapter validates canonical compact JSON and its SHA-256 before
 using request fields. It rejects duplicate keys, unexpected fields, boolean
@@ -27,8 +31,9 @@ human reviewers and must retain them.
 
 On 2026-10-17, the owner confirmed directly that Nexus has not yet been
 provisioned. There is consequently no existing service endpoint or reader
-configuration to discover. Foundation or host provisioning is outside LI-359;
-the upstream service work must first deliver the accepted Nexus target.
+configuration to discover. Foundation or host provisioning is outside LI-359.
+The upstream service must deliver the Nexus target before runtime acceptance;
+it does not block fail-closed workflow code delivery.
 
 Repository, organization, and all seven existing environment metadata lists
 contained no Nexus endpoint or reader credential configuration. No existing
@@ -71,22 +76,41 @@ delegating this access requires the authorized credential custodian; no
 publisher credential, anonymous fallback, or new App permission is allowed.
 No secret value belongs in this document, Jira, or generated evidence.
 
-## Remaining paired implementation and acceptance
+## Native code path and later runtime acceptance
 
-The final workflow must expose exactly `request_id` and `request_json`, bind
-the protected controller SHA and App identity, and validate the fresh producer
-run before reading a protected credential. Authenticated Nexus readback must
-reject redirects and prove exact size and digest without rebuilding or
-changing the candidate. Profile matrices must come from the protected source
-registry, with real Heavy and Application Acceptance execution, owned cleanup,
-and no skipped required result. Only their successful current-run evidence
-may authorize the exact v2 receipt and keyless signature from protected main.
+The workflow exposes exactly `request_id` and `request_json`, binds
+the protected controller SHA and App identity, and validates the fresh producer
+run before reading a protected credential. Empty configuration fails before
+credential, download or publication effects. Authenticated Nexus readback
+rejects redirects and proves exact size and digest without rebuilding or
+changing the candidate. Existing read-only Release App scope retrieves the
+exact producer-run/attempt stage artifact and tested runtime dependency bundle;
+checksums bind staged and independently downloaded candidate bytes. No new App
+permission or personal token is needed.
+
+Matrices come from the exact protected source registry. The immutable
+validation-owned quality action executes real scenarios with owned cleanup,
+JUnit/Allure and strict evidence gates. Signing requires every prior native job
+to have completed successfully in the same run/attempt, including actual Heavy
+and Application Acceptance cells. Missing, failed, skipped, duplicate or
+foreign-attempt results cannot authorize a receipt. There is no no-op fallback.
+Only the protected main workflow receives the signing OIDC permission.
+
+Local validation stays deterministic in read-only pinned Devtools. Protected
+runtime readback explicitly enables network and workspace output; receipt
+construction enables workspace output only. A trap removes the temporary
+reader file, which is excluded from every artifact. The final receipt artifact
+contains exactly the canonical JSON and its Sigstore bundle.
 
 Supplementary remains responsible for verifying that receipt and publishing
 the same candidate bytes to Galaxy. Its existing #1167/#1168 integration is
 prepared separately against current protected develop; it has no operational
 receiver acceptance merely because local integration tests pass.
 
-The transition workflow and existing caller remain until the paired path is
-delivered and accepted. No new workflow is deployed by this preparatory
-increment. LI-360 retains the real release and native acceptance criteria.
+The transition workflow and existing release functions remain until the paired
+runtime path is accepted. Code delivery requires current-head native review and
+normal protected integration. Later LI-371/LI-118 runtime evidence must prove
+real infrastructure/configuration, real profiles and the exact signed receipt
+before Galaxy cutover. LI-360 retains the separately recorded native workflow
+and release acceptance boundary. Local tests and code delivery are not runtime
+acceptance.
